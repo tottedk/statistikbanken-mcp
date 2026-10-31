@@ -228,9 +228,17 @@ class StatbankClient:
         values = _coerce_code_map(values, "values")
         sum_range = _coerce_code_map(sum_range, "sum_range")
         sum_from = _coerce_sum_from(sum_from)
+        metadata = self._metadata_for(table)
+        values, sum_from, sum_range, aliased = _alias_arguments(
+            metadata, values, sum_from, sum_range
+        )
+        notes.extend(aliased)
+        values, sum_from, sum_range, promoted = _promote_open_ended(
+            metadata, values, sum_from, sum_range
+        )
+        notes.extend(promoted)
         values, dropped = _drop_equivalent_value_sums(values, sum_from)
         notes.extend(dropped)
-        metadata = self._metadata_for(table)
         selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
         assumed = _fill_required(metadata, selections)
         _guard_time_sums(metadata, selections, explicit)
@@ -298,6 +306,14 @@ class StatbankClient:
         with self._lock:
             self._tables = data
         return data
+
+    def place_names(self, table: str) -> list[str]:
+        """Every area label on the table, including those past the tabelinfo cap."""
+        metadata = self._metadata_for(table)
+        for variable in metadata.variables:
+            if _fold(variable.id) == "omraade":
+                return [item["text"] for item in variable.values]
+        return []
 
     def _metadata_for(self, table: str) -> _Table:
         if not isinstance(table, str) or not table.strip():
@@ -658,6 +674,162 @@ def _coerce_sum_from(raw: Any) -> dict[str, str] | None:
                 f"{_sum_argument_help('sum_from')}"
             )
     return coerced
+
+
+_VARIABLE_ALIASES = {
+    "kom": "OMRÅDE",
+    "kommune": "OMRÅDE",
+    "kommuner": "OMRÅDE",
+    "omraade": "OMRÅDE",
+    "alder": "ALDER",
+    "tid": "Tid",
+    "aar": "Tid",
+}
+
+
+def _alias_variable(table: _Table, code: str) -> str:
+    found = table.variable(code)
+    if found is not None:
+        return found.id
+    target = _VARIABLE_ALIASES.get(_fold(code).replace(" ", ""))
+    if target is None:
+        return code
+    match = table.variable(target)
+    return match.id if match is not None else code
+
+
+def _alias_arguments(
+    table: _Table,
+    values: dict[str, list[str]] | None,
+    sum_from: dict[str, str] | None,
+    sum_range: dict[str, list[str]] | None,
+) -> tuple[
+    dict[str, list[str]] | None, dict[str, str] | None, dict[str, list[str]] | None, list[str]
+]:
+    notes: list[str] = []
+    return (
+        _alias_map(table, values, notes),
+        _alias_map(table, sum_from, notes),
+        _alias_map(table, sum_range, notes),
+        notes,
+    )
+
+
+def _alias_map(
+    table: _Table, mapping: dict[str, Any] | None, notes: list[str]
+) -> dict[str, Any] | None:
+    if not mapping:
+        return mapping
+    renamed: dict[str, Any] = {}
+    for key, value in mapping.items():
+        canonical = _alias_variable(table, str(key))
+        if table.variable(str(key)) is None and canonical != key:
+            notes.append(f"Used {canonical} for {key}.")
+        if canonical in renamed:
+            raise StatbankError(f"Variable {canonical} was given more than once.")
+        renamed[canonical] = value
+    return renamed
+
+
+def _promote_open_ended(
+    table: _Table,
+    values: dict[str, list[str]] | None,
+    sum_from: dict[str, str] | None,
+    sum_range: dict[str, list[str]] | None,
+) -> tuple[
+    dict[str, list[str]] | None, dict[str, str] | None, dict[str, list[str]] | None, list[str]
+]:
+    """Turn 80+, >=80 and 0-17 into the sum the API actually understands.
+
+    A code of 80 is one year of age. The models write 80+ for everyone older,
+    and the close match '80 år' then charts that one year.
+    """
+    notes: list[str] = []
+    if not values:
+        return values, sum_from, sum_range, notes
+    values = {key: list(codes) for key, codes in values.items()}
+    from_map = dict(sum_from or {})
+    range_map = dict(sum_range or {})
+    for key in list(values):
+        variable = table.variable(key)
+        if variable is None or variable.time:
+            continue
+        numeric, _explicit = _split_numeric_run(variable.values)
+        if numeric is None:
+            continue
+        kept: list[str] = []
+        for token in values[key]:
+            if _value_matches(variable, token):
+                kept.append(token)
+                continue
+            threshold = _open_ended_age(token)
+            span = None if threshold is not None else _closed_age_span(token)
+            if threshold is not None:
+                note = (
+                    f'Treated {variable.id} "{token}" as '
+                    f'sum_from {{"{variable.id}": "{threshold}"}}.'
+                )
+                _store_sum(from_map, variable.id, threshold, note, notes)
+            elif span is not None:
+                low, high = span
+                _store_sum(
+                    range_map,
+                    variable.id,
+                    [low, high],
+                    f'Treated {variable.id} "{token}" as sum_range '
+                    f'{{"{variable.id}": ["{low}", "{high}"]}}.',
+                    notes,
+                )
+            else:
+                kept.append(token)
+        if kept:
+            values[key] = kept
+        else:
+            values.pop(key)
+    return (
+        values,
+        from_map or None,
+        range_map or None,
+        notes,
+    )
+
+
+def _store_sum(
+    target: dict[str, Any], variable_id: str, value: Any, note: str, notes: list[str]
+) -> None:
+    previous = target.get(variable_id)
+    if previous is not None and previous != value:
+        raise StatbankError(
+            f"Variable {variable_id} asks for two different totals ({previous} and {value}). "
+            "Pass one sum_from or sum_range."
+        )
+    target[variable_id] = value
+    if note not in notes:
+        notes.append(note)
+
+
+def _open_ended_age(token: str) -> str | None:
+    folded = _fold(token.strip())
+    match = re.fullmatch(
+        r">=?\s*(\d+)|(\d+)\s*\+|(\d+)\s*-|(\d+)\s+og\s+derover|over\s+(\d+)|(\d+)\s+aar\s+og\s+derover",
+        folded,
+    )
+    if match is None:
+        return None
+    return next(group for group in match.groups() if group is not None)
+
+
+def _closed_age_span(token: str) -> tuple[str, str] | None:
+    folded = _fold(token.strip())
+    match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", folded) or re.fullmatch(
+        r"(\d+)\s+til\s+(\d+)", folded
+    )
+    if match is None:
+        return None
+    low, high = int(match.group(1)), int(match.group(2))
+    if low > high:
+        return None
+    return str(low), str(high)
 
 
 def _drop_equivalent_value_sums(

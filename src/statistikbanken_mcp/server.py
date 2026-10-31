@@ -134,7 +134,10 @@ def hent_data(
     `values` maps a variable id to codes or labels, matched without case
     sensitivity ("Silkeborg", "København", "kobenhavn"). Each entry may be a
     list, one code ("230"), or several codes separated by a comma
-    ("Rudersdal, Hørsholm"). An unknown value names the closest labels and,
+    ("Rudersdal, Hørsholm"). On an age variable, "80+", ">=80", "80-" and
+    "80 og derover" are the sum from that age upward, and "0-17" is the
+    closed range. The result notes the substitution. An unknown value names
+    the closest labels and,
     for Tid, the latest period. These expressions are passed through: "*"
     (every code), "(1)" (latest period), "(-n+4)" (the four latest periods),
     and a range such as ">=2016K3". A range lists matching periods. It does

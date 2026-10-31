@@ -39,7 +39,7 @@ def test_search_and_metadata(live_client: StatbankClient) -> None:
 
 
 def test_ambiguous_time_sum_is_rejected_live(live_client: StatbankClient) -> None:
-    with pytest.raises(ToolError, match="sum_from") as caught:
+    with pytest.raises(ToolError, match="not every period") as caught:
         hent_data(
             "FOLK1A",
             values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
@@ -63,7 +63,31 @@ def test_equivalent_age_sum_is_one_number_live(live_client: StatbankClient) -> N
     assert row["ALDER"] == "80+"
     assert isinstance(row["value"], int)
     assert 1000 < row["value"] < 20000
-    assert any("same request" in note for note in result["notes"])
+    assert any("sum_from" in note for note in result["notes"])
+
+
+def test_open_ended_age_returns_the_80_plus_series(live_client: StatbankClient) -> None:
+    for phrase in ("80+", ">=80"):
+        result = hent_data(
+            "FOLK1A",
+            values={
+                "OMRÅDE": ["Rudersdal", "Hørsholm"],
+                "ALDER": [phrase],
+                "Tid": [">=2015K1"],
+            },
+        )
+        by_place = {}
+        for row in result["rows"]:
+            by_place.setdefault(row["OMRÅDE"], []).append(row)
+        assert set(by_place) == {"Rudersdal", "Hørsholm"}, phrase
+        rudersdal = by_place["Rudersdal"]
+        horsholm = by_place["Hørsholm"]
+        assert rudersdal[0]["Tid"] == "2015K1", phrase
+        assert rudersdal[0]["ALDER"] == "80+", phrase
+        assert rudersdal[0]["value"] > 2000, phrase
+        assert rudersdal[-1]["value"] > 2000, phrase
+        assert horsholm[0]["value"] > 1000, phrase
+        assert any("sum_from" in note for note in result["notes"]), phrase
 
 
 def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:

@@ -36,6 +36,8 @@ MAX_BODY_BYTES = 32_768
 DEFAULT_LLM_TIMEOUT = 45.0
 DEFAULT_TOOL_TIMEOUT = 30.0
 NO_FETCHED_NUMBERS = "Jeg fik ikke hentet tal, så jeg viser ingen."
+NO_DATA_ANSWER = "Jeg fandt ingen tal i Statistikbanken for det, du spørger om."
+LLM_TIMEOUT_TEXT = "Modellen svarede ikke i tide. Prøv igen."
 UNVERIFIED_NUMBERS = (
     "Jeg viser kun de hentede tal. Teksten er udeladt, fordi den indeholder tal, "
     "der ikke kommer fra tabellen."
@@ -265,7 +267,8 @@ function render(data) {
   }
   for (const fact of data.facts || []) {
     const card = el("div", null, "fact");
-    const value = fact.value == null ? "–" : String(fact.value);
+    const value = fact.value == null ? "–"
+      : (typeof fact.value === "number" ? fact.value.toLocaleString("da-DK") : String(fact.value));
     card.append(el("strong", value));
     const bits = [
       "Tabel " + (fact.table || ""),
@@ -392,7 +395,7 @@ class ChatClient:
             response.raise_for_status()
             payload = response.json()
         except httpx.TimeoutException as exc:
-            raise LLMError("Modellen svarede ikke i tide.") from exc
+            raise LLMError(LLM_TIMEOUT_TEXT) from exc
         except (httpx.HTTPError, json.JSONDecodeError) as exc:
             raise LLMError("Kunne ikke kontakte modellen.") from exc
         return _parse_reply(payload)
@@ -750,9 +753,14 @@ def guard_answer(question: str, answer: str, facts: list[dict[str, Any]]) -> str
     or an invented total cannot become the answer.
     """
     if not facts:
+        if _is_page_message(answer):
+            return answer
         if _unverified_numbers(answer, question, facts):
             return NO_FETCHED_NUMBERS
-        return answer
+        return NO_DATA_ANSWER
+    mismatch = _place_mismatch(question, facts)
+    if mismatch:
+        return mismatch
     if not _asks_for_trend(question):
         lines = _latest_lines(facts)
         if lines:
@@ -785,11 +793,83 @@ def _single_fact(facts: list[dict[str, Any]]) -> bool:
     return len(facts) == 1 and _single_value(facts[0])
 
 
+def _is_page_message(answer: str) -> bool:
+    if answer in {NO_FETCHED_NUMBERS, UNVERIFIED_NUMBERS, NO_DATA_ANSWER}:
+        return True
+    return (
+        answer.startswith("Jeg nåede grænsen for opslag")
+        or answer.startswith("Modellen gav ikke et svar")
+        or answer.startswith("Jeg fandt ingen tal at svare ud fra")
+    )
+
+
 def _summary_line(fact: dict[str, Any]) -> str:
     value = _da_number(fact["value"])
     bits = [str(fact.get(key) or "") for key in ("table", "period", "unit")]
+    detail = str(fact.get("detail") or "")
+    if detail:
+        bits.append(detail)
     label = ", ".join(bit for bit in bits if bit)
     return f"{value} ({label})" if label else value
+
+
+def _place_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
+    """Refuse a fetched place when the question named a different one."""
+    tables = {str(fact.get("table") or "") for fact in facts if fact.get("table")}
+    if len(tables) != 1:
+        return ""
+    known = _place_names(next(iter(tables)))
+    asked = [name for name in known if _name_in_text(name, question)]
+    if not asked:
+        return ""
+    got = _places_in_facts(facts)
+    missing = [name for name in asked if not any(_same_place(name, item) for item in got)]
+    if not missing:
+        return ""
+    missing_text = " og ".join(missing)
+    if not got:
+        return f"Jeg fik ikke hentet tal for {missing_text}."
+    return f"Jeg fik hentet tal for {' og '.join(got)}, ikke for {missing_text}."
+
+
+def _place_names(table: str) -> list[str]:
+    from statistikbanken_mcp.server import get_client
+    from statistikbanken_mcp.statbank import StatbankError
+
+    try:
+        return get_client().place_names(table)
+    except (StatbankError, OSError):
+        return []
+
+
+def _places_in_facts(facts: list[dict[str, Any]]) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for fact in facts:
+        for name in re.findall(r"OMRÅDE:\s*(.*?)(?:,\s*[^,]+:|$)", str(fact.get("detail") or "")):
+            label = name.strip()
+            key = _fold_place(label)
+            if label and key not in seen:
+                seen.add(key)
+                found.append(label)
+    return found
+
+
+def _name_in_text(name: str, text: str) -> bool:
+    folded = _fold_place(name)
+    if len(folded) < 4:
+        return False
+    return (
+        re.search(rf"(?<![0-9a-z]){re.escape(folded)}(?![0-9a-z])", _fold_place(text)) is not None
+    )
+
+
+def _same_place(left: str, right: str) -> bool:
+    return _fold_place(left) == _fold_place(right)
+
+
+def _fold_place(text: str) -> str:
+    return text.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
 
 
 def _da_number(value: int | float) -> str:
@@ -1099,7 +1179,9 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                 result = answer(question)
             except LLMError as exc:
                 sys.stderr.write(f"Question failed: {type(exc).__name__}: {exc}\n")
-                self._json(502, {"error": str(exc)})
+                text = str(exc)
+                status = 504 if "ikke i tide" in text else 502
+                self._json(status, {"error": text})
                 return
             except Exception as exc:
                 sys.stderr.write(f"Question failed: {type(exc).__name__}: {exc}\n")

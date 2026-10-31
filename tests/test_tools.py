@@ -142,7 +142,7 @@ def test_required_variable_without_a_total_lists_codes() -> None:
 def test_ambiguous_time_sum_is_rejected_before_any_number(
     calls: list[dict[str, object]],
 ) -> None:
-    with pytest.raises(ToolError, match="sum_from") as caught:
+    with pytest.raises(ToolError, match="not every period") as caught:
         hent_data(
             "FOLK1A",
             values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
@@ -150,7 +150,6 @@ def test_ambiguous_time_sum_is_rejected_before_any_number(
         )
     message = str(caught.value)
     assert ">=2015K1" in message
-    assert 'not values [">=80"]' in message
     assert "13078" not in message
     assert "hide rows" in message
     assert not any(str(call["path"]).endswith("/data") for call in calls)
@@ -244,7 +243,7 @@ def test_equivalent_age_expression_and_sum_from_are_one_request(
     )
     assert result["rows"][0]["ALDER"] == "80+"
     assert result["rows"][0]["value"] == 5045
-    assert any("same request" in note for note in result["notes"])
+    assert any("sum_from" in note for note in result["notes"])
     sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
     assert isinstance(sent, dict)
     ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
@@ -277,6 +276,42 @@ def test_sum_from_nested_in_values_is_moved_out(calls: list[dict[str, object]]) 
     assert 'sum_from {"ALDER": "80"}' in message
     assert "pydantic" not in message.casefold()
     assert "list_type" not in message
+
+
+def test_open_ended_age_becomes_sum_from(calls: list[dict[str, object]]) -> None:
+    phrases = ["80+", ">=80", "80-", "80 og derover", "over 80"]
+    for phrase in phrases:
+        result = hent_data("FOLK1A", values={"OMRÅDE": ["230"], "ALDER": [phrase]})
+        assert result["rows"][0]["ALDER"] == "80+", phrase
+        assert result["rows"][0]["value"] == 5045, phrase
+        assert any("sum_from" in note and phrase in note for note in result["notes"]), phrase
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
+    assert str(ages[0]).startswith("sum(80+")
+
+
+def test_plain_age_80_stays_one_year(calls: list[dict[str, object]]) -> None:
+    with pytest.raises(ToolError):
+        hent_data("FOLK1A", {"OMRÅDE": ["230"], "ALDER": ["80"], "Tid": ["2026K3"]})
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
+    assert ages == ["80"]
+
+
+def test_closed_age_text_becomes_sum_range() -> None:
+    result = hent_data("FOLK1A", values={"OMRÅDE": ["230", "223"], "ALDER": ["0-17"]})
+    assert {row["OMRÅDE"] for row in result["rows"]} == {"Rudersdal", "Hørsholm"}
+    assert result["rows"][0]["ALDER"] == "0-17"
+    assert any('sum_range {"ALDER": ["0", "17"]}' in note for note in result["notes"])
+
+
+def test_kom_is_an_alias_for_area() -> None:
+    result = hent_data("FOLK1A", values={"KOM": "Rudersdal", "alder": "80+"})
+    assert result["rows"][0]["OMRÅDE"] == "Rudersdal"
+    assert result["rows"][0]["value"] == 5045
+    assert any("Used OMRÅDE for KOM." in note for note in result["notes"])
 
 
 def test_tabelinfo_filter_finds_a_value_past_the_cap() -> None:

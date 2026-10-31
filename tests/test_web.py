@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from statistikbanken_mcp.web import (
+    NO_DATA_ANSWER,
     NO_FETCHED_NUMBERS,
     PAGE,
     SYSTEM_PROMPT,
@@ -254,7 +255,7 @@ def test_unverified_numbers_are_removed_when_facts_exist() -> None:
 def test_single_fact_summary_does_not_depend_on_the_prose() -> None:
     fact = _population_fact(5045)
     question = "Hvor mange over 80 bor i Rudersdal?"
-    line = "5.045 (FOLK1A, 2026K3, Antal)"
+    line = "5.045 (FOLK1A, 2026K3, Antal, OMRÅDE: Rudersdal, ALDER: 80+)"
     honest = guard_answer(
         question,
         "Der bor 5.045 personer på 80 år eller derover i Rudersdal i 2026K3.",
@@ -277,20 +278,34 @@ def test_a_count_question_uses_only_the_latest_period() -> None:
         "In 2016K3 there were 4,200 and in 2026K3 there were 5,045.",
         facts,
     )
-    assert answer == "5.045 (FOLK1A, 2026K3, Antal)\n2.790 (FOLK1A, 2026K3, Antal)"
+    assert answer == (
+        "5.045 (FOLK1A, 2026K3, Antal, OMRÅDE: Rudersdal, ALDER: 80+)\n"
+        "2.790 (FOLK1A, 2026K3, Antal, OMRÅDE: Hørsholm, ALDER: 80+)"
+    )
     assert "2016" not in answer
     assert "4.200" not in answer
 
 
-def test_a_danish_refusal_without_new_numbers_is_kept() -> None:
-    answer = "Narnia er ikke et område i statistikken. Der er ingen tal for den kommune."
-    assert guard_answer("Hvor mange bor i Narnia?", answer, []) == answer
-    repeated = guard_answer(
-        "Hvor mange over 80 bor i Rudersdal?",
-        "Jeg kan ikke slå 80 år op uden en tabel.",
-        [],
+def test_no_data_answers_use_a_fixed_danish_sentence() -> None:
+    english = (
+        'Tool calls failed because there is no data for "Narnia" in Statistikbanken. '
+        "Narnia is not a real municipality in Denmark."
     )
-    assert repeated.startswith("Jeg kan ikke")
+    norwegian = (
+        'Fant ingen data om "Narnia" i Statistikbanken. '
+        "Denne navnet passer ikke bra til vores database."
+    )
+    assert guard_answer("Hvor mange bor i Narnia?", english, []) == NO_DATA_ANSWER
+    assert guard_answer("Hvor mange bor i Narnia?", norwegian, []) == NO_DATA_ANSWER
+    assert "Fant" not in NO_DATA_ANSWER
+
+
+def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
+    fact = _population_fact(18114)
+    fact["detail"] = "OMRÅDE: København, ALDER: 80+"
+    answer = guard_answer("Hvor mange over 80 bor i Rudersdal?", "18.114", [fact])
+    assert answer == "Jeg fik hentet tal for København, ikke for Rudersdal."
+    assert "18.114" not in answer
 
 
 def test_each_question_starts_a_fresh_conversation() -> None:
@@ -311,8 +326,8 @@ def test_each_question_starts_a_fresh_conversation() -> None:
     assert "Rudersdal" in model.seen[1]
     assert "latest period" in model.seen[1]
     assert "Danish" in model.seen[1]
-    assert first.answer == "Ingen tal her."
-    assert second.answer == "Ingen tal her."
+    assert first.answer == NO_DATA_ANSWER
+    assert second.answer == NO_DATA_ANSWER
 
 
 def test_llm_timeout_is_distinct_from_a_statbank_timeout(
@@ -323,7 +338,7 @@ def test_llm_timeout_is_distinct_from_a_statbank_timeout(
 
     http = httpx.Client(transport=httpx.MockTransport(time_out))
     client = ChatClient("http://127.0.0.1:11434/v1", "ollama", "qwen2.5", 1, http=http)
-    with pytest.raises(LLMError, match="Modellen svarede ikke i tide"):
+    with pytest.raises(LLMError, match="Modellen svarede ikke i tide. Prøv igen."):
         client.complete([{"role": "user", "content": "hej"}], [])
 
     settings = Settings(
@@ -361,6 +376,39 @@ def test_llm_timeout_is_distinct_from_a_statbank_timeout(
     assert "Statistikbanken stalled" in logged
 
 
+def test_llm_timeout_is_http_504() -> None:
+    settings = Settings(
+        llm="ollama",
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen2.5",
+        api_key="ollama",
+        host="127.0.0.1",
+        port=0,
+        daily_cap=10,
+        per_minute=10,
+        max_question_chars=100,
+        max_tool_calls=2,
+        llm_timeout=45,
+        tool_timeout=30,
+    )
+
+    def timed_out(question: str) -> TurnResult:
+        raise LLMError("Modellen svarede ikke i tide. Prøv igen.")
+
+    handler = _handler(settings, Limiter(10, 10), timed_out)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    try:
+        response = _post(port, {"question": "hej"})
+        assert response.status == 504
+        body = json.loads(response.read().decode())
+        assert body["error"] == "Modellen svarede ikke i tide. Prøv igen."
+    finally:
+        server.shutdown()
+
+
 def test_timeout_defaults_are_split(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("STATBANK_LLM_TIMEOUT", raising=False)
     monkeypatch.delenv("STATBANK_TOOL_TIMEOUT", raising=False)
@@ -368,6 +416,10 @@ def test_timeout_defaults_are_split(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = settings_from_env([])
     assert settings.llm_timeout == 45
     assert settings.tool_timeout == 30
+
+
+def test_fact_cards_use_danish_grouping() -> None:
+    assert 'fact.value.toLocaleString("da-DK")' in PAGE
 
 
 def test_csv_button_is_hidden_without_facts() -> None:
@@ -391,7 +443,7 @@ def test_turn_stops_at_the_tool_cap() -> None:
     )
     result = asyncio.run(run_turn(model, tools, "spørgsmål", max_tool_calls=1))
     assert len(result.calls) == 1
-    assert result.answer == "Delvist svar."
+    assert result.answer == NO_DATA_ANSWER
 
 
 def test_invalid_tool_arguments_are_reported() -> None:
@@ -605,7 +657,7 @@ def test_scripted_model_recovers_from_the_bad_time_sum() -> None:
     assert "list_type" not in result.calls[0]["result"]
     assert "5045" in result.calls[0]["result"]
     assert "13078" not in result.calls[0]["result"]
-    assert "sum_from" in result.calls[1]["result"]
+    assert "not every period" in result.calls[1]["result"]
     assert ">=2015K1" in result.calls[1]["result"]
     assert "13078" not in result.calls[1]["result"]
     assert all(fact.get("value") != 13078 for fact in result.facts)
