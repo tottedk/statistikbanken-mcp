@@ -173,7 +173,7 @@ function drawChart(series) {
     const label = svgEl("text", {
       x: left - 6, y: yOf(value) + 4, "text-anchor": "end", fill: "#4a453e", "font-size": "11"
     });
-    label.textContent = Math.round(value).toLocaleString("da-DK");
+    label.textContent = daDigits(Math.round(value));
     svg.append(label);
   }
   const step = Math.ceil(periods.length / 6);
@@ -200,6 +200,17 @@ function drawChart(series) {
   const wrap = el("div", null, "chart");
   wrap.append(svg);
   return wrap;
+}
+
+function daDigits(value) {
+  const negative = value < 0;
+  const digits = String(Math.abs(Math.round(value)));
+  let out = "";
+  for (let i = 0; i < digits.length; i++) {
+    if (i && (digits.length - i) % 3 === 0) out += ".";
+    out += digits[i];
+  }
+  return (negative ? "-" : "") + out;
 }
 
 function legend(series) {
@@ -237,16 +248,19 @@ function render(data) {
   const answer = el("section");
   const heading = el("div", null, "row");
   heading.append(el("h2", "Svar"));
-  if (data.facts && data.facts.length && data.csv) heading.append(csvButton(data.csv));
+  if (data.show_numbers !== false && data.facts && data.facts.length && data.csv) {
+    heading.append(csvButton(data.csv));
+  }
   answer.append(heading, el("p", data.answer || "", "answer"));
   out.append(answer);
 
-  if (data.chart && data.chart.length) {
+  if (data.show_numbers !== false && data.chart && data.chart.length) {
     const chart = el("section");
     chart.append(el("h2", "Udvikling"), drawChart(data.chart), legend(data.chart));
     out.append(chart);
   }
 
+  if (data.show_numbers === false) return;
   const facts = el("section");
   facts.append(el("h2", "Tal"));
   const linked = new Set();
@@ -267,8 +281,8 @@ function render(data) {
   }
   for (const fact of data.facts || []) {
     const card = el("div", null, "fact");
-    const value = fact.value == null ? "–"
-      : (typeof fact.value === "number" ? fact.value.toLocaleString("da-DK") : String(fact.value));
+    const value = typeof fact.value === "number" ? daDigits(fact.value)
+      : (fact.value == null ? "–" : String(fact.value));
     card.append(el("strong", value));
     const bits = [
       "Tabel " + (fact.table || ""),
@@ -459,6 +473,7 @@ class TurnResult:
     calls: list[dict[str, str]]
     chart: list[dict[str, Any]] = field(default_factory=list)
     csv: str = ""
+    show_numbers: bool = True
 
 
 async def run_turn(
@@ -488,6 +503,8 @@ async def run_turn(
         for call in reply.tool_calls:
             if used >= max_tool_calls:
                 break
+            if call.name == "hent_data" and isinstance(call.arguments, dict):
+                call.arguments = apply_age_intent(question, call.arguments)
             result = await _invoke(runner, call)
             used += 1
             calls.append(
@@ -670,12 +687,19 @@ def _turn(
     # The model text is not a source of numbers. A figure stays only when this
     # turn's hent_data rows contain it. Anything else is dropped, because a
     # wrong but plausible number is worse than no sentence.
+    refusal = _relevance_refusal(question, facts)
+    if refusal:
+        # The rows are real, but they are not the question. Do not chart them.
+        return TurnResult(
+            answer=refusal, facts=[], calls=calls, chart=[], csv="", show_numbers=False
+        )
+    kept = facts
     return TurnResult(
-        answer=guard_answer(question, answer, facts),
-        facts=facts,
+        answer=guard_answer(question, answer, kept, calls),
+        facts=kept,
         calls=calls,
-        chart=chart_series(facts),
-        csv=facts_to_csv(facts) if facts else "",
+        chart=chart_series(kept),
+        csv=facts_to_csv(kept) if kept else "",
     )
 
 
@@ -702,8 +726,13 @@ _TREND_MARKERS = (
 )
 _PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
 _YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# A figure stands alone. Digits inside FOLK1A or INDKP106 are not figures.
 _NUMBER_RE = re.compile(
-    r"\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?"
+    r"(?<![A-Za-z0-9_])("
+    r"\d{1,3}(?:\.\d{3})+(?:,\d+)?"
+    r"|\d{1,3}(?:,\d{3})+(?:\.\d+)?"
+    r"|\d+(?:[.,]\d+)?"
+    r")(?![A-Za-z0-9_])"
 )
 
 
@@ -745,7 +774,12 @@ def _closing_instruction(question: str) -> str:
     )
 
 
-def guard_answer(question: str, answer: str, facts: list[dict[str, Any]]) -> str:
+def guard_answer(
+    question: str,
+    answer: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]] | None = None,
+) -> str:
     """Drop prose that states a number this turn did not fetch.
 
     A question that asks for one figure is answered with the page's own line
@@ -755,17 +789,17 @@ def guard_answer(question: str, answer: str, facts: list[dict[str, Any]]) -> str
     if not facts:
         if _is_page_message(answer):
             return answer
-        if _unverified_numbers(answer, question, facts):
+        if _unverified_numbers(answer, question, facts, calls):
             return NO_FETCHED_NUMBERS
         return NO_DATA_ANSWER
-    mismatch = _place_mismatch(question, facts)
-    if mismatch:
-        return mismatch
+    refusal = _relevance_refusal(question, facts)
+    if refusal:
+        return refusal
     if not _asks_for_trend(question):
         lines = _latest_lines(facts)
         if lines:
             return "\n".join(lines)
-    if _unverified_numbers(answer, question, facts):
+    if _unverified_numbers(answer, question, facts, calls):
         if _single_fact(facts):
             return _summary_line(facts[0])
         return UNVERIFIED_NUMBERS
@@ -811,6 +845,112 @@ def _summary_line(fact: dict[str, Any]) -> str:
         bits.append(detail)
     label = ", ".join(bit for bit in bits if bit)
     return f"{value} ({label})" if label else value
+
+
+def apply_age_intent(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Replace the model's age codes with the age the question asked for."""
+    intent = _age_intent(question)
+    if intent is None:
+        return arguments
+    if not any(_has_alder(arguments.get(key)) for key in ("values", "sum_from", "sum_range")):
+        return arguments
+    kind, low, high = intent
+    updated = dict(arguments)
+    values = _without_alder(updated.get("values"))
+    sum_from = _without_alder(updated.get("sum_from"))
+    sum_range = _without_alder(updated.get("sum_range"))
+    if kind == "from":
+        sum_from = dict(sum_from or {})
+        sum_from["ALDER"] = str(low)
+    else:
+        sum_range = dict(sum_range or {})
+        sum_range["ALDER"] = [str(low), str(high)]
+    _put_map(updated, "values", values)
+    _put_map(updated, "sum_from", sum_from)
+    _put_map(updated, "sum_range", sum_range)
+    return updated
+
+
+def _age_intent(question: str) -> tuple[str, int, int | None] | None:
+    text = question.casefold().replace("–", "-")
+    between = re.search(r"mellem\s+(\d{1,3})\s+og\s+(\d{1,3})", text)
+    if between and _age_span(int(between.group(1)), int(between.group(2))):
+        low, high = int(between.group(1)), int(between.group(2))
+        return ("range", low, high)
+    span = re.search(r"(?<!\d)(\d{1,3})\s*-\s*(\d{1,3})(?!\d)", text)
+    if span and _age_span(int(span.group(1)), int(span.group(2))):
+        return ("range", int(span.group(1)), int(span.group(2)))
+    if re.search(r"\bbørn\b", text):
+        return ("range", 0, 17)
+    opened = re.search(
+        r"(\d{1,3})\s*år\s+og\s+derover|over\s+(\d{1,3})(?!\d)|>=\s*(\d{1,3})(?!\d)|(\d{1,3})\s*\+",
+        text,
+    )
+    if opened is None:
+        return None
+    number = next(int(group) for group in opened.groups() if group)
+    if number > 125:
+        return None
+    return ("from", number, None)
+
+
+def _age_span(low: int, high: int) -> bool:
+    return low <= high <= 125
+
+
+def _has_alder(mapping: Any) -> bool:
+    return isinstance(mapping, dict) and any(str(key).casefold() == "alder" for key in mapping)
+
+
+def _without_alder(mapping: Any) -> dict[str, Any] | None:
+    if not isinstance(mapping, dict):
+        return None
+    return {key: value for key, value in mapping.items() if str(key).casefold() != "alder"}
+
+
+def _put_map(arguments: dict[str, Any], key: str, mapping: dict[str, Any] | None) -> None:
+    if mapping:
+        arguments[key] = mapping
+    else:
+        arguments.pop(key, None)
+
+
+def _relevance_refusal(question: str, facts: list[dict[str, Any]]) -> str:
+    if not facts:
+        return ""
+    place = _place_mismatch(question, facts)
+    if place:
+        return place
+    return _age_mismatch(question, facts)
+
+
+def _age_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
+    intent = _age_intent(question)
+    if intent is None:
+        return ""
+    labels: list[str] = []
+    for fact in facts:
+        label = _detail_field(str(fact.get("detail") or ""), "ALDER")
+        if label and label not in labels:
+            labels.append(label)
+    if not labels or all(_age_label_matches(intent, label) for label in labels):
+        return ""
+    kind, low, high = intent
+    wanted = f"{low}+" if kind == "from" else f"{low}-{high}"
+    return f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {wanted}."
+
+
+def _age_label_matches(intent: tuple[str, int, int | None], label: str) -> bool:
+    kind, low, high = intent
+    folded = label.casefold().replace(" ", "").replace("–", "-")
+    if kind == "from":
+        return folded in {f"{low}+", f"{low}årogderover"}
+    return folded == f"{low}-{high}"
+
+
+def _detail_field(detail: str, field: str) -> str:
+    match = re.search(rf"{field}:\s*(.*?)(?:,\s*[^,]+:|$)", detail)
+    return match.group(1).strip() if match else ""
 
 
 def _place_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
@@ -883,8 +1023,14 @@ def _da_number(value: int | float) -> str:
     return sign + f"{abs(number):,}".replace(",", ".")
 
 
-def _unverified_numbers(answer: str, question: str, facts: list[dict[str, Any]]) -> list[float]:
+def _unverified_numbers(
+    answer: str,
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]] | None = None,
+) -> list[float]:
     allowed = set(_numbers_in(question))
+    allowed.update(_sent_codes(calls))
     for fact in facts:
         value = fact.get("value")
         if isinstance(value, bool) or not isinstance(value, int | float):
@@ -893,13 +1039,25 @@ def _unverified_numbers(answer: str, question: str, facts: list[dict[str, Any]])
     return [number for number in _numbers_in(answer) if not _near(number, allowed)]
 
 
+def _sent_codes(calls: list[dict[str, str]] | None) -> set[float]:
+    """Area and value codes from this turn's hent_data arguments, not its results."""
+    if not calls:
+        return set()
+    found: set[float] = set()
+    for call in calls:
+        if call.get("name") != "hent_data":
+            continue
+        found.update(_numbers_in(str(call.get("arguments") or "")))
+    return found
+
+
 def _near(number: float, allowed: set[float]) -> bool:
     return any(abs(number - item) < 1e-6 for item in allowed)
 
 
 def _numbers_in(text: str) -> list[float]:
     masked = _YEAR_RE.sub(lambda match: " " * len(match.group(0)), _mask_periods(text))
-    return [_parse_stat_number(match.group(0)) for match in _NUMBER_RE.finditer(masked)]
+    return [_parse_stat_number(match.group(1)) for match in _NUMBER_RE.finditer(masked)]
 
 
 def _mask_periods(text: str) -> str:
@@ -920,6 +1078,25 @@ def _parse_stat_number(token: str) -> float:
     if "," in token and "." not in token:
         return float(token.replace(",", "."))
     return float(token)
+
+
+def _unwrap(exc: BaseException) -> list[BaseException]:
+    if isinstance(exc, BaseExceptionGroup):
+        leaves: list[BaseException] = []
+        for child in exc.exceptions:
+            leaves.extend(_unwrap(child))
+        return leaves
+    return [exc]
+
+
+def _failure_response(exc: BaseException) -> tuple[int, str]:
+    for item in _unwrap(exc):
+        if isinstance(item, LLMError):
+            text = str(item)
+            return (504 if "ikke i tide" in text else 502), text
+    if any(_is_timeout(item) for item in _unwrap(exc)):
+        return 504, "Statistikbanken svarede ikke i tide."
+    return 502, "Kunne ikke hente et svar."
 
 
 def _is_timeout(exc: BaseException) -> bool:
@@ -1177,19 +1354,13 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                 return
             try:
                 result = answer(question)
-            except LLMError as exc:
-                sys.stderr.write(f"Question failed: {type(exc).__name__}: {exc}\n")
-                text = str(exc)
-                status = 504 if "ikke i tide" in text else 502
-                self._json(status, {"error": text})
-                return
             except Exception as exc:
-                sys.stderr.write(f"Question failed: {type(exc).__name__}: {exc}\n")
+                leaves = _unwrap(exc)
+                names = ", ".join(type(item).__name__ for item in leaves)
+                sys.stderr.write(f"Question failed: {type(exc).__name__} ({names}): {exc}\n")
                 traceback.print_exc(file=sys.stderr)
-                if _is_timeout(exc):
-                    self._json(504, {"error": "Statistikbanken svarede ikke i tide."})
-                else:
-                    self._json(502, {"error": "Kunne ikke hente et svar."})
+                status, text = _failure_response(exc)
+                self._json(status, {"error": text})
                 return
             self._json(
                 200,
@@ -1199,6 +1370,7 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                     "calls": result.calls,
                     "chart": result.chart,
                     "csv": result.csv,
+                    "show_numbers": result.show_numbers,
                 },
             )
 

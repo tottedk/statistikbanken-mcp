@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from statistikbanken_mcp.web import (
+    LLM_TIMEOUT_TEXT,
     NO_DATA_ANSWER,
     NO_FETCHED_NUMBERS,
     PAGE,
@@ -31,6 +32,7 @@ from statistikbanken_mcp.web import (
     _fallback_answer,
     _handler,
     _turn,
+    apply_age_intent,
     chart_series,
     facts_to_csv,
     guard_answer,
@@ -239,6 +241,27 @@ def test_hallucinated_turn_keeps_the_tool_trace_and_hides_the_numbers() -> None:
     assert result.calls[0]["name"] == "hent_data"
 
 
+def test_table_ids_and_sent_area_codes_are_not_figures() -> None:
+    text = "steget fra 3.524 (2015K1) til 5.045 (2026K3) i FOLK1A, område 223"
+    facts = [
+        _population_fact(3524, "2015K1", "Hørsholm"),
+        _population_fact(5045, "2026K3", "Hørsholm"),
+    ]
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": '{"table": "FOLK1A", "values": {"OMRÅDE": ["223"], "Tid": [">=2015K1"]}}',
+            "result": "",
+        }
+    ]
+    question = "Hvordan har udviklingen været siden 2015?"
+    kept = guard_answer(question, text, facts, calls)
+    assert "3.524" in kept
+    assert "5.045" in kept
+    assert "FOLK1A" in kept
+    assert kept != UNVERIFIED_NUMBERS
+
+
 def test_unverified_numbers_are_removed_when_facts_exist() -> None:
     facts = [
         _population_fact(3524, "2015K1"),
@@ -306,6 +329,101 @@ def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
     answer = guard_answer("Hvor mange over 80 bor i Rudersdal?", "18.114", [fact])
     assert answer == "Jeg fik hentet tal for København, ikke for Rudersdal."
     assert "18.114" not in answer
+    hidden = _turn("Hvor mange over 80 bor i Rudersdal?", "18.114", [fact], [])
+    assert hidden.answer == answer
+    assert hidden.facts == []
+    assert hidden.chart == []
+    assert hidden.csv == ""
+    assert hidden.show_numbers is False
+
+
+def test_question_age_replaces_the_codes_the_model_sent() -> None:
+    question_a = "Hvordan har udviklingen for 80+ i Rudersdal og Hørsholm været siden 2015?"
+    rewritten_a = apply_age_intent(
+        question_a,
+        {
+            "table": "FOLK1A",
+            "values": {"KOM": ["Rudersdal", "Hørsholm"], "ALDER": "80", "Tid": [">=2015K1"]},
+        },
+    )
+    assert rewritten_a["values"] == {
+        "KOM": ["Rudersdal", "Hørsholm"],
+        "Tid": [">=2015K1"],
+    }
+    assert rewritten_a["sum_from"] == {"ALDER": "80"}
+    assert "sum_range" not in rewritten_a
+
+    question_c = "Hvor mange børn (0-17 år) bor i Hørsholm?"
+    first = apply_age_intent(
+        question_c,
+        {
+            "table": "FOLK1A",
+            "values": {"OMRÅDE": "Hørsholm", "ALDER": "0-17"},
+            "sum_from": {"ALDER": "0"},
+        },
+    )
+    assert first["values"] == {"OMRÅDE": "Hørsholm"}
+    assert "sum_from" not in first
+    assert first["sum_range"] == {"ALDER": ["0", "17"]}
+    second = apply_age_intent(
+        question_c,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["223"]}, "sum_from": {"ALDER": 0}},
+    )
+    assert second["sum_range"] == {"ALDER": ["0", "17"]}
+    assert "sum_from" not in second
+
+
+def test_wrong_age_is_not_presented_as_the_answer() -> None:
+    fact = _population_fact(395, "2015K1")
+    fact["detail"] = "OMRÅDE: Rudersdal, ALDER: 80 år"
+    question = "Hvordan har udviklingen for 80+ i Rudersdal været siden 2015?"
+    hidden = _turn(question, "Se grafen.", [fact], [])
+    assert hidden.answer == "Jeg fik hentet tal for alder 80 år, ikke for 80+."
+    assert hidden.show_numbers is False
+    assert hidden.facts == []
+    assert hidden.chart == []
+    assert "395" not in hidden.answer
+
+
+def test_llm_timeout_inside_a_task_group_is_http_504() -> None:
+    settings = Settings(
+        llm="ollama",
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen2.5",
+        api_key="ollama",
+        host="127.0.0.1",
+        port=0,
+        daily_cap=10,
+        per_minute=10,
+        max_question_chars=100,
+        max_tool_calls=2,
+        llm_timeout=45,
+        tool_timeout=30,
+    )
+
+    def timed_out(question: str) -> TurnResult:
+        async def fail() -> None:
+            raise LLMError(LLM_TIMEOUT_TEXT)
+
+        async def grouped() -> None:
+            async with asyncio.TaskGroup() as group:
+                group.create_task(fail())
+
+        asyncio.run(grouped())
+
+    handler = _handler(settings, Limiter(10, 10), timed_out)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    try:
+        response = _post(port, {"question": "hej"})
+        assert response.status == 504
+        body = json.loads(response.read().decode())
+        assert body["error"] == "Modellen svarede ikke i tide. Prøv igen."
+        assert "Kunne ikke hente et svar." not in body["error"]
+    finally:
+        server.shutdown()
 
 
 def test_each_question_starts_a_fresh_conversation() -> None:
@@ -418,8 +536,12 @@ def test_timeout_defaults_are_split(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.tool_timeout == 30
 
 
-def test_fact_cards_use_danish_grouping() -> None:
-    assert 'fact.value.toLocaleString("da-DK")' in PAGE
+def test_fact_cards_and_the_axis_use_danish_dots() -> None:
+    assert "function daDigits" in PAGE
+    assert "daDigits(Math.round(value))" in PAGE
+    assert "daDigits(fact.value)" in PAGE
+    chart = PAGE.split("function drawChart", 1)[1].split("function daDigits", 1)[0]
+    assert "toLocaleString" not in chart
 
 
 def test_csv_button_is_hidden_without_facts() -> None:
@@ -606,6 +728,72 @@ def _fact(place: str, period: str, value: int | float, unpublished: bool = False
         "unpublished": unpublished,
         "url": "https://www.statistikbanken.dk/FOLK1A",
     }
+
+
+@pytest.mark.live
+@pytest.mark.live
+def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
+    """14b sent age 80, and 0-17 together with sum_from 0. The question wins."""
+
+    async def _run(question: str, arguments: dict, call_id: str) -> TurnResult:
+        from mcp import Client
+
+        model = ScriptedModel(
+            [
+                ChatReply("", [_call("hent_data", arguments, call_id)]),
+                ChatReply("Se tallene.", []),
+            ]
+        )
+        async with Client(server_command(), read_timeout_seconds=120) as client:
+            runner = McpRunner(client)
+            await runner.prepare()
+            return await run_turn(model, runner, question, max_tool_calls=4)
+
+    series = asyncio.run(
+        _run(
+            "Hvordan har udviklingen for 80+ i Rudersdal og Hørsholm været siden 2015?",
+            {
+                "table": "FOLK1A",
+                "values": {
+                    "KOM": ["Rudersdal", "Hørsholm"],
+                    "ALDER": "80",
+                    "Tid": [">=2015K1"],
+                },
+            },
+            "c_a",
+        )
+    )
+    by_place = {}
+    for fact in series.facts:
+        if "Rudersdal" in fact["detail"]:
+            by_place.setdefault("Rudersdal", {})[fact["period"]] = fact["value"]
+        if "Hørsholm" in fact["detail"]:
+            by_place.setdefault("Hørsholm", {})[fact["period"]] = fact["value"]
+    assert by_place["Rudersdal"]["2015K1"] == 3524
+    assert by_place["Rudersdal"]["2026K3"] == 5045
+    assert by_place["Hørsholm"]["2015K1"] == 1719
+    assert by_place["Hørsholm"]["2026K3"] == 2790
+    assert all("80+" in fact["detail"] for fact in series.facts)
+    assert len(series.chart) == 2
+    assert all(len(item["points"]) > 2 for item in series.chart)
+
+    children = asyncio.run(
+        _run(
+            "Hvor mange børn (0-17 år) bor i Hørsholm?",
+            {
+                "table": "FOLK1A",
+                "values": {"OMRÅDE": "Hørsholm", "ALDER": "0-17"},
+                "sum_from": {"ALDER": "0"},
+            },
+            "c_c",
+        )
+    )
+    assert len(children.facts) == 1
+    assert children.facts[0]["value"] == 4916
+    assert "Hørsholm" in children.facts[0]["detail"]
+    assert "0-17" in children.facts[0]["detail"]
+    assert children.answer.startswith("4.916")
+    assert children.show_numbers is True
 
 
 @pytest.mark.live
