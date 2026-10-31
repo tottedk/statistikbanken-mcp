@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -132,9 +133,11 @@ class StatbankClient:
         http: httpx.Client | None = None,
         *,
         base_url: str = BASE_URL,
-        timeout: float = 60.0,
+        timeout: float = 30.0,
     ) -> None:
         self._owns_http = http is None
+        if http is None and os.environ.get("STATBANK_HTTP_TIMEOUT"):
+            timeout = float(os.environ["STATBANK_HTTP_TIMEOUT"])
         self._http = http or httpx.Client(
             base_url=base_url,
             timeout=timeout,
@@ -217,12 +220,16 @@ class StatbankClient:
     def fetch(
         self,
         table: str,
-        values: dict[str, list[str] | str] | None = None,
-        sum_from: dict[str, str] | None = None,
-        sum_range: dict[str, list[str] | str] | None = None,
+        values: dict[str, Any] | None = None,
+        sum_from: dict[str, Any] | None = None,
+        sum_range: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        values, sum_from, sum_range, notes = _hoist_nested_sums(values, sum_from, sum_range)
         values = _coerce_code_map(values, "values")
         sum_range = _coerce_code_map(sum_range, "sum_range")
+        sum_from = _coerce_sum_from(sum_from)
+        values, dropped = _drop_equivalent_value_sums(values, sum_from)
+        notes.extend(dropped)
         metadata = self._metadata_for(table)
         selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
         assumed = _fill_required(metadata, selections)
@@ -258,6 +265,8 @@ class StatbankClient:
         }
         if assumed:
             result["defaults"] = assumed
+        if notes:
+            result["notes"] = notes
         return result
 
     def _fetch_sum_locally(
@@ -543,6 +552,162 @@ def _value_matches_terms(item: dict[str, str], terms: list[str]) -> bool:
     return False
 
 
+def _sum_argument_help(kind: str) -> str:
+    if kind == "sum_range":
+        return (
+            "sum_range is an argument beside values, not a key inside values. "
+            'Call hent_data with values {"OMRÅDE": ["230"]} and '
+            'sum_range {"ALDER": ["0", "17"]}.'
+        )
+    return (
+        "sum_from is an argument beside values, not a key inside values. "
+        'Call hent_data with values {"OMRÅDE": ["230"]} and sum_from {"ALDER": "80"}.'
+    )
+
+
+def _hoist_nested_sums(
+    values: Any,
+    sum_from: Any,
+    sum_range: Any,
+) -> tuple[Any, Any, Any, list[str]]:
+    """Lift sum_from and sum_range that the model nested inside values."""
+    notes: list[str] = []
+    if not isinstance(values, dict):
+        return values, sum_from, sum_range, notes
+    if sum_from is not None and not isinstance(sum_from, dict):
+        return values, sum_from, sum_range, notes
+    if sum_range is not None and not isinstance(sum_range, dict):
+        return values, sum_from, sum_range, notes
+    values = dict(values)
+    from_map = dict(sum_from or {})
+    range_map = dict(sum_range or {})
+    from_used = sum_from is not None
+    range_used = sum_range is not None
+
+    for kind, target in (("sum_from", from_map), ("sum_range", range_map)):
+        if kind not in values:
+            continue
+        nested = values.pop(kind)
+        if not isinstance(nested, dict) or not nested:
+            raise StatbankError(_sum_argument_help(kind))
+        for var, spec in nested.items():
+            previous = target.get(var)
+            if previous is not None and str(previous).strip() != str(spec).strip():
+                raise StatbankError(
+                    f"{kind} for {var} is inside values and also passed beside values, "
+                    f"and they differ. {_sum_argument_help(kind)}"
+                )
+            target[var] = spec
+        if kind == "sum_from":
+            from_used = True
+        else:
+            range_used = True
+        notes.append(f"Moved {kind} out of values. {_sum_argument_help(kind)}")
+
+    for var, raw in list(values.items()):
+        if not isinstance(raw, dict):
+            continue
+        keys = {str(key) for key in raw}
+        if keys == {"sum_from"} or keys == {"sum_range"}:
+            kind = next(iter(raw))
+            spec = raw[kind]
+            target = from_map if kind == "sum_from" else range_map
+            previous = target.get(var)
+            if previous is not None and str(previous).strip() != str(spec).strip():
+                raise StatbankError(
+                    f"{kind} for {var} disagrees with the value inside values. "
+                    f"{_sum_argument_help(kind)}"
+                )
+            target[var] = spec
+            values.pop(var)
+            if kind == "sum_from":
+                from_used = True
+            else:
+                range_used = True
+            notes.append(f"Moved {kind} for {var} out of values. {_sum_argument_help(kind)}")
+            continue
+        raise StatbankError(
+            f"values for {var} must be a code or a list of codes. {_sum_argument_help('sum_from')}"
+        )
+    return (
+        values,
+        from_map if from_used else None,
+        range_map if range_used else None,
+        notes,
+    )
+
+
+def _coerce_sum_from(raw: Any) -> dict[str, str] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise StatbankError(_sum_argument_help("sum_from"))
+    coerced: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(value, bool):
+            raise StatbankError(_sum_argument_help("sum_from"))
+        if isinstance(value, int):
+            coerced[str(key)] = str(value)
+        elif isinstance(value, str) and value.strip():
+            coerced[str(key)] = value.strip()
+        elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
+            coerced[str(key)] = value[0].strip()
+        else:
+            raise StatbankError(
+                f"sum_from for {key} must be one numeric code such as '80'. "
+                f"{_sum_argument_help('sum_from')}"
+            )
+    return coerced
+
+
+def _drop_equivalent_value_sums(
+    values: dict[str, list[str]] | None,
+    sum_from: dict[str, str] | None,
+) -> tuple[dict[str, list[str]] | None, list[str]]:
+    """Treat values '>=80' plus sum_from '80' as one request."""
+    if not values or not sum_from:
+        return values, []
+    notes: list[str] = []
+    folded = {key.casefold(): key for key in values}
+    for code, start in sum_from.items():
+        key = folded.get(str(code).casefold())
+        if key is None:
+            continue
+        if _equivalent_sum(values[key], start):
+            shown = ", ".join(values.pop(key))
+            notes.append(
+                f"Ignored values for {key} ({shown}); it is the same request as "
+                f'sum_from {{"{code}": "{start}"}}.'
+            )
+            continue
+        raise StatbankError(
+            f"Variable {key} is listed in both values and sum_from, and they differ. "
+            f"Remove {key} from values. "
+            f'Keep sum_from {{"{code}": "{start}"}} and pass the other variables in values.'
+        )
+    return values, notes
+
+
+def _equivalent_sum(raw: list[str], start: str) -> bool:
+    token = start.strip()
+    if not token.isdigit():
+        return False
+    threshold = int(token)
+    if not raw:
+        return False
+    for item in raw:
+        text = item.strip()
+        lower_bound = re.fullmatch(r">=\s*(\d+)", text)
+        if lower_bound and int(lower_bound.group(1)) == threshold:
+            continue
+        if text.isdigit() and int(text) == threshold:
+            continue
+        if text == f"{threshold}+":
+            continue
+        return False
+    return True
+
+
 def _coerce_code_map(raw: Any, name: str) -> dict[str, list[str]] | None:
     if raw is None:
         return None
@@ -684,8 +849,8 @@ def _build_selections(
         variable = _require_variable(table, str(code))
         if variable.id in chosen:
             raise StatbankError(
-                f"Variable {variable.id} is listed in both values and sum_from. "
-                "Put it in only one of them."
+                f"Variable {variable.id} is listed in both values and sum_from, and they differ. "
+                f"Remove {variable.id} from values."
             )
         chosen[variable.id] = [_sum_expression(variable, start)]
 

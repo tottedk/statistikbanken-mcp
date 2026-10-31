@@ -12,9 +12,11 @@ import csv
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
+import traceback
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date
@@ -31,9 +33,18 @@ DEFAULT_XAI_MODEL = "grok-4"
 TRACE_LIMIT = 2_000
 MODEL_RESULT_LIMIT = 12_000
 MAX_BODY_BYTES = 32_768
+DEFAULT_LLM_TIMEOUT = 45.0
+DEFAULT_TOOL_TIMEOUT = 30.0
+NO_FETCHED_NUMBERS = "Jeg fik ikke hentet tal, så jeg viser ingen."
+UNVERIFIED_NUMBERS = (
+    "Jeg viser kun de hentede tal. Teksten er udeladt, fordi den indeholder tal, "
+    "der ikke kommer fra tabellen."
+)
 
 SYSTEM_PROMPT = """You answer questions about Danish official statistics.
 Use only the Statistikbanken tools. Do not invent numbers.
+Never write a number that is not in a hent_data row from this question.
+If a tool call failed, say so. Do not fill in example figures.
 Call find_tabel, then tabelinfo when you need codes, then hent_data.
 Always name the table id and the period in the answer.
 If the table title, unit, or description only partly matches the question, say so.
@@ -41,6 +52,10 @@ If the tools have no data, say so.
 Prefer sum_from or sum_range when a total is needed.
 A value like >=80 lists rows. It does not add them.
 Ages 80 and older are sum_from {"ALDER": "80"}.
+You may also pass >=80 in values together with that sum_from. It is the same request.
+sum_from and sum_range are arguments beside values, not keys inside values.
+Unless the question asks for a change, a development, or several years, use only the latest period.
+Do not list earlier periods for a question that asks how many there are now.
 For a change over time, fetch every period in one hent_data call.
 Pass Tid as one range in values, for example >=2015K1.
 Each period comes back as its own row. Do not put Tid in sum_range.
@@ -49,6 +64,7 @@ Municipality names may be passed as labels.
 One code may be a string. Several codes are a list, or one comma-separated string.
 Answer in the same language as the question.
 A Danish question gets a Danish answer, even if the tool text is English.
+Do not answer in English when the question is Danish.
 Write Danish numbers with a dot as the thousands separator: 5.045, never 5,045.
 Write periods as Statistikbanken does: 2026K3, never 2026Q3."""
 
@@ -219,7 +235,7 @@ function render(data) {
   const answer = el("section");
   const heading = el("div", null, "row");
   heading.append(el("h2", "Svar"));
-  if (data.csv) heading.append(csvButton(data.csv));
+  if (data.facts && data.facts.length && data.csv) heading.append(csvButton(data.csv));
   answer.append(heading, el("p", data.answer || "", "answer"));
   out.append(answer);
 
@@ -375,6 +391,8 @@ class ChatClient:
             )
             response.raise_for_status()
             payload = response.json()
+        except httpx.TimeoutException as exc:
+            raise LLMError("Modellen svarede ikke i tide.") from exc
         except (httpx.HTTPError, json.JSONDecodeError) as exc:
             raise LLMError("Kunne ikke kontakte modellen.") from exc
         return _parse_reply(payload)
@@ -452,6 +470,7 @@ async def run_turn(
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": question},
+        {"role": "system", "content": _closing_instruction(question)},
     ]
     calls: list[dict[str, str]] = []
     facts: list[dict[str, Any]] = []
@@ -461,7 +480,7 @@ async def run_turn(
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
             answer = reply.content.strip() or _fallback_answer(calls, capped=not allow_tools)
-            return _turn(answer, facts, calls)
+            return _turn(question, answer, facts, calls)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
             if used >= max_tool_calls:
@@ -489,7 +508,7 @@ async def run_turn(
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
             answer = final.content.strip() or _fallback_answer(calls, capped=True)
-            return _turn(answer, facts, calls)
+            return _turn(question, answer, facts, calls)
 
 
 def _assistant_message(reply: ChatReply) -> dict[str, Any]:
@@ -639,14 +658,196 @@ def _csv_number(value: Any) -> str:
     return str(value)
 
 
-def _turn(answer: str, facts: list[dict[str, Any]], calls: list[dict[str, str]]) -> TurnResult:
+def _turn(
+    question: str,
+    answer: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+) -> TurnResult:
+    # The model text is not a source of numbers. A figure stays only when this
+    # turn's hent_data rows contain it. Anything else is dropped, because a
+    # wrong but plausible number is worse than no sentence.
     return TurnResult(
-        answer=answer,
+        answer=guard_answer(question, answer, facts),
         facts=facts,
         calls=calls,
         chart=chart_series(facts),
-        csv=facts_to_csv(facts),
+        csv=facts_to_csv(facts) if facts else "",
     )
+
+
+_DANISH_WORDS = frozenset(
+    """
+    hvor mange hvad hvem hvordan hvilken hvilke hvorfor bor har er siden
+    udviklet antallet over under børn kommune og til fra den det en et
+    ikke personer tabellen
+    """.split()
+)
+_TREND_MARKERS = (
+    "udvikl",
+    "siden",
+    "over tid",
+    "historik",
+    "ændr",
+    "aendr",
+    "trend",
+    "sammenlign",
+    "development",
+    "over time",
+    "since",
+    "history",
+)
+_PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_NUMBER_RE = re.compile(
+    r"\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?"
+)
+
+
+def _looks_danish(question: str) -> bool:
+    if re.search(r"[æøåÆØÅ]", question):
+        return True
+    words = set(re.findall(r"[a-zA-ZæøåÆØÅ]+", question.casefold()))
+    return len(words & _DANISH_WORDS) >= 2
+
+
+def _asks_for_trend(question: str) -> bool:
+    folded = question.casefold()
+    return any(marker in folded for marker in _TREND_MARKERS)
+
+
+def _closing_instruction(question: str) -> str:
+    """Last instruction before the model writes. Small models follow the end."""
+    if _looks_danish(question):
+        language = (
+            "The question is Danish. Answer in Danish. Do not answer in English. "
+            "Write 5.045 and 2026K3."
+        )
+    else:
+        language = "Answer in the same language as the question."
+    if _asks_for_trend(question):
+        scope = (
+            "The question asks how the numbers change over time. "
+            "Fetch the periods in one hent_data call and cite those rows."
+        )
+    else:
+        scope = (
+            "The question asks for one figure. Use only the latest period. "
+            "Do not return a long list of earlier periods."
+        )
+    return (
+        f"{language} {scope} "
+        "Use only numbers that appear in hent_data rows from this question. "
+        "If a tool call failed, say so and do not invent figures."
+    )
+
+
+def guard_answer(question: str, answer: str, facts: list[dict[str, Any]]) -> str:
+    """Drop prose that states a number this turn did not fetch.
+
+    A question that asks for one figure is answered with the page's own line
+    for the latest period. The model's sentence is not used, so a long series
+    or an invented total cannot become the answer.
+    """
+    if not facts:
+        if _unverified_numbers(answer, question, facts):
+            return NO_FETCHED_NUMBERS
+        return answer
+    if not _asks_for_trend(question):
+        lines = _latest_lines(facts)
+        if lines:
+            return "\n".join(lines)
+    if _unverified_numbers(answer, question, facts):
+        if _single_fact(facts):
+            return _summary_line(facts[0])
+        return UNVERIFIED_NUMBERS
+    if _single_fact(facts):
+        line = _summary_line(facts[0])
+        return f"{line}\n\n{answer}" if answer else line
+    return answer
+
+
+def _latest_lines(facts: list[dict[str, Any]]) -> list[str]:
+    numeric = [fact for fact in facts if _single_value(fact)]
+    if not numeric:
+        return []
+    latest = max(str(fact.get("period") or "") for fact in numeric)
+    chosen = [fact for fact in numeric if str(fact.get("period") or "") == latest]
+    return [_summary_line(fact) for fact in chosen]
+
+
+def _single_value(fact: dict[str, Any]) -> bool:
+    value = fact.get("value")
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _single_fact(facts: list[dict[str, Any]]) -> bool:
+    return len(facts) == 1 and _single_value(facts[0])
+
+
+def _summary_line(fact: dict[str, Any]) -> str:
+    value = _da_number(fact["value"])
+    bits = [str(fact.get(key) or "") for key in ("table", "period", "unit")]
+    label = ", ".join(bit for bit in bits if bit)
+    return f"{value} ({label})" if label else value
+
+
+def _da_number(value: int | float) -> str:
+    if isinstance(value, float) and not value.is_integer():
+        sign = "-" if value < 0 else ""
+        whole, frac = f"{abs(value):.10f}".rstrip("0").rstrip(".").split(".")
+        grouped = f"{int(whole):,}".replace(",", ".")
+        return f"{sign}{grouped},{frac}"
+    number = int(value)
+    sign = "-" if number < 0 else ""
+    return sign + f"{abs(number):,}".replace(",", ".")
+
+
+def _unverified_numbers(answer: str, question: str, facts: list[dict[str, Any]]) -> list[float]:
+    allowed = set(_numbers_in(question))
+    for fact in facts:
+        value = fact.get("value")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        allowed.add(float(value))
+    return [number for number in _numbers_in(answer) if not _near(number, allowed)]
+
+
+def _near(number: float, allowed: set[float]) -> bool:
+    return any(abs(number - item) < 1e-6 for item in allowed)
+
+
+def _numbers_in(text: str) -> list[float]:
+    masked = _YEAR_RE.sub(lambda match: " " * len(match.group(0)), _mask_periods(text))
+    return [_parse_stat_number(match.group(0)) for match in _NUMBER_RE.finditer(masked)]
+
+
+def _mask_periods(text: str) -> str:
+    return _PERIOD_RE.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def _parse_stat_number(token: str) -> float:
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
+        return float(token.replace(".", ""))
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+", token):
+        return float(token.replace(",", ""))
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+,\d+", token):
+        whole, frac = token.split(",")
+        return float(f"{whole.replace('.', '')}.{frac}")
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+\.\d+", token):
+        whole, frac = token.split(".")
+        return float(f"{whole.replace(',', '')}.{frac}")
+    if "," in token and "." not in token:
+        return float(token.replace(",", "."))
+    return float(token)
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return any(_is_timeout(item) for item in exc.exceptions)
+    return "timeout" in type(exc).__name__.casefold()
 
 
 def _short(text: str, limit: int) -> str:
@@ -702,7 +903,8 @@ class Settings:
     per_minute: int
     max_question_chars: int
     max_tool_calls: int
-    timeout: float
+    llm_timeout: float
+    tool_timeout: float
 
     def __repr__(self) -> str:
         return (
@@ -757,12 +959,20 @@ def settings_from_env(argv: list[str] | None = None) -> Settings:
         per_minute=int(os.environ.get("STATBANK_RATE_PER_MINUTE", "30")),
         max_question_chars=int(os.environ.get("STATBANK_MAX_QUESTION_CHARS", "1000")),
         max_tool_calls=int(os.environ.get("STATBANK_MAX_TOOL_CALLS", "8")),
-        timeout=float(os.environ.get("STATBANK_TIMEOUT", "120")),
+        llm_timeout=float(os.environ.get("STATBANK_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT))),
+        tool_timeout=float(os.environ.get("STATBANK_TOOL_TIMEOUT", str(DEFAULT_TOOL_TIMEOUT))),
     )
 
 
-def server_command() -> StdioServerParameters:
-    return StdioServerParameters(command=sys.executable, args=["-m", "statistikbanken_mcp"])
+def server_command(tool_timeout: float | None = None) -> StdioServerParameters:
+    env = dict(os.environ)
+    if tool_timeout is not None:
+        env["STATBANK_HTTP_TIMEOUT"] = str(tool_timeout)
+    return StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "statistikbanken_mcp"],
+        env=env,
+    )
 
 
 def list_server_tools() -> list[str]:
@@ -804,9 +1014,17 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
         raise LLMError("XAI_API_KEY mangler. Sæt den i miljøet eller i .env.")
 
     async def _run() -> TurnResult:
-        llm = ChatClient(settings.base_url, settings.api_key, settings.model, settings.timeout)
+        llm = ChatClient(
+            settings.base_url,
+            settings.api_key,
+            settings.model,
+            settings.llm_timeout,
+        )
         try:
-            async with Client(server_command(), read_timeout_seconds=settings.timeout) as client:
+            async with Client(
+                server_command(settings.tool_timeout),
+                read_timeout_seconds=settings.tool_timeout + 5,
+            ) as client:
                 runner = McpRunner(client)
                 await runner.prepare()
                 return await run_turn(
@@ -880,11 +1098,16 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             try:
                 result = answer(question)
             except LLMError as exc:
+                sys.stderr.write(f"Question failed: {type(exc).__name__}: {exc}\n")
                 self._json(502, {"error": str(exc)})
                 return
-            except Exception:
-                sys.stderr.write("Question failed.\n")
-                self._json(502, {"error": "Kunne ikke hente et svar."})
+            except Exception as exc:
+                sys.stderr.write(f"Question failed: {type(exc).__name__}: {exc}\n")
+                traceback.print_exc(file=sys.stderr)
+                if _is_timeout(exc):
+                    self._json(504, {"error": "Statistikbanken svarede ikke i tide."})
+                else:
+                    self._json(502, {"error": "Kunne ikke hente et svar."})
                 return
             self._json(
                 200,

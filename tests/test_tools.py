@@ -234,6 +234,51 @@ def test_string_codes_are_coerced_to_lists(calls: list[dict[str, object]]) -> No
     assert children["rows"][0]["ALDER"] == "0-17"
 
 
+def test_equivalent_age_expression_and_sum_from_are_one_request(
+    calls: list[dict[str, object]],
+) -> None:
+    result = hent_data(
+        "FOLK1A",
+        values={"OMRÅDE": ["230"], "ALDER": [">=80"]},
+        sum_from={"ALDER": "80"},
+    )
+    assert result["rows"][0]["ALDER"] == "80+"
+    assert result["rows"][0]["value"] == 5045
+    assert any("same request" in note for note in result["notes"])
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
+    assert len(ages) == 1
+    assert str(ages[0]).startswith("sum(80+")
+
+    as_text = hent_data(
+        "FOLK1A",
+        values={"OMRÅDE": "230", "ALDER": ">=80"},
+        sum_from={"ALDER": "80"},
+    )
+    assert as_text["rows"][0]["value"] == 5045
+
+
+def test_sum_from_nested_in_values_is_moved_out(calls: list[dict[str, object]]) -> None:
+    from statistikbanken_mcp.server import mcp
+
+    tool = mcp._tool_manager.get_tool("hent_data")
+    arguments = {"table": "FOLK1A", "values": {"OMRÅDE": "230", "sum_from": {"ALDER": "80"}}}
+    tool.fn_metadata.validate_arguments(arguments)
+    result = hent_data("FOLK1A", values=arguments["values"])
+    assert result["rows"][0]["value"] == 5045
+    assert any("Moved sum_from" in note for note in result["notes"])
+    assert "validation error" not in " ".join(result["notes"]).casefold()
+
+    with pytest.raises(ToolError, match="beside values") as caught:
+        hent_data("FOLK1A", values={"OMRÅDE": "230", "sum_from": "80"})
+    message = str(caught.value)
+    assert "sum_from" in message
+    assert 'sum_from {"ALDER": "80"}' in message
+    assert "pydantic" not in message.casefold()
+    assert "list_type" not in message
+
+
 def test_tabelinfo_filter_finds_a_value_past_the_cap() -> None:
     info = tabelinfo("FOLK1A", variable="OMRÅDE", values_filter="Silkeborg")
     assert info["variables"] == [
@@ -303,7 +348,7 @@ def test_sum_range_rejects_bad_bounds() -> None:
 
 def test_sum_from_and_bad_sum_arguments() -> None:
     with pytest.raises(ToolError, match="both values and sum_from"):
-        hent_data("FOLK1A", {"ALDER": ["80"]}, {"ALDER": "80"})
+        hent_data("FOLK1A", {"ALDER": ["IALT"]}, {"ALDER": "80"})
     with pytest.raises(ToolError, match="numeric code"):
         hent_data("FOLK1A", sum_from={"ALDER": "IALT"})
     with pytest.raises(ToolError, match=">= 200"):

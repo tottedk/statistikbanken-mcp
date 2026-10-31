@@ -121,9 +121,9 @@ def tabelinfo(
 @mcp.tool()
 def hent_data(
     table: str,
-    values: dict[str, list[str] | str] | None = None,
-    sum_from: dict[str, str] | None = None,
-    sum_range: dict[str, list[str] | str] | None = None,
+    values: dict[str, Any] | None = None,
+    sum_from: dict[str, Any] | None = None,
+    sum_range: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fetch observations from a Statistikbanken table.
 
@@ -157,9 +157,11 @@ def hent_data(
     to the second: that call is rejected. So is a time sum combined with
     several values, or with a range such as ">=80", because adding those
     cells would hide rows. For the change over time, pass
-    {"Tid": [">=2015K1"]} in values and use sum_from for ages. Do not also
-    put a summed variable in `values` or `sum_from`. ">=80" returns one row
-    per code.
+    {"Tid": [">=2015K1"]} in values and use sum_from for ages. A values entry
+    ">=80" together with sum_from {"ALDER": "80"} is the same sum: the values
+    entry is ignored and the result says so. sum_from and sum_range belong
+    beside values. If they are placed inside values, they are moved out.
+    ">=80" on its own returns one row per code.
 
     The result contains table, title, description, unit, periods, updated,
     source, and rows. Title, description, unit, and period say what the number

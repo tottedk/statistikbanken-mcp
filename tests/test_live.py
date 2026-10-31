@@ -51,6 +51,21 @@ def test_ambiguous_time_sum_is_rejected_live(live_client: StatbankClient) -> Non
     assert "Traceback" not in message
 
 
+def test_equivalent_age_sum_is_one_number_live(live_client: StatbankClient) -> None:
+    result = hent_data(
+        "FOLK1A",
+        values={"OMRÅDE": ["Rudersdal"], "ALDER": [">=80"], "Tid": ["(1)"]},
+        sum_from={"ALDER": "80"},
+    )
+    assert len(result["rows"]) == 1
+    row = result["rows"][0]
+    assert row["OMRÅDE"] == "Rudersdal"
+    assert row["ALDER"] == "80+"
+    assert isinstance(row["value"], int)
+    assert 1000 < row["value"] < 20000
+    assert any("same request" in note for note in result["notes"])
+
+
 def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
     info = tabelinfo("FOLK1A")
     tid = next(item for item in info["variables"] if item["id"] == "Tid")

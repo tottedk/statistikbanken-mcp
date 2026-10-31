@@ -12,8 +12,10 @@ import httpx
 import pytest
 
 from statistikbanken_mcp.web import (
+    NO_FETCHED_NUMBERS,
     PAGE,
     SYSTEM_PROMPT,
+    UNVERIFIED_NUMBERS,
     ChatClient,
     ChatReply,
     Limiter,
@@ -23,11 +25,14 @@ from statistikbanken_mcp.web import (
     ToolCall,
     ToolSpec,
     TurnResult,
+    _closing_instruction,
     _facts_from,
     _fallback_answer,
     _handler,
+    _turn,
     chart_series,
     facts_to_csv,
+    guard_answer,
     list_server_tools,
     run_turn,
     server_command,
@@ -148,10 +153,226 @@ def test_empty_final_answer_after_the_cap_names_the_limit() -> None:
 
 def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "same language as the question" in SYSTEM_PROMPT
+    assert "Do not answer in English when the question is Danish" in SYSTEM_PROMPT
+    assert "only the latest period" in SYSTEM_PROMPT
     assert "5.045" in SYSTEM_PROMPT
     assert "2026K3" in SYSTEM_PROMPT
     assert "2026Q3" in SYSTEM_PROMPT
     assert "Do not put Tid in sum_range" in SYSTEM_PROMPT
+    single = _closing_instruction("Hvor mange over 80 bor i Rudersdal?")
+    assert "Danish" in single
+    assert "latest period" in single
+    assert "do not invent" in single.casefold()
+    trend = _closing_instruction(
+        "Hvordan har antallet af 80+ i Rudersdal og Hørsholm udviklet sig siden 2015?"
+    )
+    assert "change over time" in trend
+    assert "Danish" in trend
+
+
+# Excerpts from the qwen2.5 retest (pr7r-ui-log), where the model wrote numbers
+# after hent_data failed and the page showed them with an empty fact list.
+_HALLUCINATED = {
+    "a1": (
+        "Data for Rudersdal og Hørsholm er summen af alle personer 80 år og over.\n"
+        '{"Tid": "2026K3", "OMRÅDE": "230", "ALDER": "80+", "value": 1234},\n'
+        '{"Tid": "2026K3", "OMRÅDE": "223", "ALDER": "80+", "value": 567}'
+    ),
+    "a2": (
+        "Jeg har hentet data for alle kvartaler siden 2015. "
+        "For Rudersdal starter antallet på 120 i 2015 og stiger til 345 i 2026, "
+        "mens for Hørsholm starter på 125 i 2015 og stiger til 340 i 2026."
+    ),
+    "a3": (
+        "antallet af 80+ i Rudersdal har øget fra 1234 i kvartal 1 2015 til 1300 i kvartal 4 2015"
+    ),
+    "a6": (
+        "For Rudersdal (område 230):\n- 2015K1: 1.125\n- 2026K3: 1.805\n"
+        "For Hørsholm (område 223):\n- 2015K1: 1.120\n- 2026K3: 1.810"
+    ),
+}
+_QUESTION_A = "Hvordan har antallet af 80+ i Rudersdal og Hørsholm udviklet sig siden 2015?"
+_ENGLISH_WITH_FACTS = (
+    "The population of people aged 80+ in Hørsholm has steadily increased "
+    "from 1,813 in 2016 to 2,697 in 2026. This represents a growth of "
+    "approximately 49.1% over the 10-year period. The population in 2025 "
+    "(2,629) is the highest. Average annual increase of about 5.2%. "
+    "A projected population of 2,743 in 2026."
+)
+
+
+def _population_fact(value: int, period: str = "2026K3", place: str = "Rudersdal") -> dict:
+    return {
+        "table": "FOLK1A",
+        "period": period,
+        "unit": "Antal",
+        "value": value,
+        "detail": f"OMRÅDE: {place}, ALDER: 80+",
+        "unpublished": False,
+        "url": "https://www.statistikbanken.dk/FOLK1A",
+    }
+
+
+def test_empty_facts_replace_the_hallucinated_answers() -> None:
+    for key, answer in _HALLUCINATED.items():
+        guarded = guard_answer(_QUESTION_A, answer, [])
+        assert guarded == NO_FETCHED_NUMBERS, key
+        assert "1234" not in guarded
+        assert "1.125" not in guarded
+        assert "1,813" not in guarded
+
+
+def test_hallucinated_turn_keeps_the_tool_trace_and_hides_the_numbers() -> None:
+    tools = FakeTools({})
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("hent_data", {"table": "FOLK1A"}, "c1")]),
+            ChatReply(_HALLUCINATED["a1"], []),
+        ]
+    )
+    result = asyncio.run(run_turn(model, tools, _QUESTION_A, max_tool_calls=8))
+    assert result.facts == []
+    assert result.csv == ""
+    assert result.answer == NO_FETCHED_NUMBERS
+    assert "1234" not in result.answer
+    assert result.calls[0]["name"] == "hent_data"
+
+
+def test_unverified_numbers_are_removed_when_facts_exist() -> None:
+    facts = [
+        _population_fact(3524, "2015K1"),
+        _population_fact(5045, "2026K3"),
+        _population_fact(1719, "2015K1", "Hørsholm"),
+        _population_fact(2790, "2026K3", "Hørsholm"),
+    ]
+    guarded = guard_answer(_QUESTION_A, _ENGLISH_WITH_FACTS, facts)
+    assert guarded == UNVERIFIED_NUMBERS
+    for invented in ("1,813", "2,697", "49.1", "5.2", "2,629", "2,743"):
+        assert invented not in guarded
+
+
+def test_single_fact_summary_does_not_depend_on_the_prose() -> None:
+    fact = _population_fact(5045)
+    question = "Hvor mange over 80 bor i Rudersdal?"
+    line = "5.045 (FOLK1A, 2026K3, Antal)"
+    honest = guard_answer(
+        question,
+        "Der bor 5.045 personer på 80 år eller derover i Rudersdal i 2026K3.",
+        [fact],
+    )
+    invented = guard_answer(question, "There are 9,999 people.", [fact])
+    english = guard_answer(question, "There are 5,045 people in 2026Q3.", [fact])
+    assert honest == invented == english == line
+
+
+def test_a_count_question_uses_only_the_latest_period() -> None:
+    facts = [
+        _population_fact(4200, "2016K3"),
+        _population_fact(5045, "2026K3"),
+        _population_fact(2100, "2016K3", "Hørsholm"),
+        _population_fact(2790, "2026K3", "Hørsholm"),
+    ]
+    answer = guard_answer(
+        "Hvor mange over 80 bor i Rudersdal?",
+        "In 2016K3 there were 4,200 and in 2026K3 there were 5,045.",
+        facts,
+    )
+    assert answer == "5.045 (FOLK1A, 2026K3, Antal)\n2.790 (FOLK1A, 2026K3, Antal)"
+    assert "2016" not in answer
+    assert "4.200" not in answer
+
+
+def test_a_danish_refusal_without_new_numbers_is_kept() -> None:
+    answer = "Narnia er ikke et område i statistikken. Der er ingen tal for den kommune."
+    assert guard_answer("Hvor mange bor i Narnia?", answer, []) == answer
+    repeated = guard_answer(
+        "Hvor mange over 80 bor i Rudersdal?",
+        "Jeg kan ikke slå 80 år op uden en tabel.",
+        [],
+    )
+    assert repeated.startswith("Jeg kan ikke")
+
+
+def test_each_question_starts_a_fresh_conversation() -> None:
+    class RecordingModel:
+        def __init__(self) -> None:
+            self.seen: list[str] = []
+
+        def complete(self, messages: list[dict], tools: list[dict] | None) -> ChatReply:
+            self.seen.append("\n".join(str(item.get("content") or "") for item in messages))
+            return ChatReply("Ingen tal her.", [])
+
+    tools = FakeTools({})
+    model = RecordingModel()
+    first = asyncio.run(run_turn(model, tools, "Hvor mange bor i Silkeborg?", max_tool_calls=4))
+    second = asyncio.run(run_turn(model, tools, "Hvor mange bor i Rudersdal?", max_tool_calls=4))
+    assert "Silkeborg" in model.seen[0]
+    assert "Silkeborg" not in model.seen[1]
+    assert "Rudersdal" in model.seen[1]
+    assert "latest period" in model.seen[1]
+    assert "Danish" in model.seen[1]
+    assert first.answer == "Ingen tal her."
+    assert second.answer == "Ingen tal her."
+
+
+def test_llm_timeout_is_distinct_from_a_statbank_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def time_out(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("model hung")
+
+    http = httpx.Client(transport=httpx.MockTransport(time_out))
+    client = ChatClient("http://127.0.0.1:11434/v1", "ollama", "qwen2.5", 1, http=http)
+    with pytest.raises(LLMError, match="Modellen svarede ikke i tide"):
+        client.complete([{"role": "user", "content": "hej"}], [])
+
+    settings = Settings(
+        llm="ollama",
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen2.5",
+        api_key="ollama",
+        host="127.0.0.1",
+        port=0,
+        daily_cap=10,
+        per_minute=10,
+        max_question_chars=100,
+        max_tool_calls=2,
+        llm_timeout=5,
+        tool_timeout=30,
+    )
+
+    def explode(question: str) -> TurnResult:
+        raise TimeoutError(f"Statistikbanken stalled on {question}")
+
+    handler = _handler(settings, Limiter(10, 10), explode)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    try:
+        response = _post(port, {"question": "hej"})
+        assert response.status == 504
+        body = json.loads(response.read().decode())
+        assert body["error"] == "Statistikbanken svarede ikke i tide."
+    finally:
+        server.shutdown()
+    logged = capsys.readouterr().err
+    assert "TimeoutError" in logged
+    assert "Statistikbanken stalled" in logged
+
+
+def test_timeout_defaults_are_split(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("STATBANK_LLM_TIMEOUT", raising=False)
+    monkeypatch.delenv("STATBANK_TOOL_TIMEOUT", raising=False)
+    monkeypatch.delenv("STATBANK_TIMEOUT", raising=False)
+    settings = settings_from_env([])
+    assert settings.llm_timeout == 45
+    assert settings.tool_timeout == 30
+
+
+def test_csv_button_is_hidden_without_facts() -> None:
+    assert "data.facts && data.facts.length && data.csv" in PAGE
+    assert _turn("Hvor mange bor i Narnia?", "Ingen tal.", [], []).csv == ""
 
 
 def test_chart_keeps_the_last_period_inside_the_frame() -> None:
@@ -236,7 +457,8 @@ def test_http_rejects_long_questions_and_the_rate_limit() -> None:
         per_minute=1,
         max_question_chars=20,
         max_tool_calls=2,
-        timeout=5,
+        llm_timeout=5,
+        tool_timeout=5,
     )
 
     def answer(question: str) -> TurnResult:
