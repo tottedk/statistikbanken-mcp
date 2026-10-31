@@ -93,6 +93,17 @@ def test_api_rejects_a_bad_sum_expression(calls: list[dict[str, object]]) -> Non
     assert data_calls
 
 
+def test_sum_range_rejects_bad_bounds() -> None:
+    with pytest.raises(ToolError, match="lower code to a higher one"):
+        hent_data("FOLK1A", sum_range={"ALDER": ["17", "0"]})
+    with pytest.raises(ToolError, match="two numeric codes"):
+        hent_data("FOLK1A", sum_range={"ALDER": ["0"]})
+    with pytest.raises(ToolError, match="sum_range and also"):
+        hent_data("FOLK1A", {"ALDER": ["IALT"]}, sum_range={"ALDER": ["0", "17"]})
+    with pytest.raises(ToolError, match="between 200 and 210"):
+        hent_data("FOLK1A", sum_range={"ALDER": ["200", "210"]})
+
+
 def test_sum_from_and_bad_sum_arguments() -> None:
     with pytest.raises(ToolError, match="both values and sum_from"):
         hent_data("FOLK1A", {"ALDER": ["80"]}, {"ALDER": "80"})

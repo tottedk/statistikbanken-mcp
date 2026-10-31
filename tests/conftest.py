@@ -41,6 +41,10 @@ def _handler(calls: list[dict[str, object]]) -> httpx.MockTransport:
             table = str(body.get("table", "")).strip().casefold()
             if table == "folk1a":
                 return _response(200, "tableinfo_FOLK1A.json")
+            if table == "indkp105":
+                return _response(200, "tableinfo_INDKP105.json")
+            if table == "idrfor01":
+                return _response(200, "tableinfo_IDRFOR01.json")
             if table == "notatable":
                 return _response(400, "tableinfo_NOTATABLE.json")
             return httpx.Response(500, json={"message": f"no tableinfo fixture for {table}"})
@@ -52,12 +56,19 @@ def _handler(calls: list[dict[str, object]]) -> httpx.MockTransport:
 
 
 def _data_response(body: dict[str, object]) -> httpx.Response:
+    table = str(body.get("table", "")).upper()
+    if table == "INDKP105":
+        return _response(200, "data_indkp105.json")
+    if table == "IDRFOR01":
+        return _response(200, "data_idrfor01.json")
     variables = {
         item["code"]: item["values"] for item in body.get("variables", []) if isinstance(item, dict)
     }
     alder = (variables.get("ALDER") or [""])[0]
     areas = variables.get("OMRÅDE") or []
     tid = variables.get("Tid") or []
+    if isinstance(alder, str) and alder.startswith("sum(0-17") and areas == ["230", "223"]:
+        return _response(200, "data_children_0_17.json")
     if isinstance(alder, str) and "99999" in alder:
         return _response(400, "data_bad_sum.json")
     if isinstance(alder, str) and alder.startswith("sum(80+"):

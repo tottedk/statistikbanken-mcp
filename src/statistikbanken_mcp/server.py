@@ -20,11 +20,14 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 INSTRUCTIONS = (
     "Tools for Danmarks Statistik (Statistikbanken). "
     "Search with find_tabel, read value codes with tabelinfo, then fetch with hent_data. "
-    "Ages in FOLK1A are single years from 0 to 125. To total an age group such as "
-    '80 and older, pass sum_from, for example {"ALDER": "80"}. The API then '
-    'returns one summed figure. A value like ">=80" does not sum; it returns '
-    'every age on its own row. Omit Tid or pass "(1)" for the latest period. '
-    'A span such as ">=2016K3" selects every period from that quarter onward.'
+    "The table title, description, unit, and period say what a number measures. "
+    "If they only partly cover the question, say so. "
+    "Ages in FOLK1A are single years from 0 to 125. "
+    'sum_from {"ALDER": "80"} totals 80 and older. '
+    'sum_range {"ALDER": ["0", "17"]} totals a closed range. '
+    'A value like ">=80" returns every age on its own row. '
+    'Omit Tid or pass "(1)" for the latest period. '
+    '">=2016K3" selects every period from that quarter onward.'
 )
 
 mcp = MCPServer("statistikbanken", instructions=INSTRUCTIONS)
@@ -68,9 +71,11 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
 
     Matches table id, title, and variable names. Matching is not case-sensitive.
     "befolkning" returns FOLK1A near the top. `limit` is 1–25 and defaults to 10.
-    Each hit has id, title, unit, latest_period, and variables. The variable
-    entries are names, not the codes hent_data expects; call tabelinfo for codes.
-    An empty list means nothing matched.
+    Each hit has id, title, unit, latest_period, and variables. The title is the
+    table's own wording and can be narrower than the query: a search for
+    associations can return a sports-club table. Read the title, then tabelinfo,
+    before treating the hit as the answer. Variable entries are names, not the
+    codes hent_data expects. An empty list means nothing matched.
     """
     return _guard(lambda: get_client().find_tables(query, limit=limit))
 
@@ -79,6 +84,10 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
 def tabelinfo(table: str) -> dict[str, Any]:
     """Describe one table: its variables and the value codes hent_data accepts.
 
+    Compare title, description, and unit with the question before fetching.
+    They say what the table measures. Value labels do too: "Medlemmer" is a
+    count of memberships, and "Gennemsnit for personer i gruppen (kr.)" is the
+    unit when the table's own unit is "-".
     Long runs of numeric codes are collapsed. On FOLK1A, ALDER has numeric_codes
     from "0" to "125" (the code is the age) plus the separate code IALT
     ("Alder i alt"). OMRÅDE, KØN, CIVILSTAND, and Tid are listed in full.
@@ -93,6 +102,7 @@ def hent_data(
     table: str,
     values: dict[str, list[str]] | None = None,
     sum_from: dict[str, str] | None = None,
+    sum_range: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Fetch observations from a Statistikbanken table.
 
@@ -108,13 +118,21 @@ def hent_data(
 
     `sum_from` maps a variable id to a numeric code. Every numeric code from
     that one upward is added, by the API, into a single figure. For FOLK1A,
-    {"ALDER": "80"} is everyone aged 80 through 125, labelled "80+". Do not
-    also put ALDER in `values`, and do not pass ">=80" expecting a total.
+    {"ALDER": "80"} is everyone aged 80 through 125, labelled "80+".
 
-    The result contains table, title, unit, updated, source, and rows. Each
-    row uses variable ids as keys and labels as text, plus `value`.
+    `sum_range` maps a variable id to two numeric codes, low then high,
+    inclusive. {"ALDER": ["0", "17"]} is everyone aged 0 through 17, labelled
+    "0-17", as one figure. Do not also put that variable in `values` or
+    `sum_from`. ">=80" is not a total; it returns one row per code.
+
+    The result contains table, title, description, unit, periods, updated,
+    source, and rows. Title, description, unit, and period say what the number
+    measures. If unit is "-", the selected value labels carry the measurement,
+    for example "Gennemsnit for personer i gruppen (kr.)". If those words only
+    partly cover the question, say so. Each row uses variable ids as keys and
+    labels as text, plus `value`.
     """
-    return _guard(lambda: get_client().fetch(table, values, sum_from))
+    return _guard(lambda: get_client().fetch(table, values, sum_from, sum_range))
 
 
 def main() -> None:

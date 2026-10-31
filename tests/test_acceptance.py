@@ -1,6 +1,7 @@
-"""The three questions this server exists to answer, on recorded responses.
+"""The questions this server exists to answer, on recorded responses.
 
-Numbers are the FOLK1A release of 2026-08-10 (latest period 2026K3).
+Population figures are the FOLK1A release of 2026-08-10 (latest period 2026K3).
+Income is INDKP105 for 2025, updated 2026-10-02. Sports clubs are IDRFOR01 for 2025.
 """
 
 from statistikbanken_mcp.server import find_tabel, hent_data, tabelinfo
@@ -102,6 +103,108 @@ def test_which_municipality_has_the_most_people_over_80() -> None:
     by_name = {row["OMRÅDE"]: row["value"] for row in result["rows"]}
     assert by_name == {"Rudersdal": 5045, "Hørsholm": 2790, "Gentofte": 5486}
     assert max(by_name, key=by_name.get) == "Gentofte"
+
+
+def test_children_0_to_17_in_rudersdal_and_horsholm(calls: list[dict[str, object]]) -> None:
+    _folk1a()
+    result = hent_data(
+        "FOLK1A",
+        values={
+            "OMRÅDE": ["230", "223"],
+            "KØN": ["TOT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": ["2026K3"],
+        },
+        sum_range={"ALDER": ["0", "17"]},
+    )
+    assert result["unit"] == "Antal"
+    assert result["periods"] == ["2026K3"]
+    assert result["rows"] == [
+        {
+            "OMRÅDE": "Rudersdal",
+            "KØN": "I alt",
+            "ALDER": "0-17",
+            "CIVILSTAND": "I alt",
+            "Tid": "2026K3",
+            "value": 12770,
+        },
+        {
+            "OMRÅDE": "Hørsholm",
+            "KØN": "I alt",
+            "ALDER": "0-17",
+            "CIVILSTAND": "I alt",
+            "Tid": "2026K3",
+            "value": 4916,
+        },
+    ]
+    alder = _values(_data_body(calls), "ALDER")
+    assert len(alder) == 1
+    assert alder[0].startswith("sum(0-17|0-17=0;1;")
+    assert alder[0].endswith(";17)")
+
+
+def test_average_income_in_rudersdal_and_horsholm() -> None:
+    hits = find_tabel("indkomst", limit=15)
+    match = next(hit for hit in hits if hit["id"] == "INDKP105")
+    assert match["title"] == "Indkomst i alt"
+    assert match["unit"] == "-"
+    assert match["latest_period"] == "2025"
+    info = tabelinfo("INDKP105")
+    enhed = next(item for item in info["variables"] if item["id"] == "ENHED")
+    labels = {item["id"]: item["text"] for item in enhed["values"]}
+    assert labels["118"] == "Gennemsnit for personer i gruppen (kr.)"
+    result = hent_data(
+        "INDKP105",
+        values={
+            "OMRÅDE": ["230", "223"],
+            "ENHED": ["118"],
+            "KOEN": ["MOK"],
+            "ALDER1": ["00"],
+            "INDKINTB": ["000"],
+            "Tid": ["2025"],
+        },
+    )
+    assert result["title"] == "Indkomst i alt"
+    assert result["unit"] == "-"
+    assert result["periods"] == ["2025"]
+    by_name = {row["OMRÅDE"]: row for row in result["rows"]}
+    assert set(by_name) == {"Rudersdal", "Hørsholm"}
+    for row in result["rows"]:
+        assert row["ENHED"] == "Gennemsnit for personer i gruppen (kr.)"
+        assert row["Tid"] == "2025"
+    assert by_name["Rudersdal"]["value"] == 757969
+    assert by_name["Hørsholm"]["value"] == 679635
+
+
+def test_association_membership_nearest_table_is_sports_clubs() -> None:
+    hits = find_tabel("forening")
+    by_id = {hit["id"]: hit for hit in hits}
+    assert by_id["IDRFOR01"]["title"] == "Idrætsforeninger og medlemmer"
+    assert by_id["IDRFOR01"]["unit"] == "Antal"
+    assert by_id["IDRFOR01"]["latest_period"] == "2025"
+    assert by_id["KV2FR3"]["title"] == "Foreningsmedlemskab"
+    info = tabelinfo("IDRFOR01")
+    assert info["title"] == "Idrætsforeninger og medlemmer"
+    assert "Idrætsforeninger" in info["description"]
+    key_figures = next(item for item in info["variables"] if item["id"] == "AKTP")
+    labels = {item["id"]: item["text"] for item in key_figures["values"]}
+    assert labels == {"104": "Foreninger", "105": "Medlemmer"}
+    result = hent_data(
+        "IDRFOR01",
+        values={
+            "BLSTKOM": ["230"],
+            "ORGANISATION": ["100"],
+            "AKTP": ["104", "105"],
+            "Tid": ["2025"],
+        },
+    )
+    assert "idræt" in result["title"].casefold()
+    assert "idræt" in result["description"].casefold()
+    assert result["unit"] == "Antal"
+    assert result["periods"] == ["2025"]
+    by_measure = {row["AKTP"]: row["value"] for row in result["rows"]}
+    assert by_measure == {"Foreninger": 83, "Medlemmer": 29632}
+    assert all(row["BLSTKOM"] == "Rudersdal" and row["Tid"] == "2025" for row in result["rows"])
 
 
 def _data_body(calls: list[dict[str, object]]) -> dict[str, object]:

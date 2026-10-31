@@ -104,6 +104,79 @@ def test_question_three_municipalities(live_client: StatbankClient) -> None:
     assert sum(value == by_name[winner] for value in by_name.values()) == 1
 
 
+def test_question_children_0_to_17(live_client: StatbankClient) -> None:
+    result = hent_data(
+        "FOLK1A",
+        values={
+            "OMRÅDE": ["230", "223"],
+            "KØN": ["TOT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": ["(1)"],
+        },
+        sum_range={"ALDER": ["0", "17"]},
+    )
+    assert result["periods"]
+    assert len(result["rows"]) == 2
+    by_name = {row["OMRÅDE"]: row["value"] for row in result["rows"]}
+    assert set(by_name) == {"Rudersdal", "Hørsholm"}
+    assert all(row["ALDER"] == "0-17" for row in result["rows"])
+    assert all(isinstance(value, int) and 1000 < value < 20000 for value in by_name.values())
+    assert by_name["Rudersdal"] > by_name["Hørsholm"]
+
+
+def test_question_average_income(live_client: StatbankClient) -> None:
+    hits = find_tabel("indkomst", limit=15)
+    assert any(hit["id"] == "INDKP105" and hit["latest_period"] for hit in hits)
+    result = hent_data(
+        "INDKP105",
+        values={
+            "OMRÅDE": ["230", "223"],
+            "ENHED": ["118"],
+            "KOEN": ["MOK"],
+            "ALDER1": ["00"],
+            "INDKINTB": ["000"],
+            "Tid": ["2025"],
+        },
+    )
+    assert result["title"]
+    assert result["unit"] == "-"
+    assert result["periods"] == ["2025"]
+    by_name = {row["OMRÅDE"]: row for row in result["rows"]}
+    assert set(by_name) == {"Rudersdal", "Hørsholm"}
+    for row in by_name.values():
+        assert row["ENHED"] == "Gennemsnit for personer i gruppen (kr.)"
+        assert isinstance(row["value"], int)
+        assert 100_000 < row["value"] < 5_000_000
+
+
+def test_question_association_membership_is_sports_clubs(live_client: StatbankClient) -> None:
+    hits = find_tabel("forening")
+    sports = next(hit for hit in hits if hit["id"] == "IDRFOR01")
+    assert "idræt" in sports["title"].casefold()
+    assert sports["unit"] == "Antal"
+    assert sports["latest_period"]
+    info = tabelinfo("IDRFOR01")
+    assert "idræt" in info["description"].casefold()
+    result = hent_data(
+        "IDRFOR01",
+        values={
+            "BLSTKOM": ["230"],
+            "ORGANISATION": ["100"],
+            "AKTP": ["104", "105"],
+            "Tid": ["(1)"],
+        },
+    )
+    assert "idræt" in result["title"].casefold()
+    assert "idræt" in result["description"].casefold()
+    assert result["unit"] == "Antal"
+    assert result["periods"]
+    by_measure = {row["AKTP"]: row["value"] for row in result["rows"]}
+    assert set(by_measure) == {"Foreninger", "Medlemmer"}
+    assert isinstance(by_measure["Foreninger"], int) and by_measure["Foreninger"] < 500
+    assert isinstance(by_measure["Medlemmer"], int) and by_measure["Medlemmer"] > 1000
+    assert all(row["BLSTKOM"] == "Rudersdal" for row in result["rows"])
+
+
 def test_live_invalid_input_is_actionable(live_client: StatbankClient) -> None:
     with pytest.raises(ToolError, match="Unknown table 'NOTATABLE'") as caught:
         tabelinfo("NOTATABLE")

@@ -1,0 +1,108 @@
+{
+  "dataset": {
+    "dimension": {
+      "BLSTKOM": {
+        "label": "område",
+        "category": {
+          "index": {
+            "230": 0
+          },
+          "label": {
+            "230": "Rudersdal"
+          }
+        }
+      },
+      "ORGANISATION": {
+        "label": "organisation",
+        "category": {
+          "index": {
+            "100": 0
+          },
+          "label": {
+            "100": "I alt"
+          }
+        }
+      },
+      "AKTP": {
+        "label": "nøgletal",
+        "category": {
+          "index": {
+            "104": 0,
+            "105": 1
+          },
+          "label": {
+            "104": "Foreninger",
+            "105": "Medlemmer"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "IDRFOR01": 0
+          },
+          "label": {
+            "IDRFOR01": "Idrætsforeninger og medlemmer"
+          },
+          "unit": {
+            "IDRFOR01": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2025": 0
+          },
+          "label": {
+            "2025": "2025"
+          }
+        }
+      },
+      "id": [
+        "BLSTKOM",
+        "ORGANISATION",
+        "AKTP",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        2,
+        1,
+        1
+      ],
+      "role": {
+        "geo": [
+          "BLSTKOM"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Idrætsforeninger og medlemmer efter område, organisation, nøgletal, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-06-02T06:00:00Z",
+    "value": [
+      83,
+      29632
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/53db5cb7-a4a4-434d-b116-cd0bfadf8f4b",
+        "tableid": "IDRFOR01",
+        "decimals": 0
+      }
+    }
+  }
+}
