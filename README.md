@@ -58,7 +58,7 @@ Free-text search over table id, title, and variable names.
 find_tabel(query="befolkning", limit=5)
 ```
 
-Returns `id`, `title`, `unit`, `latest_period`, and `variables` (names, not codes). `befolkning` returns FOLK1A first. `limit` is 1–25, default 10.
+Returns `id`, `title`, `unit`, `latest_period`, and `variables` (names, not codes). Matching does not require every word. A few everyday synonyms are built in (`bruttoledighed`, `huspriser`, `husdyr`, `population`, `indbrud`). A municipality name such as Silkeborg is matched against FOLK1A and returned with its code in `matched_values`. If nothing matches, the tool returns an error instead of an empty list. `befolkning` returns FOLK1A first. `limit` is 1–25, default 10.
 
 ### `tabelinfo`
 
@@ -68,13 +68,15 @@ Variables and the value codes `hent_data` accepts.
 tabelinfo(table="FOLK1A")
 ```
 
-On FOLK1A that is OMRÅDE (including Rudersdal `230`, Hørsholm `223`, Gentofte `157`), KØN, ALDER as single years `0`–`125` plus `IALT`, CIVILSTAND, and Tid (for example `2026K3`). A long run of numeric codes is collapsed to `numeric_codes` instead of listing every year.
+On FOLK1A that is OMRÅDE (including Rudersdal `230`, Hørsholm `223`, Gentofte `157`), KØN, ALDER as single years `0`–`125` plus `IALT`, CIVILSTAND, and Tid. Time is a `time_span` with first, last, and count, not every period. Other long value lists are capped; `values_filter` looks up the rest, for example `variable="OMRÅDE", values_filter="Silkeborg"`.
 
 ### `hent_data`
 
-Fetch rows for a table. Omitted variables are dropped by the API (the total remains, for example both sexes). Omitting Tid returns the latest period, same as `"(1)"`.
+Fetch rows for a table. Omitted variables are dropped by the API when they have a total (for example both sexes). A required variable with one total is filled in and listed under `defaults`. A required variable with no total returns its codes instead of a raw API error. Omitting Tid returns the latest period, same as `"(1)"`.
 
-`>=80` returns one row per year. `sum_from` asks the API to add every numeric code from that code upward into one figure. `sum_range` does the same for a closed range, low then high:
+Values may be codes or labels (`Silkeborg`, `København`, `kobenhavn`). A near miss lists the closest labels. A period that is not in the table names the latest one.
+
+`>=80` returns one row per year. `sum_from` adds every numeric code from that code upward. `sum_range` is either two numeric ends or a list of codes to add:
 
 ```text
 hent_data(
@@ -99,7 +101,7 @@ hent_data(
 )
 ```
 
-Those rows are labelled `0-17`. A period range such as `">=2016K3"` returns every matching period as its own row.
+Those rows are labelled `0-17`. The same argument adds explicit codes, for example age bands `["25-29", "30-34"]` or quarters `["2023K1", "2023K2", "2023K3", "2023K4"]`. A period range such as `">=2016K3"` returns every matching period as its own row. A trailing `0` with `unpublished: true` is a period the API has not published yet.
 
 The result includes `title`, `description`, `unit`, and `periods`. Read them before answering. A search hit can be narrower than the question: `forening` returns both `Foreningsmedlemskab` and `Idrætsforeninger og medlemmer`, and only the title says which one it is. When `unit` is `-`, the selected value label carries the measurement, such as average income in kroner.
 

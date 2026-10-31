@@ -8,6 +8,7 @@ older" has to be requested with the API's own ``sum()`` syntax. Passing
 
 from __future__ import annotations
 
+import difflib
 import json
 import re
 import threading
@@ -18,6 +19,70 @@ import httpx
 
 BASE_URL = "https://api.statbank.dk/v1"
 USER_AGENT = "statistikbanken-mcp/0.1"
+VALUE_LIST_CAP = 50
+
+# Everyday words and a few English ones, only where the table title uses another term.
+_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "bruttoledighed": ("fuldtidsledige",),
+    "unemployment": ("fuldtidsledige",),
+    "population": ("befolkning",),
+    "people": ("befolkning",),
+    "inhabitants": ("befolkning",),
+    "huspriser": ("ejendomssalg",),
+    "husdyr": ("dyr",),
+    "livestock": ("dyr",),
+    "cattle": ("dyr",),
+    "indbrud": ("forbrydelser",),
+    "burglary": ("forbrydelser",),
+    "studerende": ("uddannelse",),
+    "students": ("uddannelse",),
+    "indvandrere": ("indvandr",),
+    "immigrants": ("indvandr",),
+    "income": ("indkomst",),
+    "kommune": ("område",),
+    "denmark": ("danmark",),
+    "danish": ("danmark",),
+}
+_STOPWORDS = frozenset(
+    {
+        "og",
+        "i",
+        "på",
+        "af",
+        "til",
+        "med",
+        "for",
+        "den",
+        "det",
+        "der",
+        "som",
+        "en",
+        "et",
+        "er",
+        "var",
+        "har",
+        "hvor",
+        "mange",
+        "hvordan",
+        "hvad",
+        "the",
+        "of",
+        "in",
+        "on",
+        "a",
+        "an",
+        "to",
+        "and",
+        "how",
+        "many",
+        "what",
+        "live",
+        "lives",
+        "there",
+        "are",
+        "is",
+    }
+)
 
 _TABLE_MISSING = re.compile(r"Tabel findes ikke:\s*(.*?)\s*$")
 _VARIABLE_MISSING = re.compile(r"Kan ikke finde variablen:\s*(.*?)\s*$")
@@ -26,6 +91,10 @@ _VALUE_MISSING = re.compile(r"Kan ikke finde værdien:\s*(.*?)\s*\((.*?)\)\s*$")
 
 class StatbankError(Exception):
     """A failure the caller can correct, with a message and no traceback."""
+
+
+class SumNotAllowed(StatbankError):
+    """The API refused sum() for this variable. The caller can add the rows."""
 
 
 @dataclass(frozen=True)
@@ -85,19 +154,65 @@ class StatbankClient:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 25:
             raise StatbankError("limit must be an integer from 1 to 25.")
 
-        tokens = query.casefold().split()
+        tokens = _query_tokens(query)
         folded = query.casefold().strip()
+        places = self._matching_places(tokens)
         ranked: list[tuple[int, int, dict[str, Any]]] = []
         for index, table in enumerate(self._table_list()):
             score = _score_table(table, tokens, folded)
+            place_hit = places if str(table.get("id")) == "FOLK1A" else []
+            if place_hit:
+                score = (score or 0) + 250
             if score is None:
                 continue
-            ranked.append((score, -index, _public_table(table)))
+            hit = _public_table(table)
+            if place_hit:
+                hit["matched_values"] = [
+                    {"variable": "OMRÅDE", "id": item["id"], "text": item["text"]}
+                    for item in place_hit[:5]
+                ]
+            ranked.append((score, -index, hit))
+        if not ranked:
+            raise StatbankError(
+                f"No table matches {query.strip()!r}. Try fewer words, or a subject such as "
+                "'befolkning', 'indkomst' or 'priser'. A place or category name is a value "
+                "inside a table: search the subject, then pass the name to hent_data."
+            )
         ranked.sort(reverse=True)
         return [item for _, _, item in ranked[:limit]]
 
-    def table_info(self, table: str) -> dict[str, Any]:
-        return _public_metadata(self._metadata_for(table))
+    def table_info(
+        self,
+        table: str,
+        *,
+        variable: str | None = None,
+        values_filter: str | None = None,
+    ) -> dict[str, Any]:
+        return _public_metadata(
+            self._metadata_for(table),
+            variable=variable,
+            values_filter=values_filter,
+        )
+
+    def _matching_places(self, tokens: list[str]) -> list[dict[str, str]]:
+        try:
+            metadata = self._metadata_for("FOLK1A")
+        except StatbankError:
+            return []
+        area = metadata.variable("OMRÅDE")
+        if area is None:
+            return []
+        found: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for token in tokens:
+            folded = _fold(token)
+            for item in area.values:
+                if item["id"] in seen:
+                    continue
+                if _fold(item["text"]) == folded or _fold(item["id"]) == folded:
+                    found.append(item)
+                    seen.add(item["id"])
+        return found
 
     def fetch(
         self,
@@ -107,7 +222,8 @@ class StatbankClient:
         sum_range: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         metadata = self._metadata_for(table)
-        selections = _build_selections(metadata, values, sum_from, sum_range)
+        selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
+        assumed = _fill_required(metadata, selections)
         variables = [{"code": code, "values": selected} for code, selected in selections.items()]
         payload: dict[str, Any] = {
             "table": metadata.id,
@@ -117,21 +233,47 @@ class StatbankClient:
         }
         if variables:
             payload["variables"] = variables
-        data = self._post("data", payload)
-        rows = _rows_from_jsonstat(data)
-        source = None
-        if isinstance(data, dict):
-            source = (data.get("dataset") or {}).get("source")
-        return {
+        source = "Danmarks Statistik"
+        try:
+            data = self._post("data", payload)
+        except SumNotAllowed:
+            rows = self._fetch_sum_locally(payload, explicit)
+        else:
+            rows = _rows_from_jsonstat(data)
+            if isinstance(data, dict):
+                source = (data.get("dataset") or {}).get("source") or source
+        _flag_unpublished(rows)
+        result = {
             "table": metadata.id,
             "title": metadata.title,
             "description": metadata.description,
             "unit": metadata.unit,
             "updated": metadata.updated,
             "periods": _periods(metadata, rows),
-            "source": source or "Danmarks Statistik",
+            "source": source,
             "rows": rows,
         }
+        if assumed:
+            result["defaults"] = assumed
+        return result
+
+    def _fetch_sum_locally(
+        self,
+        payload: dict[str, Any],
+        explicit: dict[str, list[str]],
+    ) -> list[dict[str, Any]]:
+        if len(explicit) != 1:
+            raise StatbankError(
+                "Statistikbanken cannot add these codes. Request them in values and add the rows."
+            )
+        variable_id, codes = next(iter(explicit.items()))
+        variables = []
+        for item in payload.get("variables", []):
+            selected = codes if item["code"] == variable_id else item["values"]
+            variables.append({"code": item["code"], "values": selected})
+        expanded = {**payload, "variables": variables}
+        data = self._post("data", expanded)
+        return _sum_rows(_rows_from_jsonstat(data), variable_id, codes)
 
     def _table_list(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -177,12 +319,34 @@ class StatbankClient:
                 "Could not reach Statistikbanken (https://api.statbank.dk). Try again."
             ) from exc
         if response.status_code >= 400:
-            message = _message_from_api_error(_json_or_none(response), response.status_code)
+            payload_error = _json_or_none(response)
+            raw = ""
+            if isinstance(payload_error, dict) and payload_error.get("message"):
+                raw = str(payload_error["message"])
+            message = _message_from_api_error(payload_error, response.status_code)
+            if "ikke tilladt" in raw.casefold() and "sum" in raw.casefold():
+                raise SumNotAllowed(message)
             raise StatbankError(message)
         try:
             return response.json()
         except json.JSONDecodeError as exc:
             raise StatbankError("Statistikbanken returned a response that was not JSON.") from exc
+
+
+def _query_tokens(query: str) -> list[str]:
+    parts = [part for part in query.casefold().split() if part]
+    kept = [part for part in parts if part not in _STOPWORDS and len(part) >= 3]
+    return kept or parts
+
+
+def _expansions(token: str) -> tuple[str, ...]:
+    return (token, *_SYNONYMS.get(token, ()))
+
+
+def _contains_token(haystack: str, token: str) -> bool:
+    if len(token) >= 4:
+        return token in haystack
+    return re.search(rf"(?<!\w){re.escape(token)}(?!\w)", haystack) is not None
 
 
 def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int | None:
@@ -195,17 +359,26 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
     score = 0
     if haystack_id == folded:
         score += 1000
-    elif folded in haystack_id:
+    elif folded and _contains_token(haystack_id, folded):
         score += 200
+    matched = 0
     for token in tokens:
-        if token in haystack_id:
-            score += 50
-        elif token in haystack_title:
-            score += 30
-        elif token in haystack_variables:
-            score += 10
-        else:
-            return None
+        best = 0
+        for alt in _expansions(token):
+            if _contains_token(haystack_id, alt):
+                best = max(best, 80)
+            elif _contains_token(haystack_title, alt):
+                best = max(best, 40)
+            elif _contains_token(haystack_variables, alt):
+                best = max(best, 15)
+        if best:
+            matched += 1
+            score += best
+    if matched == 0 and score < 1000:
+        return None
+    score += matched * 25
+    if tokens and matched == len(tokens):
+        score += 30
     if table.get("active") is True:
         score += 5
     return score
@@ -254,7 +427,21 @@ def _parse_table(data: Any) -> _Table:
     )
 
 
-def _public_metadata(table: _Table) -> dict[str, Any]:
+def _public_metadata(
+    table: _Table,
+    *,
+    variable: str | None = None,
+    values_filter: str | None = None,
+) -> dict[str, Any]:
+    chosen = table.variables
+    if variable is not None and str(variable).strip():
+        match = table.variable(str(variable))
+        if match is None:
+            known = ", ".join(item.id for item in table.variables)
+            raise StatbankError(
+                f"Unknown variable '{variable}' on table {table.id}. Known variables: {known}."
+            )
+        chosen = (match,)
     return {
         "id": table.id,
         "title": table.title,
@@ -262,21 +449,50 @@ def _public_metadata(table: _Table) -> dict[str, Any]:
         "unit": table.unit,
         "updated": table.updated,
         "active": table.active,
-        "variables": [_public_variable(variable) for variable in table.variables],
+        "variables": [_public_variable(item, values_filter=values_filter) for item in chosen],
     }
 
 
-def _public_variable(variable: _Variable) -> dict[str, Any]:
-    numeric, explicit = _split_numeric_run(variable.values)
+def _public_variable(variable: _Variable, *, values_filter: str | None = None) -> dict[str, Any]:
     published: dict[str, Any] = {
         "id": variable.id,
         "text": variable.text,
         "eliminable": variable.eliminable,
         "time": variable.time,
-        "values": explicit,
     }
+    total = _unique_total(variable)
+    if total is not None:
+        published["total"] = {"id": total["id"], "text": total["text"]}
+    needle = values_filter.casefold().strip() if values_filter and values_filter.strip() else ""
+    if variable.time and not needle:
+        values = variable.values
+        if values:
+            published["time_span"] = {
+                "first": {"id": values[0]["id"], "text": values[0]["text"]},
+                "last": {"id": values[-1]["id"], "text": values[-1]["text"]},
+                "count": len(values),
+            }
+        else:
+            published["time_span"] = {"first": None, "last": None, "count": 0}
+        return published
+    if needle:
+        shown = [
+            {"id": item["id"], "text": item["text"]}
+            for item in variable.values
+            if needle in item["id"].casefold() or needle in item["text"].casefold()
+        ]
+        published["values"] = shown
+        published["value_count"] = len(shown)
+        return published
+    numeric, explicit = _split_numeric_run(variable.values)
     if numeric is not None:
         published["numeric_codes"] = numeric
+    published["value_count"] = len(explicit)
+    if len(explicit) > VALUE_LIST_CAP:
+        published["values"] = explicit[:VALUE_LIST_CAP]
+        published["values_truncated"] = True
+    else:
+        published["values"] = explicit
     return published
 
 
@@ -307,7 +523,7 @@ def _build_selections(
     values: dict[str, list[str]] | None,
     sum_from: dict[str, str] | None,
     sum_range: dict[str, list[str]] | None = None,
-) -> dict[str, list[str]]:
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     if values is None:
         values = {}
     if sum_from is None:
@@ -321,10 +537,12 @@ def _build_selections(
         raise StatbankError(
             "values maps a variable id to a list of codes. "
             "sum_from maps a variable id to one numeric code. "
-            "sum_range maps a variable id to two numeric codes, low then high."
+            "sum_range maps a variable id to two numeric codes, low then high, "
+            "or to a list of codes to add."
         )
 
     chosen: dict[str, list[str]] = {}
+    explicit: dict[str, list[str]] = {}
     for code, raw_values in values.items():
         variable = _require_variable(table, str(code))
         if variable.id in chosen:
@@ -347,11 +565,15 @@ def _build_selections(
                 f"Variable {variable.id} is listed in sum_range and also in values or sum_from. "
                 "Put it in only one of them."
             )
-        chosen[variable.id] = [_sum_range_expression(variable, bounds)]
+        expression, codes = _sum_range_or_codes(table, variable, bounds)
+        chosen[variable.id] = [expression]
+        if codes is not None:
+            explicit[variable.id] = codes
 
-    return {
+    ordered = {
         variable.id: chosen[variable.id] for variable in table.variables if variable.id in chosen
     }
+    return ordered, explicit
 
 
 def _require_variable(table: _Table, code: str) -> _Variable:
@@ -373,7 +595,6 @@ def _resolve_values(table: _Table, variable: _Variable, raw_values: Any) -> list
             sample = variable.values[0]["id"]
             example = f" For example ['{sample}']."
         raise StatbankError(f"Values for {variable.id} must be a non-empty list of codes.{example}")
-    by_fold = {item["id"].casefold(): item["id"] for item in variable.values}
     resolved: list[str] = []
     seen: set[str] = set()
     for raw in raw_values:
@@ -383,16 +604,75 @@ def _resolve_values(table: _Table, variable: _Variable, raw_values: Any) -> list
         if _is_expression(token):
             canonical = token
         else:
-            canonical = by_fold.get(token.casefold())
-            if canonical is None:
-                raise StatbankError(
-                    f"Unknown value '{token}' for variable {variable.id} on table {table.id}. "
-                    f"{_value_hint(variable)}"
-                )
+            canonical = _canonical_value(table, variable, token)
         if canonical not in seen:
             resolved.append(canonical)
             seen.add(canonical)
     return resolved
+
+
+def _canonical_value(table: _Table, variable: _Variable, token: str) -> str:
+    matches = _value_matches(variable, token)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        listed = ", ".join(matches)
+        raise StatbankError(
+            f"Value '{token}' matches several codes on {variable.id}: {listed}. Pass one code."
+        )
+    suggestions = _close_values(variable, token)
+    latest = ""
+    if variable.time and variable.values:
+        latest = f" Latest period is {variable.values[-1]['id']}."
+    advice = suggestions or _value_hint(variable)
+    raise StatbankError(
+        f"Unknown value '{token}' for variable {variable.id} on table {table.id}.{latest} {advice}"
+    )
+
+
+def _value_matches(variable: _Variable, token: str) -> list[str]:
+    folded = _fold(token)
+    exact_code = [
+        item["id"] for item in variable.values if item["id"].casefold() == token.casefold()
+    ]
+    if exact_code:
+        return exact_code
+    folded_code = [item["id"] for item in variable.values if _fold(item["id"]) == folded]
+    if folded_code:
+        return folded_code
+    labels: list[str] = []
+    for item in variable.values:
+        keys = {_fold(item["text"])}
+        for prefix in ("til ", "fra "):
+            text = _fold(item["text"])
+            if text.startswith(prefix):
+                keys.add(text[len(prefix) :].strip())
+        if folded in keys:
+            labels.append(item["id"])
+    return labels
+
+
+def _close_values(variable: _Variable, token: str) -> str:
+    folded = _fold(token)
+    pool: list[str] = []
+    owner: dict[str, dict[str, str]] = {}
+    for item in variable.values:
+        for key in (_fold(item["text"]), _fold(item["id"])):
+            if key and key not in owner:
+                pool.append(key)
+                owner[key] = item
+    found = difflib.get_close_matches(folded, pool, n=3, cutoff=0.72)
+    if not found:
+        return ""
+    shown: list[str] = []
+    seen: set[str] = set()
+    for key in found:
+        item = owner[key]
+        if item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        shown.append(f"{item['text']} ({item['id']})")
+    return "Did you mean " + ", ".join(shown) + "?"
 
 
 def _is_expression(token: str) -> bool:
@@ -419,6 +699,43 @@ def _sum_expression(variable: _Variable, start: Any) -> str:
             f"No codes on {variable.id} are numeric and >= {threshold}. {_value_hint(variable)}"
         )
     label = f"{threshold}+"
+    return f"sum({label}|{label}={';'.join(codes)})"
+
+
+def _sum_range_or_codes(
+    table: _Table,
+    variable: _Variable,
+    bounds: Any,
+) -> tuple[str, list[str] | None]:
+    if _is_numeric_span(bounds):
+        return _sum_range_expression(variable, bounds), None
+    codes_ok = (
+        isinstance(bounds, list)
+        and len(bounds) >= 2
+        and all(isinstance(item, str) for item in bounds)
+    )
+    if not codes_ok:
+        raise StatbankError(
+            f"sum_range for {variable.id} must be two numeric codes such as ['0', '17'], "
+            "or a list of codes to add such as ['25-29', '30-34']."
+        )
+    codes = [_canonical_value(table, variable, item) for item in bounds]
+    return _sum_expression_from_codes(codes), codes
+
+
+def _is_numeric_span(bounds: Any) -> bool:
+    if not isinstance(bounds, list) or len(bounds) != 2:
+        return False
+    if not all(isinstance(item, str) for item in bounds):
+        return False
+    low, high = bounds[0].strip(), bounds[1].strip()
+    return low.isdigit() and high.isdigit() and str(int(low)) == low and str(int(high)) == high
+
+
+def _sum_expression_from_codes(codes: list[str]) -> str:
+    label = "+".join(codes)
+    if len(label) > 80:
+        label = f"{codes[0]}+…+{codes[-1]}"
     return f"sum({label}|{label}={';'.join(codes)})"
 
 
@@ -535,6 +852,109 @@ def _rows_from_jsonstat(payload: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _fold(text: str) -> str:
+    return text.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
+
+
+def _is_total_value(item: dict[str, str]) -> bool:
+    code = item["id"].casefold()
+    text = item["text"].casefold().strip()
+    return code in {"tot", "ialt"} or text in {"i alt", "alle", "total"}
+
+
+def _unique_total(variable: _Variable) -> dict[str, str] | None:
+    totals = [item for item in variable.values if _is_total_value(item)]
+    if len(totals) == 1:
+        return totals[0]
+    return None
+
+
+def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict[str, str]]:
+    assumed: list[dict[str, str]] = []
+    missing: list[_Variable] = []
+    for variable in table.variables:
+        if variable.time or variable.eliminable or variable.id in selections:
+            continue
+        total = _unique_total(variable)
+        if total is None:
+            missing.append(variable)
+            continue
+        selections[variable.id] = [total["id"]]
+        assumed.append({"variable": variable.id, "id": total["id"], "text": total["text"]})
+    if missing:
+        raise StatbankError(_missing_variables_message(table, missing))
+    ordered = {
+        variable.id: selections[variable.id]
+        for variable in table.variables
+        if variable.id in selections
+    }
+    selections.clear()
+    selections.update(ordered)
+    return assumed
+
+
+def _missing_variables_message(table: _Table, missing: list[_Variable]) -> str:
+    parts = [
+        f"Variable {variable.id} on {table.id} has no total and must be set. "
+        f"{_code_sample(variable)}"
+        for variable in missing
+    ]
+    return " ".join(parts)
+
+
+def _code_sample(variable: _Variable) -> str:
+    shown = variable.values[:10]
+    listed = ", ".join(f"{item['id']} ({item['text']})" for item in shown)
+    extra = ""
+    if len(variable.values) > len(shown):
+        extra = f" … {len(variable.values) - len(shown)} more."
+    return f"Codes: {listed}.{extra} Pass one of them in values."
+
+
+def _flag_unpublished(rows: list[dict[str, Any]]) -> None:
+    if len(rows) < 2:
+        return
+    keys = [key for key in rows[0] if key != "value"]
+    varying = [key for key in keys if len({row.get(key) for row in rows}) > 1]
+    if len(varying) != 1:
+        return
+    trailing: list[dict[str, Any]] = []
+    for row in reversed(rows):
+        if row.get("value") == 0:
+            trailing.append(row)
+        else:
+            break
+    if trailing and len(trailing) < len(rows):
+        for row in trailing:
+            row["unpublished"] = True
+
+
+def _sum_rows(
+    rows: list[dict[str, Any]],
+    variable_id: str,
+    codes: list[str],
+) -> list[dict[str, Any]]:
+    if not rows:
+        raise StatbankError(f"Statistikbanken returned no rows to add for {variable_id}.")
+    total = 0
+    for row in rows:
+        value = row.get("value")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            label = row.get(variable_id, "")
+            raise StatbankError(f"Could not add {variable_id} because '{label}' has no number.")
+        total += value
+    if isinstance(total, float) and total.is_integer():
+        total = int(total)
+    summed = {
+        key: value
+        for key, value in rows[0].items()
+        if key not in {variable_id, "value", "unpublished"}
+    }
+    summed[variable_id] = "+".join(codes)
+    summed["value"] = total
+    return [summed]
+
+
 def _periods(table: _Table, rows: list[dict[str, Any]]) -> list[str]:
     time_ids = [variable.id for variable in table.variables if variable.time]
     periods: list[str] = []
@@ -587,6 +1007,13 @@ def _message_from_api_error(payload: Any, status: int) -> str:
             "Call tabelinfo to list valid codes. "
             "To total a closed numeric range, use sum_range. "
             "To total codes from N upward, use sum_from."
+        )
+    must_choose = re.search(r"Der skal vælges værdier for variabel:\s*(.*?)\s*$", message)
+    if must_choose:
+        variable = must_choose.group(1)
+        return (
+            f"Variable {variable} must be set; it has no single total. "
+            "Call tabelinfo and pass one of its codes in values."
         )
     if message:
         return (

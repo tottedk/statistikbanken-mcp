@@ -1,0 +1,555 @@
+{
+  "id": "HOTEL1",
+  "text": "Overnatninger på hoteller og feriecentre",
+  "description": "Overnatninger på hoteller og feriecentre efter område, gæstens nationalitet, enhed, periode og tid",
+  "unit": "Antal",
+  "suppressedDataValue": "0",
+  "updated": "2026-10-09T08:00:00",
+  "active": true,
+  "contacts": [
+    {
+      "name": "Majbrit Holst",
+      "phone": "+4524940824",
+      "mail": "mbj@dst.dk"
+    }
+  ],
+  "documentation": {
+    "id": "ef9a83ae-26fa-4a56-8deb-3942712c202f",
+    "url": "https://www.dst.dk/statistikdokumentation/ef9a83ae-26fa-4a56-8deb-3942712c202f"
+  },
+  "footnote": {
+    "text": "Kun hoteller med minimum 40 senge deltager i statistikken. Bemærk, at der er databrud mellem 2013 og 2014 grundet ny population i vandrerhjemsstatistikken, dvs., at nogle virksomheder, som tidligere har været klassificeret som hoteller, nu i stedet indgår i vandrerhjemsstatistikken.",
+    "mandatory": false
+  },
+  "variables": [
+    {
+      "id": "OMRÅDE",
+      "text": "område",
+      "elimination": true,
+      "time": false,
+      "map": "Denmark_rural_07",
+      "values": [
+        {
+          "id": "000",
+          "text": "Hele landet"
+        },
+        {
+          "id": "084",
+          "text": "Region Hovedstaden"
+        },
+        {
+          "id": "01",
+          "text": "Landsdel Byen København"
+        },
+        {
+          "id": "02",
+          "text": "Landsdel Københavns omegn"
+        },
+        {
+          "id": "03",
+          "text": "Landsdel Nordsjælland"
+        },
+        {
+          "id": "04",
+          "text": "Landsdel Bornholm"
+        },
+        {
+          "id": "085",
+          "text": "Region Sjælland"
+        },
+        {
+          "id": "05",
+          "text": "Landsdel Østsjælland"
+        },
+        {
+          "id": "06",
+          "text": "Landsdel Vest- og Sydsjælland"
+        },
+        {
+          "id": "083",
+          "text": "Region Syddanmark"
+        },
+        {
+          "id": "07",
+          "text": "Landsdel Fyn"
+        },
+        {
+          "id": "08",
+          "text": "Landsdel Sydjylland"
+        },
+        {
+          "id": "082",
+          "text": "Region Midtjylland"
+        },
+        {
+          "id": "09",
+          "text": "Landsdel Østjylland"
+        },
+        {
+          "id": "10",
+          "text": "Landsdel Vestjylland"
+        },
+        {
+          "id": "081",
+          "text": "Region Nordjylland"
+        },
+        {
+          "id": "11",
+          "text": "Landsdel Nordjylland"
+        }
+      ]
+    },
+    {
+      "id": "NATION1",
+      "text": "gæstens nationalitet",
+      "elimination": true,
+      "time": false,
+      "values": [
+        {
+          "id": "TOT",
+          "text": "I alt"
+        },
+        {
+          "id": "DAN",
+          "text": "Danmark"
+        },
+        {
+          "id": "UDLAN",
+          "text": "Verden udenfor Danmark"
+        },
+        {
+          "id": "BELU",
+          "text": "Belgien"
+        },
+        {
+          "id": "BUL",
+          "text": "Bulgarien"
+        },
+        {
+          "id": "CYP",
+          "text": "Cypern"
+        },
+        {
+          "id": "EST",
+          "text": "Estland"
+        },
+        {
+          "id": "FIN",
+          "text": "Finland"
+        },
+        {
+          "id": "FRA",
+          "text": "Frankrig"
+        },
+        {
+          "id": "FÆR",
+          "text": "Færøerne"
+        },
+        {
+          "id": "GRÆ",
+          "text": "Grækenland"
+        },
+        {
+          "id": "GRØ",
+          "text": "Grønland"
+        },
+        {
+          "id": "IRL",
+          "text": "Irland"
+        },
+        {
+          "id": "ISL",
+          "text": "Island"
+        },
+        {
+          "id": "ITA",
+          "text": "Italien"
+        },
+        {
+          "id": "KRO",
+          "text": "Kroatien"
+        },
+        {
+          "id": "LET",
+          "text": "Letland"
+        },
+        {
+          "id": "LIT",
+          "text": "Litauen"
+        },
+        {
+          "id": "LUX",
+          "text": "Luxembourg"
+        },
+        {
+          "id": "MAL",
+          "text": "Malta"
+        },
+        {
+          "id": "HOL",
+          "text": "Nederlandene"
+        },
+        {
+          "id": "POL",
+          "text": "Polen"
+        },
+        {
+          "id": "POR",
+          "text": "Portugal"
+        },
+        {
+          "id": "RUM",
+          "text": "Rumænien"
+        },
+        {
+          "id": "RUS",
+          "text": "Rusland"
+        },
+        {
+          "id": "SCH",
+          "text": "Schweiz"
+        },
+        {
+          "id": "SLV",
+          "text": "Slovakiet"
+        },
+        {
+          "id": "SLO",
+          "text": "Slovenien"
+        },
+        {
+          "id": "SPA",
+          "text": "Spanien"
+        },
+        {
+          "id": "STO",
+          "text": "Storbritannien"
+        },
+        {
+          "id": "SVE",
+          "text": "Sverige"
+        },
+        {
+          "id": "NOR",
+          "text": "Norge"
+        },
+        {
+          "id": "TJR",
+          "text": "Tjekkiet"
+        },
+        {
+          "id": "TYR",
+          "text": "Tyrkiet"
+        },
+        {
+          "id": "TYS",
+          "text": "Tyskland"
+        },
+        {
+          "id": "UKR",
+          "text": "Ukraine"
+        },
+        {
+          "id": "UNG",
+          "text": "Ungarn"
+        },
+        {
+          "id": "ØST",
+          "text": "Østrig"
+        },
+        {
+          "id": "EUØ",
+          "text": "Europa i øvrigt"
+        },
+        {
+          "id": "SYD",
+          "text": "Sydafrika"
+        },
+        {
+          "id": "AFRX",
+          "text": "Afrika uden Sydafrika"
+        },
+        {
+          "id": "BRA",
+          "text": "Brasilien"
+        },
+        {
+          "id": "CAN",
+          "text": "Canada"
+        },
+        {
+          "id": "USA",
+          "text": "USA"
+        },
+        {
+          "id": "AMØ",
+          "text": "Syd- og Mellemamerika uden Brasilien"
+        },
+        {
+          "id": "IND",
+          "text": "Indien"
+        },
+        {
+          "id": "JAP",
+          "text": "Japan"
+        },
+        {
+          "id": "KIN",
+          "text": "Kina"
+        },
+        {
+          "id": "KOR",
+          "text": "Sydkorea"
+        },
+        {
+          "id": "THA",
+          "text": "Thailand"
+        },
+        {
+          "id": "SØA",
+          "text": "Asien uden Kina, Japan, Sydkorea, Indien og Thailand"
+        },
+        {
+          "id": "AUS",
+          "text": "Australien"
+        },
+        {
+          "id": "OCEX",
+          "text": "Oceanien uden Australien"
+        },
+        {
+          "id": "ANDRE",
+          "text": "Uoplyst land"
+        }
+      ]
+    },
+    {
+      "id": "TAL",
+      "text": "enhed",
+      "elimination": false,
+      "time": false,
+      "values": [
+        {
+          "id": "1030",
+          "text": "Overnatninger"
+        },
+        {
+          "id": "1070",
+          "text": "Solgte værelser"
+        }
+      ]
+    },
+    {
+      "id": "PERIODE",
+      "text": "periode",
+      "elimination": false,
+      "time": false,
+      "values": [
+        {
+          "id": "1",
+          "text": "Hele året"
+        },
+        {
+          "id": "2",
+          "text": "År til dato"
+        },
+        {
+          "id": "01",
+          "text": "Januar"
+        },
+        {
+          "id": "02",
+          "text": "Februar"
+        },
+        {
+          "id": "03",
+          "text": "Marts"
+        },
+        {
+          "id": "04",
+          "text": "April"
+        },
+        {
+          "id": "05",
+          "text": "Maj"
+        },
+        {
+          "id": "06",
+          "text": "Juni"
+        },
+        {
+          "id": "07",
+          "text": "Juli"
+        },
+        {
+          "id": "08",
+          "text": "August"
+        },
+        {
+          "id": "09",
+          "text": "September"
+        },
+        {
+          "id": "10",
+          "text": "Oktober"
+        },
+        {
+          "id": "11",
+          "text": "November"
+        },
+        {
+          "id": "12",
+          "text": "December"
+        }
+      ]
+    },
+    {
+      "id": "Tid",
+      "text": "tid",
+      "elimination": false,
+      "time": true,
+      "values": [
+        {
+          "id": "1992",
+          "text": "1992"
+        },
+        {
+          "id": "1993",
+          "text": "1993"
+        },
+        {
+          "id": "1994",
+          "text": "1994"
+        },
+        {
+          "id": "1995",
+          "text": "1995"
+        },
+        {
+          "id": "1996",
+          "text": "1996"
+        },
+        {
+          "id": "1997",
+          "text": "1997"
+        },
+        {
+          "id": "1998",
+          "text": "1998"
+        },
+        {
+          "id": "1999",
+          "text": "1999"
+        },
+        {
+          "id": "2000",
+          "text": "2000"
+        },
+        {
+          "id": "2001",
+          "text": "2001"
+        },
+        {
+          "id": "2002",
+          "text": "2002"
+        },
+        {
+          "id": "2003",
+          "text": "2003"
+        },
+        {
+          "id": "2004",
+          "text": "2004"
+        },
+        {
+          "id": "2005",
+          "text": "2005"
+        },
+        {
+          "id": "2006",
+          "text": "2006"
+        },
+        {
+          "id": "2007",
+          "text": "2007"
+        },
+        {
+          "id": "2008",
+          "text": "2008"
+        },
+        {
+          "id": "2009",
+          "text": "2009"
+        },
+        {
+          "id": "2010",
+          "text": "2010"
+        },
+        {
+          "id": "2011",
+          "text": "2011"
+        },
+        {
+          "id": "2012",
+          "text": "2012"
+        },
+        {
+          "id": "2013",
+          "text": "2013"
+        },
+        {
+          "id": "2014",
+          "text": "2014"
+        },
+        {
+          "id": "2015",
+          "text": "2015"
+        },
+        {
+          "id": "2016",
+          "text": "2016"
+        },
+        {
+          "id": "2017",
+          "text": "2017"
+        },
+        {
+          "id": "2018",
+          "text": "2018"
+        },
+        {
+          "id": "2019",
+          "text": "2019"
+        },
+        {
+          "id": "2020",
+          "text": "2020"
+        },
+        {
+          "id": "2021",
+          "text": "2021"
+        },
+        {
+          "id": "2022",
+          "text": "2022"
+        },
+        {
+          "id": "2023",
+          "text": "2023"
+        },
+        {
+          "id": "2024",
+          "text": "2024"
+        },
+        {
+          "id": "2025",
+          "text": "2025"
+        },
+        {
+          "id": "2026",
+          "text": "2026"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,914 @@
+{
+  "id": "STRAF10",
+  "text": "Anmeldte forbrydelser",
+  "description": "Anmeldte forbrydelser efter overtrædelsens art og tid",
+  "unit": "Antal",
+  "suppressedDataValue": "0",
+  "updated": "2026-10-19T08:00:00",
+  "active": true,
+  "contacts": [
+    {
+      "name": "Iben Birgitte Pedersen",
+      "phone": "+4523603711",
+      "mail": "ipe@dst.dk"
+    }
+  ],
+  "documentation": {
+    "id": "c1ac7749-1e15-4d3a-8ed0-fb2d26a9fe93",
+    "url": "https://www.dst.dk/statistikdokumentation/c1ac7749-1e15-4d3a-8ed0-fb2d26a9fe93"
+  },
+  "footnote": {
+    "text": "Antal anmeldelser for Love vedr. dyr, jagt mv. er for lavt i 2023. Der mangler ca. 1.700 anmeldelser.    \r\n \r\n  Straffelovens bestemmelser vedr. seksualforbrydelser gennemgik væsentlige ændringer med virkning fra 1. juli 2013. Ændringerne betød bl.a., at der nu er flere kategorier af seksualforbrydelser end tidligere, der henføres under bestemmelserne om voldtægt (§216). Se mere herom i statistikdokumentationen, i afsnittet Sammenlignelighed: http://www.dst.dk/statistikdokumentation/c1ac7749-1e15-4d3a-8ed0-fb2d26a9fe93",
+    "mandatory": true
+  },
+  "variables": [
+    {
+      "id": "OVERTRÆD",
+      "text": "overtrædelsens art",
+      "elimination": true,
+      "time": false,
+      "values": [
+        {
+          "id": "TOT",
+          "text": "Overtrædelsens art i alt"
+        },
+        {
+          "id": "1",
+          "text": "Straffelov i alt"
+        },
+        {
+          "id": "1000",
+          "text": "Uoplyst straffelov"
+        },
+        {
+          "id": "11",
+          "text": "Seksualforbrydelser i alt"
+        },
+        {
+          "id": "1110",
+          "text": "Blodskam mv."
+        },
+        {
+          "id": "1120",
+          "text": "Voldtægt mv."
+        },
+        {
+          "id": "1130",
+          "text": "Heteroseksuel sædelighedsforbrydelse mod barn under 12 år (Udgået 2013)"
+        },
+        {
+          "id": "1131",
+          "text": "Seksualforbrydelse mod barn under 12 år (Ny fra 2013)"
+        },
+        {
+          "id": "1140",
+          "text": "Heteroseksuel sædelighedsforbrydelse i øvrigt (Udgået 2013)"
+        },
+        {
+          "id": "1141",
+          "text": "Seksualforbrydelse mod barn under 15 år (Ny fra 2013)"
+        },
+        {
+          "id": "1145",
+          "text": "Seksualforbrydelse i øvrigt (Ny fra 2013)"
+        },
+        {
+          "id": "1146",
+          "text": "Grooming"
+        },
+        {
+          "id": "1150",
+          "text": "Homoseksuel sædelighedsforbrydelse mod barn under 12 år (Udgået 2013)"
+        },
+        {
+          "id": "1160",
+          "text": "Homoseksuel sædelighedsforbrydelse i øvrigt (Udgået 2013)"
+        },
+        {
+          "id": "1172",
+          "text": "Blufærdighedskrænkelse ved beføling"
+        },
+        {
+          "id": "1174",
+          "text": "Blufærdighedskrænkelse ved blotteri"
+        },
+        {
+          "id": "1176",
+          "text": "Blufærdighedskrænkelse i øvrigt"
+        },
+        {
+          "id": "1180",
+          "text": "Utugt mv."
+        },
+        {
+          "id": "12",
+          "text": "Voldsforbrydelser i alt"
+        },
+        {
+          "id": "1210",
+          "text": "Vold og lignende mod offentlig myndighed"
+        },
+        {
+          "id": "1220",
+          "text": "Opløb/forstyrrelse af offentlig orden"
+        },
+        {
+          "id": "1230",
+          "text": "Manddrab"
+        },
+        {
+          "id": "1240",
+          "text": "Forsøg på manddrab"
+        },
+        {
+          "id": "1250",
+          "text": "Psykisk vold mv."
+        },
+        {
+          "id": "1252",
+          "text": "Simpel vold"
+        },
+        {
+          "id": "1255",
+          "text": "Alvorligere vold"
+        },
+        {
+          "id": "1258",
+          "text": "Særlig alvorlig vold"
+        },
+        {
+          "id": "1260",
+          "text": "Vold mod sagesløs"
+        },
+        {
+          "id": "1270",
+          "text": "Forsætlig legemskrænkelse i øvrigt"
+        },
+        {
+          "id": "1280",
+          "text": "Forsætlig legemsbeskadigelse"
+        },
+        {
+          "id": "1283",
+          "text": "Uagtsomt manddrab/legemsbeskadigelse"
+        },
+        {
+          "id": "1286",
+          "text": "Forbrydelse mod liv og legeme"
+        },
+        {
+          "id": "1289",
+          "text": "Forbrydelse mod den personlige frihed"
+        },
+        {
+          "id": "1292",
+          "text": "Trusler"
+        },
+        {
+          "id": "13",
+          "text": "Ejendomsforbrydelser i alt"
+        },
+        {
+          "id": "1304",
+          "text": "Dokumentfalsk"
+        },
+        {
+          "id": "1308",
+          "text": "Dokumentfalsk med check"
+        },
+        {
+          "id": "1312",
+          "text": "Brandstiftelse"
+        },
+        {
+          "id": "1316",
+          "text": "Indbrud i forretning, virksomhed mv."
+        },
+        {
+          "id": "1320",
+          "text": "Indbrud i beboelser"
+        },
+        {
+          "id": "1324",
+          "text": "Indbrud i ubeboede bebyggelser"
+        },
+        {
+          "id": "1328",
+          "text": "Tyveri fra bil, båd mv."
+        },
+        {
+          "id": "1332",
+          "text": "Butikstyverier mv."
+        },
+        {
+          "id": "1336",
+          "text": "Andre tyverier"
+        },
+        {
+          "id": "1339",
+          "text": "Tyveri/brugstyveri af køretøj"
+        },
+        {
+          "id": "1342",
+          "text": "Tyveri/brugstyveri af knallert"
+        },
+        {
+          "id": "1345",
+          "text": "Tyveri/brugstyveri af cykel"
+        },
+        {
+          "id": "1348",
+          "text": "Tyveri/brugstyveri af andet"
+        },
+        {
+          "id": "1351",
+          "text": "Ulovlig omgang med hittegods"
+        },
+        {
+          "id": "1354",
+          "text": "Underslæb"
+        },
+        {
+          "id": "1357",
+          "text": "Bedrageri"
+        },
+        {
+          "id": "1360",
+          "text": "Checkbedrageri"
+        },
+        {
+          "id": "1363",
+          "text": "Mandatsvig"
+        },
+        {
+          "id": "1366",
+          "text": "Afpresning og åger"
+        },
+        {
+          "id": "1372",
+          "text": "Skyldnersvig"
+        },
+        {
+          "id": "1376",
+          "text": "Hæleri"
+        },
+        {
+          "id": "1380",
+          "text": "Røveri"
+        },
+        {
+          "id": "1384",
+          "text": "Grov skattesvig mv."
+        },
+        {
+          "id": "1390",
+          "text": "Hærværk"
+        },
+        {
+          "id": "1394",
+          "text": "Uagtsomt hæleri"
+        },
+        {
+          "id": "1398",
+          "text": "Berigelsesforbrydelse og formuekrænkelse"
+        },
+        {
+          "id": "14",
+          "text": "Andre straffelovsforbrydelser i alt"
+        },
+        {
+          "id": "1410",
+          "text": "Forbrydelse mod offentlig myndighed mv."
+        },
+        {
+          "id": "1415",
+          "text": "Forbrydelse i offentlig tjeneste"
+        },
+        {
+          "id": "1420",
+          "text": "Falsk forklaring for retten"
+        },
+        {
+          "id": "1425",
+          "text": "Falsk forklaring i øvrigt"
+        },
+        {
+          "id": "1430",
+          "text": "Forbrydelse vedrørende penge og bevismateriale"
+        },
+        {
+          "id": "1435",
+          "text": "Salg af narkotika mv."
+        },
+        {
+          "id": "1440",
+          "text": "Smugling mv. af narkotika"
+        },
+        {
+          "id": "1445",
+          "text": "Almenskadelige forbrydelser mv."
+        },
+        {
+          "id": "1450",
+          "text": "Ulovligt erhverv mv."
+        },
+        {
+          "id": "1455",
+          "text": "Forbrydelser i familieforhold"
+        },
+        {
+          "id": "1460",
+          "text": "Uagtsomt manddrab mv. i forbindelse med færdselsuheld"
+        },
+        {
+          "id": "1475",
+          "text": "Tilhold (Udgået 2012)"
+        },
+        {
+          "id": "1485",
+          "text": "Freds- og ærekrænkelser"
+        },
+        {
+          "id": "3",
+          "text": "Særlove i alt"
+        },
+        {
+          "id": "3210",
+          "text": "Lov om euforiserende stoffer"
+        },
+        {
+          "id": "3410",
+          "text": "Våbenloven"
+        },
+        {
+          "id": "3610",
+          "text": "Skatte- og afgiftslove mv."
+        },
+        {
+          "id": "3810",
+          "text": "Andre strafferetlige særlove"
+        },
+        {
+          "id": "3815",
+          "text": "Sundheds- og sociallove"
+        },
+        {
+          "id": "3820",
+          "text": "Bygge- og boliglove"
+        },
+        {
+          "id": "3825",
+          "text": "Miljøloven"
+        },
+        {
+          "id": "3830",
+          "text": "Love vedrørende dyr, jagt mv."
+        },
+        {
+          "id": "3835",
+          "text": "Love vedrørende arbejde, transport mv."
+        },
+        {
+          "id": "3840",
+          "text": "Selskabs- og firmalovgivningen mv."
+        },
+        {
+          "id": "3845",
+          "text": "Love vedrørende forsvaret o.l."
+        },
+        {
+          "id": "3850",
+          "text": "Love vedrørende offentlige forsyninger"
+        },
+        {
+          "id": "3855",
+          "text": "Love vedrørende spil, bevilling, næring"
+        },
+        {
+          "id": "3865",
+          "text": "Særlovgivning i øvrigt"
+        },
+        {
+          "id": "3870",
+          "text": "Uoplyst særlovgivning"
+        }
+      ]
+    },
+    {
+      "id": "Tid",
+      "text": "tid",
+      "elimination": false,
+      "time": true,
+      "values": [
+        {
+          "id": "1995K1",
+          "text": "1995K1"
+        },
+        {
+          "id": "1995K2",
+          "text": "1995K2"
+        },
+        {
+          "id": "1995K3",
+          "text": "1995K3"
+        },
+        {
+          "id": "1995K4",
+          "text": "1995K4"
+        },
+        {
+          "id": "1996K1",
+          "text": "1996K1"
+        },
+        {
+          "id": "1996K2",
+          "text": "1996K2"
+        },
+        {
+          "id": "1996K3",
+          "text": "1996K3"
+        },
+        {
+          "id": "1996K4",
+          "text": "1996K4"
+        },
+        {
+          "id": "1997K1",
+          "text": "1997K1"
+        },
+        {
+          "id": "1997K2",
+          "text": "1997K2"
+        },
+        {
+          "id": "1997K3",
+          "text": "1997K3"
+        },
+        {
+          "id": "1997K4",
+          "text": "1997K4"
+        },
+        {
+          "id": "1998K1",
+          "text": "1998K1"
+        },
+        {
+          "id": "1998K2",
+          "text": "1998K2"
+        },
+        {
+          "id": "1998K3",
+          "text": "1998K3"
+        },
+        {
+          "id": "1998K4",
+          "text": "1998K4"
+        },
+        {
+          "id": "1999K1",
+          "text": "1999K1"
+        },
+        {
+          "id": "1999K2",
+          "text": "1999K2"
+        },
+        {
+          "id": "1999K3",
+          "text": "1999K3"
+        },
+        {
+          "id": "1999K4",
+          "text": "1999K4"
+        },
+        {
+          "id": "2000K1",
+          "text": "2000K1"
+        },
+        {
+          "id": "2000K2",
+          "text": "2000K2"
+        },
+        {
+          "id": "2000K3",
+          "text": "2000K3"
+        },
+        {
+          "id": "2000K4",
+          "text": "2000K4"
+        },
+        {
+          "id": "2001K1",
+          "text": "2001K1"
+        },
+        {
+          "id": "2001K2",
+          "text": "2001K2"
+        },
+        {
+          "id": "2001K3",
+          "text": "2001K3"
+        },
+        {
+          "id": "2001K4",
+          "text": "2001K4"
+        },
+        {
+          "id": "2002K1",
+          "text": "2002K1"
+        },
+        {
+          "id": "2002K2",
+          "text": "2002K2"
+        },
+        {
+          "id": "2002K3",
+          "text": "2002K3"
+        },
+        {
+          "id": "2002K4",
+          "text": "2002K4"
+        },
+        {
+          "id": "2003K1",
+          "text": "2003K1"
+        },
+        {
+          "id": "2003K2",
+          "text": "2003K2"
+        },
+        {
+          "id": "2003K3",
+          "text": "2003K3"
+        },
+        {
+          "id": "2003K4",
+          "text": "2003K4"
+        },
+        {
+          "id": "2004K1",
+          "text": "2004K1"
+        },
+        {
+          "id": "2004K2",
+          "text": "2004K2"
+        },
+        {
+          "id": "2004K3",
+          "text": "2004K3"
+        },
+        {
+          "id": "2004K4",
+          "text": "2004K4"
+        },
+        {
+          "id": "2005K1",
+          "text": "2005K1"
+        },
+        {
+          "id": "2005K2",
+          "text": "2005K2"
+        },
+        {
+          "id": "2005K3",
+          "text": "2005K3"
+        },
+        {
+          "id": "2005K4",
+          "text": "2005K4"
+        },
+        {
+          "id": "2006K1",
+          "text": "2006K1"
+        },
+        {
+          "id": "2006K2",
+          "text": "2006K2"
+        },
+        {
+          "id": "2006K3",
+          "text": "2006K3"
+        },
+        {
+          "id": "2006K4",
+          "text": "2006K4"
+        },
+        {
+          "id": "2007K1",
+          "text": "2007K1"
+        },
+        {
+          "id": "2007K2",
+          "text": "2007K2"
+        },
+        {
+          "id": "2007K3",
+          "text": "2007K3"
+        },
+        {
+          "id": "2007K4",
+          "text": "2007K4"
+        },
+        {
+          "id": "2008K1",
+          "text": "2008K1"
+        },
+        {
+          "id": "2008K2",
+          "text": "2008K2"
+        },
+        {
+          "id": "2008K3",
+          "text": "2008K3"
+        },
+        {
+          "id": "2008K4",
+          "text": "2008K4"
+        },
+        {
+          "id": "2009K1",
+          "text": "2009K1"
+        },
+        {
+          "id": "2009K2",
+          "text": "2009K2"
+        },
+        {
+          "id": "2009K3",
+          "text": "2009K3"
+        },
+        {
+          "id": "2009K4",
+          "text": "2009K4"
+        },
+        {
+          "id": "2010K1",
+          "text": "2010K1"
+        },
+        {
+          "id": "2010K2",
+          "text": "2010K2"
+        },
+        {
+          "id": "2010K3",
+          "text": "2010K3"
+        },
+        {
+          "id": "2010K4",
+          "text": "2010K4"
+        },
+        {
+          "id": "2011K1",
+          "text": "2011K1"
+        },
+        {
+          "id": "2011K2",
+          "text": "2011K2"
+        },
+        {
+          "id": "2011K3",
+          "text": "2011K3"
+        },
+        {
+          "id": "2011K4",
+          "text": "2011K4"
+        },
+        {
+          "id": "2012K1",
+          "text": "2012K1"
+        },
+        {
+          "id": "2012K2",
+          "text": "2012K2"
+        },
+        {
+          "id": "2012K3",
+          "text": "2012K3"
+        },
+        {
+          "id": "2012K4",
+          "text": "2012K4"
+        },
+        {
+          "id": "2013K1",
+          "text": "2013K1"
+        },
+        {
+          "id": "2013K2",
+          "text": "2013K2"
+        },
+        {
+          "id": "2013K3",
+          "text": "2013K3"
+        },
+        {
+          "id": "2013K4",
+          "text": "2013K4"
+        },
+        {
+          "id": "2014K1",
+          "text": "2014K1"
+        },
+        {
+          "id": "2014K2",
+          "text": "2014K2"
+        },
+        {
+          "id": "2014K3",
+          "text": "2014K3"
+        },
+        {
+          "id": "2014K4",
+          "text": "2014K4"
+        },
+        {
+          "id": "2015K1",
+          "text": "2015K1"
+        },
+        {
+          "id": "2015K2",
+          "text": "2015K2"
+        },
+        {
+          "id": "2015K3",
+          "text": "2015K3"
+        },
+        {
+          "id": "2015K4",
+          "text": "2015K4"
+        },
+        {
+          "id": "2016K1",
+          "text": "2016K1"
+        },
+        {
+          "id": "2016K2",
+          "text": "2016K2"
+        },
+        {
+          "id": "2016K3",
+          "text": "2016K3"
+        },
+        {
+          "id": "2016K4",
+          "text": "2016K4"
+        },
+        {
+          "id": "2017K1",
+          "text": "2017K1"
+        },
+        {
+          "id": "2017K2",
+          "text": "2017K2"
+        },
+        {
+          "id": "2017K3",
+          "text": "2017K3"
+        },
+        {
+          "id": "2017K4",
+          "text": "2017K4"
+        },
+        {
+          "id": "2018K1",
+          "text": "2018K1"
+        },
+        {
+          "id": "2018K2",
+          "text": "2018K2"
+        },
+        {
+          "id": "2018K3",
+          "text": "2018K3"
+        },
+        {
+          "id": "2018K4",
+          "text": "2018K4"
+        },
+        {
+          "id": "2019K1",
+          "text": "2019K1"
+        },
+        {
+          "id": "2019K2",
+          "text": "2019K2"
+        },
+        {
+          "id": "2019K3",
+          "text": "2019K3"
+        },
+        {
+          "id": "2019K4",
+          "text": "2019K4"
+        },
+        {
+          "id": "2020K1",
+          "text": "2020K1"
+        },
+        {
+          "id": "2020K2",
+          "text": "2020K2"
+        },
+        {
+          "id": "2020K3",
+          "text": "2020K3"
+        },
+        {
+          "id": "2020K4",
+          "text": "2020K4"
+        },
+        {
+          "id": "2021K1",
+          "text": "2021K1"
+        },
+        {
+          "id": "2021K2",
+          "text": "2021K2"
+        },
+        {
+          "id": "2021K3",
+          "text": "2021K3"
+        },
+        {
+          "id": "2021K4",
+          "text": "2021K4"
+        },
+        {
+          "id": "2022K1",
+          "text": "2022K1"
+        },
+        {
+          "id": "2022K2",
+          "text": "2022K2"
+        },
+        {
+          "id": "2022K3",
+          "text": "2022K3"
+        },
+        {
+          "id": "2022K4",
+          "text": "2022K4"
+        },
+        {
+          "id": "2023K1",
+          "text": "2023K1"
+        },
+        {
+          "id": "2023K2",
+          "text": "2023K2"
+        },
+        {
+          "id": "2023K3",
+          "text": "2023K3"
+        },
+        {
+          "id": "2023K4",
+          "text": "2023K4"
+        },
+        {
+          "id": "2024K1",
+          "text": "2024K1"
+        },
+        {
+          "id": "2024K2",
+          "text": "2024K2"
+        },
+        {
+          "id": "2024K3",
+          "text": "2024K3"
+        },
+        {
+          "id": "2024K4",
+          "text": "2024K4"
+        },
+        {
+          "id": "2025K1",
+          "text": "2025K1"
+        },
+        {
+          "id": "2025K2",
+          "text": "2025K2"
+        },
+        {
+          "id": "2025K3",
+          "text": "2025K3"
+        },
+        {
+          "id": "2025K4",
+          "text": "2025K4"
+        },
+        {
+          "id": "2026K1",
+          "text": "2026K1"
+        },
+        {
+          "id": "2026K2",
+          "text": "2026K2"
+        },
+        {
+          "id": "2026K3",
+          "text": "2026K3"
+        }
+      ]
+    }
+  ]
+}

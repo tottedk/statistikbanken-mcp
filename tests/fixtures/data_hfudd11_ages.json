@@ -1,0 +1,89 @@
+{
+  "dataset": {
+    "dimension": {
+      "HFUDD": {
+        "label": "højeste fuldførte uddannelse",
+        "category": {
+          "index": {
+            "H70": 0
+          },
+          "label": {
+            "H70": "H70 Lange videregående uddannelser, LVU"
+          }
+        }
+      },
+      "ALDER": {
+        "label": "alder",
+        "category": {
+          "index": {
+            "25-29+30-34+35-39+40-44+45-49+50-54+55-59+60-64": 0
+          },
+          "label": {
+            "25-29+30-34+35-39+40-44+45-49+50-54+55-59+60-64": "25-29+30-34+35-39+40-44+45-49+50-54+55-59+60-64"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "HFUDD11": 0
+          },
+          "label": {
+            "HFUDD11": "Befolkningens højeste fuldførte uddannelse (15-69 år)"
+          },
+          "unit": {
+            "HFUDD11": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2025": 0
+          },
+          "label": {
+            "2025": "2025"
+          }
+        }
+      },
+      "id": [
+        "HFUDD",
+        "ALDER",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "role": {
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Befolkningens højeste fuldførte uddannelse (15-69 år) efter højeste fuldførte uddannelse, alder, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-04-01T06:00:00Z",
+    "value": [
+      493701
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/dfe70b55-5b92-48c2-8633-1f17a190a87e",
+        "tableid": "HFUDD11",
+        "decimals": 0
+      }
+    }
+  }
+}
