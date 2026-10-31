@@ -88,6 +88,34 @@ uv run mcp dev src/statistikbanken_mcp/server.py
 
 That starts a local page where you can list the tools and call them.
 
+## Web demo
+
+A local page asks a question in Danish or English. The answer sits above the numbers (table, period, unit). The tool calls that produced them can be expanded. The page is a client of the MCP server over stdio. It does not read Statistikbanken itself.
+
+```bash
+uv run statistikbanken-web
+```
+
+Then open http://127.0.0.1:8080. The process listens on 127.0.0.1 only. Copy `.env.example` to `.env` to change the model, the daily question cap, or the per-address limit. `.env` is gitignored. The API key is never printed.
+
+Ollama, in PowerShell or any other shell. Pull a model that can call tools, then start the page with the default settings:
+
+```bash
+ollama pull qwen2.5
+uv run statistikbanken-web
+```
+
+Ollama's OpenAI-compatible API is `http://127.0.0.1:11434/v1`. The dummy key is ignored.
+
+xAI uses the same chat-completions shape at `https://api.x.ai/v1`. Set the key in the environment, not in the repo:
+
+```powershell
+$env:XAI_API_KEY = "your-key"
+uv run statistikbanken-web --llm xai --model grok-4
+```
+
+`--llm`, `--model`, `--base-url`, `--host`, and `--port` override the environment for one run.
+
 ## Tests
 
 Unit tests replay responses recorded from the live API (`tests/fixtures/`). A smaller set calls the API directly, including one session over stdio. GitHub Actions runs Ruff and pytest on every push and pull request.
