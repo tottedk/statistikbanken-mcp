@@ -40,11 +40,17 @@ If the table title, unit, or description only partly matches the question, say s
 If the tools have no data, say so.
 Prefer sum_from or sum_range when a total is needed.
 A value like >=80 lists rows. It does not add them.
+Ages 80 and older are sum_from {"ALDER": "80"}.
 For a change over time, fetch every period in one hent_data call.
-Pass Tid as one range, for example >=2015K1.
-Each period comes back as its own row. Do not sum those periods.
+Pass Tid as one range in values, for example >=2015K1.
+Each period comes back as its own row. Do not put Tid in sum_range.
+Do not sum periods together with several places or an age range.
 Municipality names may be passed as labels.
-Answer in the same language as the question, in a few sentences."""
+One code may be a string. Several codes are a list, or one comma-separated string.
+Answer in the same language as the question.
+A Danish question gets a Danish answer, even if the tool text is English.
+Write Danish numbers with a dot as the thousands separator: 5.045, never 5,045.
+Write periods as Statistikbanken does: 2026K3, never 2026Q3."""
 
 PAGE = """<!DOCTYPE html>
 <html lang="da">
@@ -121,7 +127,7 @@ function svgEl(name, attrs) {
 }
 
 function drawChart(series) {
-  const width = 640, height = 280, left = 64, right = 12, top = 16, bottom = 36;
+  const width = 640, height = 280, left = 64, right = 56, top = 16, bottom = 36;
   const periods = [];
   const seen = new Set();
   for (const item of series) for (const point of item.points) {
@@ -155,8 +161,14 @@ function drawChart(series) {
   const step = Math.ceil(periods.length / 6);
   periods.forEach((period, index) => {
     if (index % step && index !== periods.length - 1) return;
+    const last = index === periods.length - 1;
+    const first = index === 0;
     const label = svgEl("text", {
-      x: xOf(period), y: height - 12, "text-anchor": "middle", fill: "#4a453e", "font-size": "11"
+      x: last ? width - 4 : (first ? left : xOf(period)),
+      y: height - 12,
+      "text-anchor": last ? "end" : (first ? "start" : "middle"),
+      fill: "#4a453e",
+      "font-size": "11"
     });
     label.textContent = period;
     svg.append(label);
@@ -448,7 +460,7 @@ async def run_turn(
         allow_tools = used < max_tool_calls
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
-            answer = reply.content.strip() or _fallback_answer(calls)
+            answer = reply.content.strip() or _fallback_answer(calls, capped=not allow_tools)
             return _turn(answer, facts, calls)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
@@ -476,7 +488,7 @@ async def run_turn(
             )
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
-            answer = final.content.strip() or _fallback_answer(calls)
+            answer = final.content.strip() or _fallback_answer(calls, capped=True)
             return _turn(answer, facts, calls)
 
 
@@ -507,10 +519,14 @@ async def _invoke(runner: ToolRunner, call: ToolCall) -> str:
         return f"Tool failed: {exc.__class__.__name__}"
 
 
-def _fallback_answer(calls: list[dict[str, str]]) -> str:
+def _fallback_answer(calls: list[dict[str, str]], *, capped: bool) -> str:
+    if capped:
+        return (
+            "Jeg nåede grænsen for opslag og kan ikke svare færdigt. Se værktøjskaldene nedenfor."
+        )
     if not calls:
         return "Jeg fandt ingen tal at svare ud fra."
-    return "Jeg nåede grænsen for opslag og kan ikke svare færdigt. Se værktøjskaldene nedenfor."
+    return "Modellen gav ikke et svar. Prøv at omformulere spørgsmålet."
 
 
 def _facts_from(name: str, result: str) -> list[dict[str, Any]]:

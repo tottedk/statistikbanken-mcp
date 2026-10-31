@@ -12,6 +12,8 @@ import httpx
 import pytest
 
 from statistikbanken_mcp.web import (
+    PAGE,
+    SYSTEM_PROMPT,
     ChatClient,
     ChatReply,
     Limiter,
@@ -22,6 +24,7 @@ from statistikbanken_mcp.web import (
     ToolSpec,
     TurnResult,
     _facts_from,
+    _fallback_answer,
     _handler,
     chart_series,
     facts_to_csv,
@@ -114,6 +117,47 @@ def test_turn_cites_table_period_and_records_calls() -> None:
             "url": "https://www.statistikbanken.dk/FOLK1A",
         }
     ]
+
+
+def test_empty_model_text_is_not_the_tool_cap() -> None:
+    tools = FakeTools({"find_tabel": "[]", "tabelinfo": "{}"})
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "a"}, "c1")]),
+            ChatReply("", [_call("tabelinfo", {"table": "FOLK1A"}, "c2")]),
+            ChatReply("   ", []),
+        ]
+    )
+    result = asyncio.run(run_turn(model, tools, "spørgsmål", max_tool_calls=8))
+    assert len(result.calls) == 2
+    assert "grænsen" not in result.answer
+    assert result.answer == _fallback_answer(result.calls, capped=False)
+
+
+def test_empty_final_answer_after_the_cap_names_the_limit() -> None:
+    tools = FakeTools({"find_tabel": "[]"})
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "a"}, "c1")]),
+            ChatReply("", []),
+        ]
+    )
+    result = asyncio.run(run_turn(model, tools, "spørgsmål", max_tool_calls=1))
+    assert "grænsen for opslag" in result.answer
+
+
+def test_prompt_requires_the_question_language_and_danish_periods() -> None:
+    assert "same language as the question" in SYSTEM_PROMPT
+    assert "5.045" in SYSTEM_PROMPT
+    assert "2026K3" in SYSTEM_PROMPT
+    assert "2026Q3" in SYSTEM_PROMPT
+    assert "Do not put Tid in sum_range" in SYSTEM_PROMPT
+
+
+def test_chart_keeps_the_last_period_inside_the_frame() -> None:
+    assert "right = 56" in PAGE
+    assert 'text-anchor": last ? "end"' in PAGE
+    assert "width - 4" in PAGE
 
 
 def test_turn_stops_at_the_tool_cap() -> None:
@@ -288,6 +332,65 @@ def _fact(place: str, period: str, value: int | float, unpublished: bool = False
         "unpublished": unpublished,
         "url": "https://www.statistikbanken.dk/FOLK1A",
     }
+
+
+@pytest.mark.live
+def test_scripted_model_recovers_from_the_bad_time_sum() -> None:
+    """The exact failing call errors, then the corrected call charts both places."""
+
+    bad = {
+        "table": "FOLK1A",
+        "values": {"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+        "sum_range": {"Tid": ["2015K1", "2026K3"]},
+    }
+    as_strings = {
+        "table": "FOLK1A",
+        "values": {"OMRÅDE": "230", "Tid": "(1)"},
+        "sum_from": {"ALDER": "80"},
+    }
+    good = {
+        "table": "FOLK1A",
+        "values": {"OMRÅDE": ["Rudersdal", "Hørsholm"], "Tid": [">=2015K1"]},
+        "sum_from": {"ALDER": "80"},
+    }
+
+    async def _run() -> TurnResult:
+        from mcp import Client
+
+        model = ScriptedModel(
+            [
+                ChatReply("", [_call("hent_data", as_strings, "c1")]),
+                ChatReply("", [_call("hent_data", bad, "c2")]),
+                ChatReply("", [_call("hent_data", good, "c3")]),
+                ChatReply(
+                    "I Rudersdal og Hørsholm er der flere på 80 år i 2026K3 end i 2015K1.",
+                    [],
+                ),
+            ]
+        )
+        async with Client(server_command(), read_timeout_seconds=120) as client:
+            runner = McpRunner(client)
+            await runner.prepare()
+            return await run_turn(
+                model,
+                runner,
+                "Hvordan har antallet af personer på 80 år og derover udviklet sig "
+                "i Rudersdal og Hørsholm siden 2015?",
+                max_tool_calls=8,
+            )
+
+    result = asyncio.run(_run())
+    assert "list_type" not in result.calls[0]["result"]
+    assert "5045" in result.calls[0]["result"]
+    assert "13078" not in result.calls[0]["result"]
+    assert "sum_from" in result.calls[1]["result"]
+    assert ">=2015K1" in result.calls[1]["result"]
+    assert "13078" not in result.calls[1]["result"]
+    assert all(fact.get("value") != 13078 for fact in result.facts)
+    assert len(result.facts) >= 8
+    assert len(result.chart) == 2
+    assert "2026K3" in result.answer
+    assert "5,045" not in result.answer
 
 
 def test_app_lists_tools_from_the_mcp_server() -> None:

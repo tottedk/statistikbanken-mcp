@@ -139,6 +139,101 @@ def test_required_variable_without_a_total_lists_codes() -> None:
     assert "Traceback" not in message
 
 
+def test_ambiguous_time_sum_is_rejected_before_any_number(
+    calls: list[dict[str, object]],
+) -> None:
+    with pytest.raises(ToolError, match="sum_from") as caught:
+        hent_data(
+            "FOLK1A",
+            values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+            sum_range={"Tid": ["2015K1", "2026K3"]},
+        )
+    message = str(caught.value)
+    assert ">=2015K1" in message
+    assert 'not values [">=80"]' in message
+    assert "13078" not in message
+    assert "hide rows" in message
+    assert not any(str(call["path"]).endswith("/data") for call in calls)
+
+
+def test_two_period_sum_is_not_a_time_range(calls: list[dict[str, object]]) -> None:
+    with pytest.raises(ToolError, match="not every period") as caught:
+        hent_data(
+            "FOLK1A",
+            values={"OMRÅDE": ["230"], "ALDER": ["IALT"]},
+            sum_range={"Tid": ["2015K1", "2026K3"]},
+        )
+    assert ">=2015K1" in str(caught.value)
+    assert not any(str(call["path"]).endswith("/data") for call in calls)
+
+
+def test_local_sum_keeps_each_series() -> None:
+    from statistikbanken_mcp.statbank import _sum_rows
+
+    rows = [
+        {"OMRÅDE": "Rudersdal", "ALDER": "80 år", "Tid": "2015K1", "value": 3524},
+        {"OMRÅDE": "Rudersdal", "ALDER": "80 år", "Tid": "2026K3", "value": 5045},
+        {"OMRÅDE": "Hørsholm", "ALDER": "80 år", "Tid": "2015K1", "value": 1719},
+        {"OMRÅDE": "Hørsholm", "ALDER": "80 år", "Tid": "2026K3", "value": 2790},
+        {"OMRÅDE": "Rudersdal", "ALDER": "81 år", "Tid": "2015K1", "value": 1},
+        {"OMRÅDE": "Rudersdal", "ALDER": "81 år", "Tid": "2026K3", "value": 2},
+    ]
+    summed = _sum_rows(rows, "Tid", ["2015K1", "2026K3"])
+    by_series = {(row["OMRÅDE"], row["ALDER"]): row for row in summed}
+    assert len(by_series) == 3
+    assert by_series[("Rudersdal", "80 år")]["value"] == 8569
+    assert by_series[("Hørsholm", "80 år")]["value"] == 4509
+    assert by_series[("Rudersdal", "81 år")]["Tid"] == "2015K1+2026K3"
+    assert 13078 not in {row["value"] for row in summed}
+
+
+def test_values_filter_splits_words_and_keeps_unmatched_variables() -> None:
+    info = tabelinfo("FOLK1A", values_filter="Rudersdal, Hørsholm")
+    variables = {item["id"]: item for item in info["variables"]}
+    areas = {item["id"]: item["text"] for item in variables["OMRÅDE"]["values"]}
+    assert areas == {"223": "Hørsholm", "230": "Rudersdal"}
+    assert "filter_note" not in variables["OMRÅDE"]
+    assert variables["Tid"]["time_span"]["first"]["id"] == "2008K1"
+    assert variables["Tid"]["time_span"]["count"] == 75
+    assert variables["Tid"]["filter_note"] == "No match for the filter on this variable."
+    assert "values" not in variables["Tid"]
+    assert variables["KØN"]["values"]
+    assert "No match" in variables["KØN"]["filter_note"]
+
+    spaced = tabelinfo("FOLK1A", values_filter="Rudersdal Hørsholm")
+    spaced_areas = next(item for item in spaced["variables"] if item["id"] == "OMRÅDE")
+    assert {item["text"] for item in spaced_areas["values"]} == {"Rudersdal", "Hørsholm"}
+
+
+def test_string_codes_are_coerced_to_lists(calls: list[dict[str, object]]) -> None:
+    from statistikbanken_mcp.server import mcp
+
+    tool = mcp._tool_manager.get_tool("hent_data")
+    parsed = tool.fn_metadata.validate_arguments(
+        {
+            "table": "FOLK1A",
+            "values": {"OMRÅDE": "Rudersdal, Hørsholm", "ALDER": "IALT", "Tid": ">=2016K3"},
+        }
+    )
+    assert parsed["values"]["Tid"] == ">=2016K3"
+    result = hent_data("FOLK1A", values=parsed["values"])
+    assert result["rows"]
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    variables = {item["code"]: item["values"] for item in sent["variables"]}
+    assert variables["OMRÅDE"] == ["230", "223"]
+    assert variables["ALDER"] == ["IALT"]
+    assert variables["Tid"] == [">=2016K3"]
+
+    children = hent_data(
+        "FOLK1A",
+        values={"OMRÅDE": "230, 223"},
+        sum_range={"ALDER": "0, 17"},
+    )
+    assert {row["OMRÅDE"] for row in children["rows"]} == {"Rudersdal", "Hørsholm"}
+    assert children["rows"][0]["ALDER"] == "0-17"
+
+
 def test_tabelinfo_filter_finds_a_value_past_the_cap() -> None:
     info = tabelinfo("FOLK1A", variable="OMRÅDE", values_filter="Silkeborg")
     assert info["variables"] == [

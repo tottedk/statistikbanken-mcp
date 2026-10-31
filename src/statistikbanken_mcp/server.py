@@ -28,7 +28,10 @@ INSTRUCTIONS = (
     'sum_from {"ALDER": "80"} totals 80 and older. '
     'sum_range {"ALDER": ["0", "17"]} totals a numeric range. '
     'sum_range {"ALDER": ["25-29", "30-34"]} adds those codes. '
-    'A value like ">=80" returns every code on its own row. '
+    'A value like ">=80" returns every code on its own row. It does not add them. '
+    "Do not sum a time variable across several places or a range such as >=80. "
+    'For the change over time, pass Tid in values as ">=2015K1". '
+    "A values entry may be one code or several codes separated by a comma. "
     "A trailing 0 marked unpublished is a period the API has not published yet. "
     'Omit Tid or pass "(1)" for the latest period.'
 )
@@ -103,9 +106,10 @@ def tabelinfo(
     from "0" to "125" plus IALT. Time variables are a time_span (first, last,
     count) rather than every period. Other value lists are capped; value_count
     is the full size and values_truncated means the list was cut. Pass
-    values_filter to search one variable's codes and labels (for example
-    variable "OMRÅDE" and values_filter "Silkeborg"). `total`, when present,
-    is the code used if that required variable is omitted in hent_data.
+    values_filter to search codes and labels. Several words, separated by a
+    comma or a space, match any of them (for example "Rudersdal, Hørsholm").
+    A variable with no match keeps its normal list and says so. `total`, when
+    present, is the code used if that required variable is omitted in hent_data.
     eliminable means the variable can be left out. A time variable also accepts
     "(1)" for the latest period and ranges such as ">=2016K3".
     """
@@ -117,9 +121,9 @@ def tabelinfo(
 @mcp.tool()
 def hent_data(
     table: str,
-    values: dict[str, list[str]] | None = None,
+    values: dict[str, list[str] | str] | None = None,
     sum_from: dict[str, str] | None = None,
-    sum_range: dict[str, list[str]] | None = None,
+    sum_range: dict[str, list[str] | str] | None = None,
 ) -> dict[str, Any]:
     """Fetch observations from a Statistikbanken table.
 
@@ -128,11 +132,13 @@ def hent_data(
     period, the same as the value "(1)".
 
     `values` maps a variable id to codes or labels, matched without case
-    sensitivity ("Silkeborg", "København", "kobenhavn"). An unknown value
-    names the closest labels and, for Tid, the latest period. These expressions
-    are passed through: "*" (every code), "(1)" (latest period), "(-n+4)"
-    (the four latest periods), and a range such as ">=2016K3". A range lists
-    matching periods. It does not add them together.
+    sensitivity ("Silkeborg", "København", "kobenhavn"). Each entry may be a
+    list, one code ("230"), or several codes separated by a comma
+    ("Rudersdal, Hørsholm"). An unknown value names the closest labels and,
+    for Tid, the latest period. These expressions are passed through: "*"
+    (every code), "(1)" (latest period), "(-n+4)" (the four latest periods),
+    and a range such as ">=2016K3". A range lists matching periods. It does
+    not add them together.
 
     A variable that cannot be omitted and has one total (code TOT or IALT, or
     text "I alt") is filled with that total and listed in `defaults`. If it
@@ -146,8 +152,14 @@ def hent_data(
     of codes to add. {"ALDER": ["0", "17"]} is ages 0 through 17. {"ALDER":
     ["25-29", "30-34"]} adds those bands. {"Tid": ["2023K1", "2023K2",
     "2023K3", "2023K4"]} adds those quarters when the API allows a sum, and
-    otherwise adds the published rows. Do not also put that variable in
-    `values` or `sum_from`. ">=80" returns one row per code.
+    otherwise adds the published rows, but only when every other variable is
+    one plain code. Two periods in sum_range are not a range from the first
+    to the second: that call is rejected. So is a time sum combined with
+    several values, or with a range such as ">=80", because adding those
+    cells would hide rows. For the change over time, pass
+    {"Tid": [">=2015K1"]} in values and use sum_from for ages. Do not also
+    put a summed variable in `values` or `sum_from`. ">=80" returns one row
+    per code.
 
     The result contains table, title, description, unit, periods, updated,
     source, and rows. Title, description, unit, and period say what the number

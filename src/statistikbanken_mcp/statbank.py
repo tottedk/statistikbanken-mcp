@@ -217,13 +217,16 @@ class StatbankClient:
     def fetch(
         self,
         table: str,
-        values: dict[str, list[str]] | None = None,
+        values: dict[str, list[str] | str] | None = None,
         sum_from: dict[str, str] | None = None,
-        sum_range: dict[str, list[str]] | None = None,
+        sum_range: dict[str, list[str] | str] | None = None,
     ) -> dict[str, Any]:
+        values = _coerce_code_map(values, "values")
+        sum_range = _coerce_code_map(sum_range, "sum_range")
         metadata = self._metadata_for(table)
         selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
         assumed = _fill_required(metadata, selections)
+        _guard_time_sums(metadata, selections, explicit)
         variables = [{"code": code, "values": selected} for code, selected in selections.items()]
         payload: dict[str, Any] = {
             "table": metadata.id,
@@ -463,8 +466,19 @@ def _public_variable(variable: _Variable, *, values_filter: str | None = None) -
     total = _unique_total(variable)
     if total is not None:
         published["total"] = {"id": total["id"], "text": total["text"]}
-    needle = values_filter.casefold().strip() if values_filter and values_filter.strip() else ""
-    if variable.time and not needle:
+    terms = _filter_terms(values_filter)
+    if terms:
+        shown = [
+            {"id": item["id"], "text": item["text"]}
+            for item in variable.values
+            if _value_matches_terms(item, terms)
+        ]
+        if shown:
+            published["values"] = shown
+            published["value_count"] = len(shown)
+            return published
+        published["filter_note"] = "No match for the filter on this variable."
+    if variable.time:
         values = variable.values
         if values:
             published["time_span"] = {
@@ -474,15 +488,6 @@ def _public_variable(variable: _Variable, *, values_filter: str | None = None) -
             }
         else:
             published["time_span"] = {"first": None, "last": None, "count": 0}
-        return published
-    if needle:
-        shown = [
-            {"id": item["id"], "text": item["text"]}
-            for item in variable.values
-            if needle in item["id"].casefold() or needle in item["text"].casefold()
-        ]
-        published["values"] = shown
-        published["value_count"] = len(shown)
         return published
     numeric, explicit = _split_numeric_run(variable.values)
     if numeric is not None:
@@ -516,6 +521,132 @@ def _split_numeric_run(
     if not contiguous:
         return None, [dict(item) for item in values]
     return {"from": str(numbers[0]), "to": str(numbers[-1])}, [dict(item) for item in explicit]
+
+
+def _filter_terms(values_filter: str | None) -> list[str]:
+    if not values_filter or not values_filter.strip():
+        return []
+    return [part for part in re.split(r"[\s,;]+", values_filter.casefold()) if len(part) >= 2]
+
+
+def _value_matches_terms(item: dict[str, str], terms: list[str]) -> bool:
+    fields = (
+        item["id"].casefold(),
+        item["text"].casefold(),
+        _fold(item["id"]),
+        _fold(item["text"]),
+    )
+    for term in terms:
+        folded = _fold(term)
+        if any(term in field or folded in field for field in fields):
+            return True
+    return False
+
+
+def _coerce_code_map(raw: Any, name: str) -> dict[str, list[str]] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise StatbankError(f"{name} maps a variable id to a list of codes, or to one code.")
+    return {str(key): _coerce_code_list(value, f"{name}.{key}") for key, value in raw.items()}
+
+
+def _coerce_code_list(value: Any, name: str) -> list[str]:
+    if isinstance(value, str):
+        return _split_codes(value)
+    if isinstance(value, list):
+        codes: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise StatbankError(f"{name} must be a list of codes, or one code.")
+            codes.extend(_split_codes(item))
+        return codes
+    raise StatbankError(f"{name} must be a list of codes, or one code.")
+
+
+def _split_codes(text: str) -> list[str]:
+    """Turn one code, or an unambiguous comma-separated list, into codes.
+
+    Expressions such as ``>=2015K1`` are one value. A comma splits only when
+    every piece is its own code.
+    """
+    stripped = text.strip()
+    if "," not in stripped or _is_expression(stripped):
+        return [stripped]
+    parts = [part.strip() for part in stripped.split(",") if part.strip()]
+    if len(parts) < 2 or any(_is_expression(part) for part in parts):
+        return [stripped]
+    return parts
+
+
+def _guard_time_sums(
+    table: _Table,
+    selections: dict[str, list[str]],
+    explicit: dict[str, list[str]],
+) -> None:
+    """Refuse a time sum that would hide rows or add only the two endpoints.
+
+    The API often rejects ``sum()`` on Tid. Adding the cells afterwards used
+    the first row's labels for every other variable, so a second municipality
+    and every age except the first disappeared into one plausible number.
+    """
+    for var_id, codes in explicit.items():
+        variable = table.variable(var_id)
+        if variable is None or not variable.time or not codes:
+            continue
+        conflicts = [
+            other_id
+            for other_id, selected in selections.items()
+            if other_id != var_id
+            and selected
+            and (len(selected) != 1 or _is_expression(selected[0]))
+        ]
+        if len(codes) != 2 and not conflicts:
+            continue
+        raise StatbankError(_time_sum_error(var_id, codes, conflicts, selections))
+
+
+def _time_sum_error(
+    var_id: str,
+    codes: list[str],
+    conflicts: list[str],
+    selections: dict[str, list[str]],
+) -> str:
+    start, end = codes[0], codes[-1]
+    parts = []
+    if len(codes) == 2:
+        parts.append(
+            f"sum_range on {var_id} with {start} and {end} adds only those two periods, "
+            "not every period between them."
+        )
+    if conflicts:
+        listed = ", ".join(conflicts)
+        parts.append(
+            f"Refusing to add {var_id} while {listed} has several values or a range. "
+            "That would hide rows."
+        )
+    parts.append(
+        f'For the development over time, use values {{"{var_id}": [">={start}"]}} '
+        f'or {{"{var_id}": [">={start}<={end}"]}}. '
+        "Each period comes back as its own row."
+    )
+    advice = _older_than_advice(selections)
+    if advice:
+        parts.append(advice)
+    return " ".join(parts)
+
+
+def _older_than_advice(selections: dict[str, list[str]]) -> str:
+    selected = selections.get("ALDER") or []
+    if len(selected) != 1:
+        return ""
+    match = re.fullmatch(r">=(\d+)", selected[0].strip())
+    if match is None:
+        return ""
+    start = match.group(1)
+    return (
+        f'Use sum_from {{"ALDER": "{start}"}} for ages {start} and older, not values [">={start}"].'
+    )
 
 
 def _build_selections(
@@ -934,25 +1065,40 @@ def _sum_rows(
     variable_id: str,
     codes: list[str],
 ) -> list[dict[str, Any]]:
+    """Add one variable inside each other combination of values.
+
+    One group per series. The first row's labels are not reused for a second
+    municipality or a second age.
+    """
     if not rows:
         raise StatbankError(f"Statistikbanken returned no rows to add for {variable_id}.")
-    total = 0
+    grouped: dict[tuple[tuple[str, Any], ...], dict[str, Any]] = {}
+    order: list[tuple[tuple[str, Any], ...]] = []
     for row in rows:
         value = row.get("value")
         if isinstance(value, bool) or not isinstance(value, int | float):
             label = row.get(variable_id, "")
             raise StatbankError(f"Could not add {variable_id} because '{label}' has no number.")
-        total += value
-    if isinstance(total, float) and total.is_integer():
-        total = int(total)
-    summed = {
-        key: value
-        for key, value in rows[0].items()
-        if key not in {variable_id, "value", "unpublished"}
-    }
-    summed[variable_id] = "+".join(codes)
-    summed["value"] = total
-    return [summed]
+        identity = tuple(
+            (key, row.get(key)) for key in row if key not in {variable_id, "value", "unpublished"}
+        )
+        current = grouped.get(identity)
+        if current is None:
+            current = {key: item for key, item in identity}
+            current[variable_id] = "+".join(codes)
+            current["value"] = 0
+            grouped[identity] = current
+            order.append(identity)
+        current["value"] += value
+    summed_rows: list[dict[str, Any]] = []
+    for identity in order:
+        summed = grouped[identity]
+        total = summed["value"]
+        if isinstance(total, float) and total.is_integer():
+            total = int(total)
+        summed["value"] = total
+        summed_rows.append(summed)
+    return summed_rows
 
 
 def _periods(table: _Table, rows: list[dict[str, Any]]) -> list[str]:

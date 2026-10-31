@@ -38,6 +38,19 @@ def test_search_and_metadata(live_client: StatbankClient) -> None:
     assert areas["157"] == "Gentofte"
 
 
+def test_ambiguous_time_sum_is_rejected_live(live_client: StatbankClient) -> None:
+    with pytest.raises(ToolError, match="sum_from") as caught:
+        hent_data(
+            "FOLK1A",
+            values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+            sum_range={"Tid": ["2015K1", "2026K3"]},
+        )
+    message = str(caught.value)
+    assert ">=2015K1" in message
+    assert "13078" not in message
+    assert "Traceback" not in message
+
+
 def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
     info = tabelinfo("FOLK1A")
     tid = next(item for item in info["variables"] if item["id"] == "Tid")
