@@ -684,9 +684,8 @@ def _turn(
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
 ) -> TurnResult:
-    # The model text is not a source of numbers. A figure stays only when this
-    # turn's hent_data rows contain it. Anything else is dropped, because a
-    # wrong but plausible number is worse than no sentence.
+    # A figure in the prose is kept when the same number appears in the question
+    # or anywhere in this turn's tool results. Anything else is dropped.
     refusal = _relevance_refusal(question, facts)
     if refusal:
         # The rows are real, but they are not the question. Do not chart them.
@@ -1029,25 +1028,29 @@ def _unverified_numbers(
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]] | None = None,
 ) -> list[float]:
-    allowed = set(_numbers_in(question))
-    allowed.update(_sent_codes(calls))
+    allowed = _numbers_in_context(question, facts, calls)
+    return [number for number in _numbers_in(answer) if not _near(number, allowed)]
+
+
+def _numbers_in_context(
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]] | None,
+) -> set[float]:
+    """Numbers already present in the question or in this turn's tool results."""
+    texts = [question]
+    for call in calls or []:
+        texts.append(str(call.get("result") or ""))
+    found: set[float] = set()
     for fact in facts:
         value = fact.get("value")
         if isinstance(value, bool) or not isinstance(value, int | float):
             continue
-        allowed.add(float(value))
-    return [number for number in _numbers_in(answer) if not _near(number, allowed)]
-
-
-def _sent_codes(calls: list[dict[str, str]] | None) -> set[float]:
-    """Area and value codes from this turn's hent_data arguments, not its results."""
-    if not calls:
-        return set()
-    found: set[float] = set()
-    for call in calls:
-        if call.get("name") != "hent_data":
-            continue
-        found.update(_numbers_in(str(call.get("arguments") or "")))
+        found.add(float(value))
+        for key in ("table", "period", "unit", "detail"):
+            texts.append(str(fact.get(key) or ""))
+    for text in texts:
+        found.update(_numbers_in(text))
     return found
 
 

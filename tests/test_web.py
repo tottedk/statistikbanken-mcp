@@ -241,25 +241,28 @@ def test_hallucinated_turn_keeps_the_tool_trace_and_hides_the_numbers() -> None:
     assert result.calls[0]["name"] == "hent_data"
 
 
-def test_table_ids_and_sent_area_codes_are_not_figures() -> None:
-    text = "steget fra 3.524 (2015K1) til 5.045 (2026K3) i FOLK1A, område 223"
+def test_a_number_in_the_tool_result_may_be_quoted() -> None:
+    text = "Befolkningen den 1. i kvartalet: Rudersdal fra 3.524 (2015K1) til 5.045 (2026K3)"
     facts = [
-        _population_fact(3524, "2015K1", "Hørsholm"),
-        _population_fact(5045, "2026K3", "Hørsholm"),
+        _population_fact(3524, "2015K1"),
+        _population_fact(5045, "2026K3"),
     ]
     calls = [
         {
             "name": "hent_data",
-            "arguments": '{"table": "FOLK1A", "values": {"OMRÅDE": ["223"], "Tid": [">=2015K1"]}}',
-            "result": "",
+            "arguments": "{}",
+            "result": (
+                '{"table": "FOLK1A", "title": "Befolkningen den 1. i kvartalet", '
+                '"rows": [{"value": 3524}, {"value": 5045}]}'
+            ),
         }
     ]
-    question = "Hvordan har udviklingen været siden 2015?"
+    question = "Hvordan har udviklingen i Rudersdal været siden 2015?"
     kept = guard_answer(question, text, facts, calls)
-    assert "3.524" in kept
-    assert "5.045" in kept
-    assert "FOLK1A" in kept
-    assert kept != UNVERIFIED_NUMBERS
+    assert kept == text
+    invented = guard_answer(question, text + ", i alt 9.999", facts, calls)
+    assert invented == UNVERIFIED_NUMBERS
+    assert "9.999" not in invented
 
 
 def test_unverified_numbers_are_removed_when_facts_exist() -> None:
