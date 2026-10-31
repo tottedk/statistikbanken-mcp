@@ -40,7 +40,8 @@ def test_search_and_metadata(live_client: StatbankClient) -> None:
 
 def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
     info = tabelinfo("FOLK1A")
-    latest = next(item for item in info["variables"] if item["id"] == "Tid")["values"][-1]["id"]
+    tid = next(item for item in info["variables"] if item["id"] == "Tid")
+    latest = tid["time_span"]["last"]["id"]
     result = hent_data(
         "FOLK1A",
         values={
@@ -62,7 +63,8 @@ def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
 
 def test_question_ten_year_series(live_client: StatbankClient) -> None:
     info = tabelinfo("FOLK1A")
-    latest = next(item for item in info["variables"] if item["id"] == "Tid")["values"][-1]["id"]
+    tid = next(item for item in info["variables"] if item["id"] == "Tid")
+    latest = tid["time_span"]["last"]["id"]
     result = hent_data(
         "FOLK1A",
         values={

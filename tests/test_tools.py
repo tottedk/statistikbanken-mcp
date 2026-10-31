@@ -26,7 +26,8 @@ def test_find_tabel_matches_id_case_insensitively() -> None:
 
 
 def test_find_tabel_empty_and_unknown() -> None:
-    assert find_tabel("zzzxxyyqqq") == []
+    with pytest.raises(ToolError, match="No table matches"):
+        find_tabel("zzzxxyyqqq")
     with pytest.raises(ToolError, match="befolkning"):
         find_tabel("   ")
     with pytest.raises(ToolError, match="1 to 25"):
@@ -45,8 +46,12 @@ def test_tabelinfo_compacts_ages_and_lists_areas() -> None:
     assert variables["ALDER"]["eliminable"] is True
     assert variables["Tid"]["eliminable"] is False
     assert variables["Tid"]["time"] is True
-    assert variables["Tid"]["values"][0]["id"] == "2008K1"
-    assert variables["Tid"]["values"][-1]["id"] == "2026K3"
+    assert variables["Tid"]["time_span"]["first"]["id"] == "2008K1"
+    assert variables["Tid"]["time_span"]["last"]["id"] == "2026K3"
+    assert variables["Tid"]["time_span"]["count"] == 75
+    assert "values" not in variables["Tid"]
+    assert variables["OMRÅDE"]["values_truncated"] is True
+    assert variables["OMRÅDE"]["value_count"] == 105
     areas = {item["id"]: item["text"] for item in variables["OMRÅDE"]["values"]}
     assert areas["230"] == "Rudersdal"
     assert areas["223"] == "Hørsholm"
@@ -91,6 +96,103 @@ def test_api_rejects_a_bad_sum_expression(calls: list[dict[str, object]]) -> Non
     assert "Traceback" not in message
     data_calls = [call for call in calls if str(call["path"]).endswith("/data")]
     assert data_calls
+
+
+def test_search_partial_synonym_and_place_names() -> None:
+    befolkning = [hit["id"] for hit in find_tabel("befolkning kommune", limit=5)]
+    assert "FOLK1A" in befolkning
+    assert any(hit["id"] == "AUP01" for hit in find_tabel("bruttoledighed"))
+    assert find_tabel("population", limit=1)[0]["id"] == "FOLK1A"
+    assert any(hit["id"] == "EJ56" for hit in find_tabel("huspriser"))
+    assert any(hit["id"] == "HDYR07" for hit in find_tabel("husdyr"))
+    assert any(hit["id"] == "STRAF10" for hit in find_tabel("indbrud"))
+    silkeborg = find_tabel("Silkeborg", limit=1)[0]
+    assert silkeborg["id"] == "FOLK1A"
+    assert silkeborg["matched_values"] == [{"variable": "OMRÅDE", "id": "740", "text": "Silkeborg"}]
+    with pytest.raises(ToolError, match="befolkning"):
+        find_tabel("enhjørninger")
+
+
+def test_values_accept_labels_and_suggest_near_misses(calls: list[dict[str, object]]) -> None:
+    result = hent_data("FOLK1A", {"OMRÅDE": ["Silkeborg"], "ALDER": ["IALT"], "Tid": ["(1)"]})
+    assert result["rows"][0]["OMRÅDE"] == "Silkeborg"
+    assert result["rows"][0]["value"] == 103293
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    areas = next(item["values"] for item in sent["variables"] if item["code"] == "OMRÅDE")
+    assert areas == ["740"]
+
+    copenhagen = hent_data("FOLK1A", {"område": ["Kobenhavn"], "alder": ["ialt"], "Tid": ["(1)"]})
+    assert copenhagen["rows"][0]["OMRÅDE"] == "København"
+    with pytest.raises(ToolError, match="Latest period is 2026K3"):
+        hent_data("FOLK1A", {"Tid": ["2035K1"]})
+    with pytest.raises(ToolError, match="Narnia"):
+        hent_data("FOLK1A", {"OMRÅDE": ["Narnia"]})
+
+
+def test_required_variable_without_a_total_lists_codes() -> None:
+    with pytest.raises(ToolError, match="ENHED") as caught:
+        hent_data("INDKP105", {"OMRÅDE": ["157"], "Tid": ["2024"]})
+    message = str(caught.value)
+    assert "118" in message
+    assert "Der skal vælges" not in message
+    assert "Traceback" not in message
+
+
+def test_tabelinfo_filter_finds_a_value_past_the_cap() -> None:
+    info = tabelinfo("FOLK1A", variable="OMRÅDE", values_filter="Silkeborg")
+    assert info["variables"] == [
+        {
+            "id": "OMRÅDE",
+            "text": "område",
+            "eliminable": True,
+            "time": False,
+            "values": [{"id": "740", "text": "Silkeborg"}],
+            "value_count": 1,
+        }
+    ]
+
+
+def test_explicit_code_sum_and_unpublished_zeros() -> None:
+    ages = hent_data(
+        "HFUDD11",
+        values={"HFUDD": ["H70"], "Tid": ["2025"]},
+        sum_range={
+            "ALDER": ["25-29", "30-34", "35-39", "40-44", "45-49", "50-54", "55-59", "60-64"]
+        },
+    )
+    assert ages["rows"] == [
+        {
+            "HFUDD": "H70 Lange videregående uddannelser, LVU",
+            "ALDER": "25-29+30-34+35-39+40-44+45-49+50-54+55-59+60-64",
+            "Tid": "2025",
+            "value": 493701,
+        }
+    ]
+    quarters = hent_data(
+        "STRAF10",
+        values={"OVERTRÆD": ["1"]},
+        sum_range={"Tid": ["2023K1", "2023K2", "2023K3", "2023K4"]},
+    )
+    assert quarters["rows"] == [
+        {"OVERTRÆD": "Straffelov i alt", "Tid": "2023K1+2023K2+2023K3+2023K4", "value": 331828}
+    ]
+    hotel = hent_data(
+        "HOTEL1",
+        values={
+            "OMRÅDE": ["000"],
+            "NATION1": ["TOT"],
+            "TAL": ["1030"],
+            "PERIODE": ["07", "08", "09", "10"],
+            "Tid": ["2026"],
+        },
+    )
+    by_month = {row["PERIODE"]: row for row in hotel["rows"]}
+    assert by_month["August"]["value"] == 3238862
+    assert "unpublished" not in by_month["August"]
+    assert by_month["September"]["unpublished"] is True
+    assert by_month["September"]["value"] == 0
+    assert by_month["Oktober"]["unpublished"] is True
 
 
 def test_sum_range_rejects_bad_bounds() -> None:

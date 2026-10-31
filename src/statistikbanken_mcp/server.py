@@ -19,15 +19,18 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 INSTRUCTIONS = (
     "Tools for Danmarks Statistik (Statistikbanken). "
-    "Search with find_tabel, read value codes with tabelinfo, then fetch with hent_data. "
+    "Search with find_tabel, read codes with tabelinfo, then fetch with hent_data. "
+    "Search matches some of the words, a few everyday synonyms, and municipality names "
+    "from FOLK1A. A miss is an error that suggests a broader query. "
     "The table title, description, unit, and period say what a number measures. "
     "If they only partly cover the question, say so. "
-    "Ages in FOLK1A are single years from 0 to 125. "
+    "Values may be codes or labels, for example Silkeborg or København. "
     'sum_from {"ALDER": "80"} totals 80 and older. '
-    'sum_range {"ALDER": ["0", "17"]} totals a closed range. '
-    'A value like ">=80" returns every age on its own row. '
-    'Omit Tid or pass "(1)" for the latest period. '
-    '">=2016K3" selects every period from that quarter onward.'
+    'sum_range {"ALDER": ["0", "17"]} totals a numeric range. '
+    'sum_range {"ALDER": ["25-29", "30-34"]} adds those codes. '
+    'A value like ">=80" returns every code on its own row. '
+    "A trailing 0 marked unpublished is a period the API has not published yet. "
+    'Omit Tid or pass "(1)" for the latest period.'
 )
 
 mcp = MCPServer("statistikbanken", instructions=INSTRUCTIONS)
@@ -69,19 +72,27 @@ def _guard(fn: Callable[[], T]) -> T:
 def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
     """Search Statistikbanken tables by free text.
 
-    Matches table id, title, and variable names. Matching is not case-sensitive.
+    Matches table id, title, and variable names. A hit can match some of the
+    words rather than every word, and a few everyday synonyms are recognised
+    (for example bruttoledighed, huspriser, husdyr, population, people, indbrud).
+    Municipality names are matched against FOLK1A areas and returned on that hit
+    as matched_values with their codes. Matching is not case-sensitive.
     "befolkning" returns FOLK1A near the top. `limit` is 1–25 and defaults to 10.
     Each hit has id, title, unit, latest_period, and variables. The title is the
-    table's own wording and can be narrower than the query: a search for
-    associations can return a sports-club table. Read the title, then tabelinfo,
-    before treating the hit as the answer. Variable entries are names, not the
-    codes hent_data expects. An empty list means nothing matched.
+    table's own wording and can be narrower than the query. Read it, then
+    tabelinfo, before treating the hit as the answer. If nothing matches, the
+    tool returns an error that suggests a broader subject. Variable entries are
+    names; hent_data also accepts the labels from tabelinfo.
     """
     return _guard(lambda: get_client().find_tables(query, limit=limit))
 
 
 @mcp.tool()
-def tabelinfo(table: str) -> dict[str, Any]:
+def tabelinfo(
+    table: str,
+    variable: str | None = None,
+    values_filter: str | None = None,
+) -> dict[str, Any]:
     """Describe one table: its variables and the value codes hent_data accepts.
 
     Compare title, description, and unit with the question before fetching.
@@ -89,12 +100,18 @@ def tabelinfo(table: str) -> dict[str, Any]:
     count of memberships, and "Gennemsnit for personer i gruppen (kr.)" is the
     unit when the table's own unit is "-".
     Long runs of numeric codes are collapsed. On FOLK1A, ALDER has numeric_codes
-    from "0" to "125" (the code is the age) plus the separate code IALT
-    ("Alder i alt"). OMRÅDE, KØN, CIVILSTAND, and Tid are listed in full.
-    eliminable means the variable can be left out of hent_data. A time variable
-    also accepts "(1)" for the latest period and ranges such as ">=2016K3".
+    from "0" to "125" plus IALT. Time variables are a time_span (first, last,
+    count) rather than every period. Other value lists are capped; value_count
+    is the full size and values_truncated means the list was cut. Pass
+    values_filter to search one variable's codes and labels (for example
+    variable "OMRÅDE" and values_filter "Silkeborg"). `total`, when present,
+    is the code used if that required variable is omitted in hent_data.
+    eliminable means the variable can be left out. A time variable also accepts
+    "(1)" for the latest period and ranges such as ">=2016K3".
     """
-    return _guard(lambda: get_client().table_info(table))
+    return _guard(
+        lambda: get_client().table_info(table, variable=variable, values_filter=values_filter)
+    )
 
 
 @mcp.tool()
@@ -110,27 +127,35 @@ def hent_data(
     example both sexes). Tid is the exception: omitting it returns the latest
     period, the same as the value "(1)".
 
-    `values` maps a variable id to the codes to return as separate rows. Take
-    the ids from tabelinfo. These expressions are passed through: "*" (every
-    code), "(1)" (latest period), "(-n+4)" (the four latest periods), and a
-    range such as ">=2016K3". A range lists matching periods. It does not add
-    them together.
+    `values` maps a variable id to codes or labels, matched without case
+    sensitivity ("Silkeborg", "København", "kobenhavn"). An unknown value
+    names the closest labels and, for Tid, the latest period. These expressions
+    are passed through: "*" (every code), "(1)" (latest period), "(-n+4)"
+    (the four latest periods), and a range such as ">=2016K3". A range lists
+    matching periods. It does not add them together.
+
+    A variable that cannot be omitted and has one total (code TOT or IALT, or
+    text "I alt") is filled with that total and listed in `defaults`. If it
+    has no total, the call fails and lists the codes to pass.
 
     `sum_from` maps a variable id to a numeric code. Every numeric code from
-    that one upward is added, by the API, into a single figure. For FOLK1A,
-    {"ALDER": "80"} is everyone aged 80 through 125, labelled "80+".
+    that one upward is added into a single figure. {"ALDER": "80"} is everyone
+    aged 80 and older, labelled "80+".
 
-    `sum_range` maps a variable id to two numeric codes, low then high,
-    inclusive. {"ALDER": ["0", "17"]} is everyone aged 0 through 17, labelled
-    "0-17", as one figure. Do not also put that variable in `values` or
-    `sum_from`. ">=80" is not a total; it returns one row per code.
+    `sum_range` is either two numeric codes, low then high, or a longer list
+    of codes to add. {"ALDER": ["0", "17"]} is ages 0 through 17. {"ALDER":
+    ["25-29", "30-34"]} adds those bands. {"Tid": ["2023K1", "2023K2",
+    "2023K3", "2023K4"]} adds those quarters when the API allows a sum, and
+    otherwise adds the published rows. Do not also put that variable in
+    `values` or `sum_from`. ">=80" returns one row per code.
 
     The result contains table, title, description, unit, periods, updated,
     source, and rows. Title, description, unit, and period say what the number
-    measures. If unit is "-", the selected value labels carry the measurement,
-    for example "Gennemsnit for personer i gruppen (kr.)". If those words only
-    partly cover the question, say so. Each row uses variable ids as keys and
-    labels as text, plus `value`.
+    measures. If unit is "-", the selected value labels carry the measurement.
+    If those words only partly cover the question, say so. A row with
+    unpublished true is a trailing 0: the API uses 0 for a period it has not
+    published yet. Each row uses variable ids as keys and labels as text, plus
+    `value`.
     """
     return _guard(lambda: get_client().fetch(table, values, sum_from, sum_range))
 

@@ -1,0 +1,127 @@
+{
+  "dataset": {
+    "dimension": {
+      "OMRÅDE": {
+        "label": "område",
+        "category": {
+          "index": {
+            "000": 0
+          },
+          "label": {
+            "000": "Hele landet"
+          }
+        }
+      },
+      "NATION1": {
+        "label": "gæstens nationalitet",
+        "category": {
+          "index": {
+            "TOT": 0
+          },
+          "label": {
+            "TOT": "I alt"
+          }
+        }
+      },
+      "TAL": {
+        "label": "enhed",
+        "category": {
+          "index": {
+            "1030": 0
+          },
+          "label": {
+            "1030": "Overnatninger"
+          }
+        }
+      },
+      "PERIODE": {
+        "label": "periode",
+        "category": {
+          "index": {
+            "07": 0,
+            "08": 1,
+            "09": 2,
+            "10": 3
+          },
+          "label": {
+            "07": "Juli",
+            "08": "August",
+            "09": "September",
+            "10": "Oktober"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "HOTEL1": 0
+          },
+          "label": {
+            "HOTEL1": "Overnatninger på hoteller og feriecentre"
+          },
+          "unit": {
+            "HOTEL1": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2026": 0
+          },
+          "label": {
+            "2026": "2026"
+          }
+        }
+      },
+      "id": [
+        "OMRÅDE",
+        "NATION1",
+        "TAL",
+        "PERIODE",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        1,
+        4,
+        1,
+        1
+      ],
+      "role": {
+        "geo": [
+          "OMRÅDE"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Overnatninger på hoteller og feriecentre efter område, gæstens nationalitet, enhed, periode, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-10-09T06:00:00Z",
+    "value": [
+      3589689,
+      3238862,
+      0,
+      0
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/ef9a83ae-26fa-4a56-8deb-3942712c202f",
+        "tableid": "HOTEL1",
+        "decimals": 0
+      }
+    }
+  }
+}
