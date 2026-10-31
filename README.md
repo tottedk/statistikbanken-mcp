@@ -90,7 +90,7 @@ That starts a local page where you can list the tools and call them.
 
 ## Web demo
 
-A local page asks a question in Danish or English. The answer sits above the numbers (table, period, unit). The tool calls that produced them can be expanded. The page is a client of the MCP server over stdio. It does not read Statistikbanken itself.
+A local page asks a question in Danish or English. The answer sits above the numbers (table, period, unit). The tool calls that produced them can be expanded. The page is a client of the MCP server over stdio. It does not read Statistikbanken itself. A development over time is one `hent_data` call with a period range such as `>=2015K1`, so each quarter is its own row. Several periods in one series draw a line chart on the page. Several places draw several lines. Hent CSV downloads those rows as UTF-8 with a BOM, a semicolon between columns, and a decimal comma, which is what Danish Excel expects. Each table links to `https://www.statistikbanken.dk/` plus the table id.
 
 ```bash
 uv run statistikbanken-web

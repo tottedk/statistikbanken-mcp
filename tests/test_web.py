@@ -21,7 +21,10 @@ from statistikbanken_mcp.web import (
     ToolCall,
     ToolSpec,
     TurnResult,
+    _facts_from,
     _handler,
+    chart_series,
+    facts_to_csv,
     list_server_tools,
     run_turn,
     server_command,
@@ -108,6 +111,7 @@ def test_turn_cites_table_period_and_records_calls() -> None:
             "value": 5045,
             "detail": "OMRÅDE: Rudersdal, ALDER: 80+",
             "unpublished": False,
+            "url": "https://www.statistikbanken.dk/FOLK1A",
         }
     ]
 
@@ -216,6 +220,74 @@ def _post(port: int, payload: dict) -> HTTPConnection:
     body = json.dumps(payload).encode()
     connection.request("POST", "/api/ask", body=body, headers={"Content-Type": "application/json"})
     return connection.getresponse()
+
+
+def test_chart_series_groups_periods_and_skips_a_single_point() -> None:
+    facts = [
+        _fact("Rudersdal", "2015K1", 4200),
+        _fact("Rudersdal", "2026K3", 5045),
+        _fact("Hørsholm", "2015K1", 2100),
+        _fact("Hørsholm", "2026K3", 2790),
+        _fact("Rudersdal", "2026K4", 0, unpublished=True),
+        {"table": "FOLK1A", "period": "2020", "unit": "Antal", "value": 1, "detail": "Kun ét"},
+    ]
+    series = chart_series(facts)
+    assert [item["label"] for item in series] == [
+        "OMRÅDE: Rudersdal",
+        "OMRÅDE: Hørsholm",
+    ]
+    assert [point["period"] for point in series[0]["points"]] == ["2015K1", "2026K3"]
+    assert series[0]["points"][1]["value"] == 5045
+    assert series[1]["unit"] == "Antal"
+
+
+def test_csv_uses_bom_semicolon_and_decimal_comma() -> None:
+    facts = [
+        _fact("Rudersdal", "2015K1", 5045),
+        _fact("Rudersdal", "2015K2", 12.5),
+    ]
+    text = facts_to_csv(facts)
+    assert text.startswith("\ufeff")
+    header = text.splitlines()[0].lstrip("\ufeff")
+    assert header == "tabel;periode;dimensioner;værdi;enhed"
+    assert "FOLK1A;2015K1;OMRÅDE: Rudersdal;5045;Antal" in text
+    assert "FOLK1A;2015K2;OMRÅDE: Rudersdal;12,5;Antal" in text
+
+
+@pytest.mark.live
+def test_multi_period_call_returns_several_facts() -> None:
+    from statistikbanken_mcp.server import hent_data
+
+    result = hent_data(
+        "FOLK1A",
+        values={
+            "OMRÅDE": ["Rudersdal", "Hørsholm"],
+            "KØN": ["TOT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": [">=2015K1"],
+        },
+        sum_from={"ALDER": "80"},
+    )
+    facts = _facts_from("hent_data", json.dumps(result))
+    assert len(facts) >= 8
+    assert facts[0]["url"] == "https://www.statistikbanken.dk/FOLK1A"
+    series = chart_series(facts)
+    labels = {item["label"] for item in series}
+    assert any("Rudersdal" in label for label in labels)
+    assert any("Hørsholm" in label for label in labels)
+    assert all(len(item["points"]) >= 4 for item in series)
+
+
+def _fact(place: str, period: str, value: int | float, unpublished: bool = False) -> dict:
+    return {
+        "table": "FOLK1A",
+        "period": period,
+        "unit": "Antal",
+        "value": value,
+        "detail": f"OMRÅDE: {place}",
+        "unpublished": unpublished,
+        "url": "https://www.statistikbanken.dk/FOLK1A",
+    }
 
 
 def test_app_lists_tools_from_the_mcp_server() -> None:

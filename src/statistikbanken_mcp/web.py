@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import csv
+import io
 import json
 import os
 import sys
@@ -38,6 +40,9 @@ If the table title, unit, or description only partly matches the question, say s
 If the tools have no data, say so.
 Prefer sum_from or sum_range when a total is needed.
 A value like >=80 lists rows. It does not add them.
+For a change over time, fetch every period in one hent_data call.
+Pass Tid as one range, for example >=2015K1.
+Each period comes back as its own row. Do not sum those periods.
 Municipality names may be passed as labels.
 Answer in the same language as the question, in a few sentences."""
 
@@ -72,6 +77,13 @@ PAGE = """<!DOCTYPE html>
   pre { white-space: pre-wrap; word-break: break-word;
     font: 0.85rem/1.4 ui-monospace, monospace; margin: 0.5rem 0 0; }
   .error { color: #8a1f1f; }
+  .facts { max-height: 16rem; overflow: auto; }
+  .chart { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px; padding: 0.75rem; }
+  .chart svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; font-size: 0.95rem; }
+  .swatch { display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.3rem; }
+  .row { display: flex; gap: 0.75rem; align-items: center; }
+  a { color: #1d4e89; }
   footer { margin-top: 2rem; color: #4a453e; font-size: 0.9rem; }
 </style>
 </head>
@@ -100,6 +112,92 @@ function el(tag, text, className) {
   return node;
 }
 
+const COLORS = ["#1c1915", "#9a3412", "#1d4e89", "#3f6212"];
+
+function svgEl(name, attrs) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  return node;
+}
+
+function drawChart(series) {
+  const width = 640, height = 280, left = 64, right = 12, top = 16, bottom = 36;
+  const periods = [];
+  const seen = new Set();
+  for (const item of series) for (const point of item.points) {
+    if (!seen.has(point.period)) { seen.add(point.period); periods.push(point.period); }
+  }
+  periods.sort();
+  let min = Infinity, max = -Infinity;
+  for (const item of series) for (const point of item.points) {
+    min = Math.min(min, point.value);
+    max = Math.max(max, point.value);
+  }
+  if (min === max) { min -= 1; max += 1; }
+  const span = Math.max(periods.length - 1, 1);
+  const xOf = (period) => left + (periods.indexOf(period) / span) * (width - left - right);
+  const yOf = (value) => top + (1 - (value - min) / (max - min)) * (height - top - bottom);
+  const svg = svgEl("svg", {viewBox: "0 0 " + width + " " + height, role: "img"});
+  const title = svgEl("title", {});
+  title.textContent = "Udvikling over tid";
+  svg.append(title);
+  svg.append(svgEl("line", {x1: left, y1: top, x2: left, y2: height - bottom, stroke: "#c9c2b6"}));
+  svg.append(svgEl("line", {
+    x1: left, y1: height - bottom, x2: width - right, y2: height - bottom, stroke: "#c9c2b6"
+  }));
+  for (const value of [max, (min + max) / 2, min]) {
+    const label = svgEl("text", {
+      x: left - 6, y: yOf(value) + 4, "text-anchor": "end", fill: "#4a453e", "font-size": "11"
+    });
+    label.textContent = Math.round(value).toLocaleString("da-DK");
+    svg.append(label);
+  }
+  const step = Math.ceil(periods.length / 6);
+  periods.forEach((period, index) => {
+    if (index % step && index !== periods.length - 1) return;
+    const label = svgEl("text", {
+      x: xOf(period), y: height - 12, "text-anchor": "middle", fill: "#4a453e", "font-size": "11"
+    });
+    label.textContent = period;
+    svg.append(label);
+  });
+  series.forEach((item, index) => {
+    const points = item.points.map((point) => xOf(point.period) + "," + yOf(point.value)).join(" ");
+    svg.append(svgEl("polyline", {
+      points, fill: "none", stroke: COLORS[index % COLORS.length], "stroke-width": "2"
+    }));
+  });
+  const wrap = el("div", null, "chart");
+  wrap.append(svg);
+  return wrap;
+}
+
+function legend(series) {
+  const row = el("div", null, "legend");
+  series.forEach((item, index) => {
+    const bit = el("span");
+    const swatch = el("span", null, "swatch");
+    swatch.style.background = COLORS[index % COLORS.length];
+    bit.append(swatch, document.createTextNode(item.label || item.table || ""));
+    row.append(bit);
+  });
+  return row;
+}
+
+function csvButton(csv) {
+  const button = el("button", "Hent CSV");
+  button.type = "button";
+  button.addEventListener("click", () => {
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "statistikbanken.csv";
+    link.click();
+    URL.revokeObjectURL(link.href);
+  });
+  return button;
+}
+
 function render(data) {
   out.replaceChildren();
   if (data.error) {
@@ -107,13 +205,35 @@ function render(data) {
     return;
   }
   const answer = el("section");
-  answer.append(el("h2", "Svar"), el("p", data.answer || "", "answer"));
+  const heading = el("div", null, "row");
+  heading.append(el("h2", "Svar"));
+  if (data.csv) heading.append(csvButton(data.csv));
+  answer.append(heading, el("p", data.answer || "", "answer"));
   out.append(answer);
+
+  if (data.chart && data.chart.length) {
+    const chart = el("section");
+    chart.append(el("h2", "Udvikling"), drawChart(data.chart), legend(data.chart));
+    out.append(chart);
+  }
 
   const facts = el("section");
   facts.append(el("h2", "Tal"));
+  const linked = new Set();
+  for (const fact of data.facts || []) {
+    if (fact.url && fact.table && !linked.has(fact.table)) {
+      linked.add(fact.table);
+      const link = document.createElement("a");
+      link.href = fact.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Tabel " + fact.table + " på Statistikbanken";
+      facts.append(link);
+    }
+  }
+  const list = el("div", null, "facts");
   if (!data.facts || data.facts.length === 0) {
-    facts.append(el("p", "Ingen tal hentet.", "meta"));
+    list.append(el("p", "Ingen tal hentet.", "meta"));
   }
   for (const fact of data.facts || []) {
     const card = el("div", null, "fact");
@@ -127,8 +247,9 @@ function render(data) {
     if (fact.detail) bits.push(fact.detail);
     if (fact.unpublished) bits.push("Ikke offentliggjort endnu");
     card.append(el("div", bits.filter(Boolean).join(" · "), "meta"));
-    facts.append(card);
+    list.append(card);
   }
+  facts.append(list);
   out.append(facts);
 
   const trace = el("section");
@@ -303,6 +424,8 @@ class TurnResult:
     answer: str
     facts: list[dict[str, Any]]
     calls: list[dict[str, str]]
+    chart: list[dict[str, Any]] = field(default_factory=list)
+    csv: str = ""
 
 
 async def run_turn(
@@ -326,7 +449,7 @@ async def run_turn(
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
             answer = reply.content.strip() or _fallback_answer(calls)
-            return TurnResult(answer=answer, facts=facts, calls=calls)
+            return _turn(answer, facts, calls)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
             if used >= max_tool_calls:
@@ -354,7 +477,7 @@ async def run_turn(
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
             answer = final.content.strip() or _fallback_answer(calls)
-            return TurnResult(answer=answer, facts=facts, calls=calls)
+            return _turn(answer, facts, calls)
 
 
 def _assistant_message(reply: ChatReply) -> dict[str, Any]:
@@ -420,9 +543,94 @@ def _facts_from(name: str, result: str) -> list[dict[str, Any]]:
                 "value": row.get("value"),
                 "detail": detail,
                 "unpublished": row.get("unpublished") is True,
+                "url": _table_url(str(payload.get("table") or "")),
             }
         )
     return facts
+
+
+def _table_url(table: str) -> str:
+    if table.isalnum():
+        return f"https://www.statistikbanken.dk/{table}"
+    return ""
+
+
+def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group numeric facts that share a table and dimensions across periods."""
+    grouped: dict[tuple[str, str, str], dict[str, int | float]] = {}
+    order: list[tuple[str, str, str]] = []
+    for fact in facts:
+        if fact.get("unpublished"):
+            continue
+        value = fact.get("value")
+        period = str(fact.get("period") or "")
+        if not period or isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("detail") or ""),
+            str(fact.get("unit") or ""),
+        )
+        if key not in grouped:
+            grouped[key] = {}
+            order.append(key)
+        grouped[key][period] = value
+    series = []
+    for key in order:
+        points = grouped[key]
+        if len(points) < 2:
+            continue
+        table, detail, unit = key
+        series.append(
+            {
+                "label": detail or table,
+                "table": table,
+                "unit": unit,
+                "points": [
+                    {"period": period, "value": points[period]} for period in sorted(points)
+                ],
+            }
+        )
+    return series
+
+
+def facts_to_csv(facts: list[dict[str, Any]]) -> str:
+    """UTF-8 CSV with BOM, semicolon separator, and a decimal comma."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(["tabel", "periode", "dimensioner", "værdi", "enhed"])
+    for fact in facts:
+        writer.writerow(
+            [
+                fact.get("table") or "",
+                fact.get("period") or "",
+                fact.get("detail") or "",
+                _csv_number(fact.get("value")),
+                fact.get("unit") or "",
+            ]
+        )
+    return "\ufeff" + buffer.getvalue()
+
+
+def _csv_number(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        number = int(value) if value.is_integer() else value
+        return str(number).replace(".", ",")
+    return str(value)
+
+
+def _turn(answer: str, facts: list[dict[str, Any]], calls: list[dict[str, str]]) -> TurnResult:
+    return TurnResult(
+        answer=answer,
+        facts=facts,
+        calls=calls,
+        chart=chart_series(facts),
+        csv=facts_to_csv(facts),
+    )
 
 
 def _short(text: str, limit: int) -> str:
@@ -664,7 +872,13 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                 return
             self._json(
                 200,
-                {"answer": result.answer, "facts": result.facts, "calls": result.calls},
+                {
+                    "answer": result.answer,
+                    "facts": result.facts,
+                    "calls": result.calls,
+                    "chart": result.chart,
+                    "csv": result.csv,
+                },
             )
 
         def _json(self, status: int, payload: dict[str, Any]) -> None:
