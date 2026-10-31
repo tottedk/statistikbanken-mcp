@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 statistikbanken-mcp = "statistikbanken_mcp.server:main"
+statistikbanken-web = "statistikbanken_mcp.web:main"
 
 [dependency-groups]
 dev = [
