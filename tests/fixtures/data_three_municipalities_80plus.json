@@ -1,0 +1,124 @@
+{
+  "dataset": {
+    "dimension": {
+      "OMRÅDE": {
+        "label": "område",
+        "category": {
+          "index": {
+            "230": 0,
+            "223": 1,
+            "157": 2
+          },
+          "label": {
+            "230": "Rudersdal",
+            "223": "Hørsholm",
+            "157": "Gentofte"
+          }
+        }
+      },
+      "KØN": {
+        "label": "køn",
+        "category": {
+          "index": {
+            "TOT": 0
+          },
+          "label": {
+            "TOT": "I alt"
+          }
+        }
+      },
+      "ALDER": {
+        "label": "alder",
+        "category": {
+          "index": {
+            "80+": 0
+          },
+          "label": {
+            "80+": "80+"
+          }
+        }
+      },
+      "CIVILSTAND": {
+        "label": "civilstand",
+        "category": {
+          "index": {
+            "TOT": 0
+          },
+          "label": {
+            "TOT": "I alt"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "FOLK1A": 0
+          },
+          "label": {
+            "FOLK1A": "Befolkningen den 1. i kvartalet"
+          },
+          "unit": {
+            "FOLK1A": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2026K3": 0
+          },
+          "label": {
+            "2026K3": "2026K3"
+          }
+        }
+      },
+      "id": [
+        "OMRÅDE",
+        "KØN",
+        "ALDER",
+        "CIVILSTAND",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        3,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "role": {
+        "geo": [
+          "OMRÅDE"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Befolkningen den 1. i kvartalet efter område, køn, alder, civilstand, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-08-10T06:00:00Z",
+    "value": [
+      5045,
+      2790,
+      5486
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/4a12721d-a8b0-4bde-82d7-1d1c6f319de3",
+        "tableid": "FOLK1A",
+        "decimals": 0
+      }
+    }
+  }
+}
