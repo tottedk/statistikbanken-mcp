@@ -162,6 +162,8 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "2026K3" in SYSTEM_PROMPT
     assert "2026Q3" in SYSTEM_PROMPT
     assert "Do not put Tid in sum_range" in SYSTEM_PROMPT
+    assert "first value and the last value" in SYSTEM_PROMPT
+    assert "Do not compute a difference" in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Rudersdal?")
     assert "Danish" in single
     assert "latest period" in single
@@ -263,6 +265,32 @@ def test_a_number_in_the_tool_result_may_be_quoted() -> None:
     invented = guard_answer(question, text + ", i alt 9.999", facts, calls)
     assert invented == UNVERIFIED_NUMBERS
     assert "9.999" not in invented
+
+
+def test_suppressed_prose_logs_the_flagged_numbers(caplog: pytest.LogCaptureFixture[str]) -> None:
+    text = (
+        "Befolkningen den 1. i kvartalet: Rudersdal fra 3.524 (2015K1) "
+        "til 5.045 (2026K3), i alt 9.999"
+    )
+    facts = [
+        _population_fact(3524, "2015K1"),
+        _population_fact(5045, "2026K3"),
+    ]
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": "{}",
+            "result": '{"table": "FOLK1A", "title": "Befolkningen den 1. i kvartalet"}',
+        }
+    ]
+    question = "Hvordan har udviklingen i Rudersdal været siden 2015?"
+    with caplog.at_level("INFO", logger="statistikbanken_mcp.web"):
+        guarded = guard_answer(question, text, facts, calls)
+    assert guarded == UNVERIFIED_NUMBERS
+    logged = "\n".join(caplog.messages)
+    assert "Suppressed prose; flagged numbers: 9999" in logged
+    assert text not in logged
+    assert "9.999" not in logged
 
 
 def test_unverified_numbers_are_removed_when_facts_exist() -> None:
