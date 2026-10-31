@@ -16,6 +16,7 @@ from statistikbanken_mcp.web import (
     ChatReply,
     Limiter,
     LLMError,
+    McpRunner,
     Settings,
     ToolCall,
     ToolSpec,
@@ -23,6 +24,7 @@ from statistikbanken_mcp.web import (
     _handler,
     list_server_tools,
     run_turn,
+    server_command,
     settings_from_env,
 )
 
@@ -30,8 +32,10 @@ from statistikbanken_mcp.web import (
 class ScriptedModel:
     def __init__(self, replies: list[ChatReply]) -> None:
         self.replies = list(replies)
+        self.tools_seen: list[list[dict] | None] = []
 
     def complete(self, messages: list[dict], tools: list[dict] | None) -> ChatReply:
+        self.tools_seen.append(tools)
         return self.replies.pop(0)
 
 
@@ -216,3 +220,29 @@ def _post(port: int, payload: dict) -> HTTPConnection:
 
 def test_app_lists_tools_from_the_mcp_server() -> None:
     assert list_server_tools() == ["find_tabel", "tabelinfo", "hent_data"]
+
+
+def test_real_server_schemas_become_llm_tools() -> None:
+    """List tools over stdio and build the chat-completions payload. No data call."""
+
+    async def _run() -> list[dict]:
+        from mcp import Client
+
+        model = ScriptedModel([ChatReply("Intet tal.", [])])
+        async with Client(server_command(), read_timeout_seconds=30) as client:
+            runner = McpRunner(client)
+            await runner.prepare()
+            await run_turn(model, runner, "Hej", max_tool_calls=2)
+        assert model.tools_seen
+        tools = model.tools_seen[0]
+        assert tools is not None
+        return tools
+
+    tools = asyncio.run(_run())
+    names = [tool["function"]["name"] for tool in tools]
+    assert names == ["find_tabel", "tabelinfo", "hent_data"]
+    for tool in tools:
+        assert tool["type"] == "function"
+        parameters = tool["function"]["parameters"]
+        assert parameters["type"] == "object"
+        assert "properties" in parameters

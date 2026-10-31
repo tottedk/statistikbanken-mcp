@@ -564,7 +564,7 @@ class McpRunner:
             ToolSpec(
                 name=tool.name,
                 description=tool.description or "",
-                parameters=dict(tool.inputSchema or {}),
+                parameters=dict(tool.input_schema or {}),
             )
             for tool in self._listed
         ]
