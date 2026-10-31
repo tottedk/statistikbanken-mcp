@@ -1,0 +1,134 @@
+{
+  "dataset": {
+    "dimension": {
+      "OMRÅDE": {
+        "label": "område",
+        "category": {
+          "index": {
+            "230": 0,
+            "223": 1
+          },
+          "label": {
+            "230": "Rudersdal",
+            "223": "Hørsholm"
+          }
+        }
+      },
+      "ENHED": {
+        "label": "enhed",
+        "category": {
+          "index": {
+            "118": 0
+          },
+          "label": {
+            "118": "Gennemsnit for personer i gruppen (kr.)"
+          }
+        }
+      },
+      "KOEN": {
+        "label": "køn",
+        "category": {
+          "index": {
+            "MOK": 0
+          },
+          "label": {
+            "MOK": "Mænd og kvinder i alt"
+          }
+        }
+      },
+      "ALDER1": {
+        "label": "alder",
+        "category": {
+          "index": {
+            "00": 0
+          },
+          "label": {
+            "00": "I alt"
+          }
+        }
+      },
+      "INDKINTB": {
+        "label": "indkomstinterval",
+        "category": {
+          "index": {
+            "000": 0
+          },
+          "label": {
+            "000": "Alle"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "INDKP105": 0
+          },
+          "label": {
+            "INDKP105": "Indkomst i alt"
+          },
+          "unit": {
+            "INDKP105": {
+              "base": "-",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2025": 0
+          },
+          "label": {
+            "2025": "2025"
+          }
+        }
+      },
+      "id": [
+        "OMRÅDE",
+        "ENHED",
+        "KOEN",
+        "ALDER1",
+        "INDKINTB",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "role": {
+        "geo": [
+          "OMRÅDE"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Indkomst i alt efter område, enhed, køn, alder, indkomstinterval, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-10-02T06:00:00Z",
+    "value": [
+      757969,
+      679635
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/807ba2cb-a9ca-4400-9c6a-3400bfff2359",
+        "tableid": "INDKP105",
+        "decimals": 0
+      }
+    }
+  }
+}

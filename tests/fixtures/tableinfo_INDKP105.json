@@ -1,0 +1,819 @@
+{
+  "id": "INDKP105",
+  "text": "Indkomst i alt",
+  "description": "Indkomst i alt efter område, enhed, køn, alder, indkomstinterval og tid",
+  "unit": "-",
+  "suppressedDataValue": "0",
+  "updated": "2026-10-02T08:00:00",
+  "active": true,
+  "contacts": [
+    {
+      "name": "Uwe Pedersen",
+      "phone": "+4523726569",
+      "mail": "uwp@dst.dk"
+    }
+  ],
+  "documentation": {
+    "id": "807ba2cb-a9ca-4400-9c6a-3400bfff2359",
+    "url": "https://www.dst.dk/statistikdokumentation/807ba2cb-a9ca-4400-9c6a-3400bfff2359"
+  },
+  "footnote": {
+    "text": "13. Nov. 2019: 2018-Data om skattefri kontanthjælp og herved kontanthjælp, samlede overførsler og indkomst før skat er rettet i forhold til september-udgivelsen.",
+    "mandatory": false
+  },
+  "variables": [
+    {
+      "id": "OMRÅDE",
+      "text": "område",
+      "elimination": true,
+      "time": false,
+      "map": "Denmark_municipality_07",
+      "values": [
+        {
+          "id": "000",
+          "text": "Hele landet"
+        },
+        {
+          "id": "01",
+          "text": "Landsdel Byen København"
+        },
+        {
+          "id": "101",
+          "text": "København"
+        },
+        {
+          "id": "147",
+          "text": "Frederiksberg"
+        },
+        {
+          "id": "155",
+          "text": "Dragør"
+        },
+        {
+          "id": "185",
+          "text": "Tårnby"
+        },
+        {
+          "id": "02",
+          "text": "Landsdel Københavns omegn"
+        },
+        {
+          "id": "165",
+          "text": "Albertslund"
+        },
+        {
+          "id": "151",
+          "text": "Ballerup"
+        },
+        {
+          "id": "153",
+          "text": "Brøndby"
+        },
+        {
+          "id": "157",
+          "text": "Gentofte"
+        },
+        {
+          "id": "159",
+          "text": "Gladsaxe"
+        },
+        {
+          "id": "161",
+          "text": "Glostrup"
+        },
+        {
+          "id": "163",
+          "text": "Herlev"
+        },
+        {
+          "id": "167",
+          "text": "Hvidovre"
+        },
+        {
+          "id": "169",
+          "text": "Høje-Taastrup"
+        },
+        {
+          "id": "183",
+          "text": "Ishøj"
+        },
+        {
+          "id": "173",
+          "text": "Lyngby-Taarbæk"
+        },
+        {
+          "id": "175",
+          "text": "Rødovre"
+        },
+        {
+          "id": "187",
+          "text": "Vallensbæk"
+        },
+        {
+          "id": "03",
+          "text": "Landsdel Nordsjælland"
+        },
+        {
+          "id": "201",
+          "text": "Allerød"
+        },
+        {
+          "id": "240",
+          "text": "Egedal"
+        },
+        {
+          "id": "210",
+          "text": "Fredensborg"
+        },
+        {
+          "id": "250",
+          "text": "Frederikssund"
+        },
+        {
+          "id": "190",
+          "text": "Furesø"
+        },
+        {
+          "id": "270",
+          "text": "Gribskov"
+        },
+        {
+          "id": "260",
+          "text": "Halsnæs"
+        },
+        {
+          "id": "217",
+          "text": "Helsingør"
+        },
+        {
+          "id": "219",
+          "text": "Hillerød"
+        },
+        {
+          "id": "223",
+          "text": "Hørsholm"
+        },
+        {
+          "id": "230",
+          "text": "Rudersdal"
+        },
+        {
+          "id": "04",
+          "text": "Landsdel Bornholm"
+        },
+        {
+          "id": "400",
+          "text": "Bornholm"
+        },
+        {
+          "id": "05",
+          "text": "Landsdel Østsjælland"
+        },
+        {
+          "id": "253",
+          "text": "Greve"
+        },
+        {
+          "id": "259",
+          "text": "Køge"
+        },
+        {
+          "id": "350",
+          "text": "Lejre"
+        },
+        {
+          "id": "265",
+          "text": "Roskilde"
+        },
+        {
+          "id": "269",
+          "text": "Solrød"
+        },
+        {
+          "id": "06",
+          "text": "Landsdel Vest- og Sydsjælland"
+        },
+        {
+          "id": "320",
+          "text": "Faxe"
+        },
+        {
+          "id": "376",
+          "text": "Guldborgsund"
+        },
+        {
+          "id": "316",
+          "text": "Holbæk"
+        },
+        {
+          "id": "326",
+          "text": "Kalundborg"
+        },
+        {
+          "id": "360",
+          "text": "Lolland"
+        },
+        {
+          "id": "370",
+          "text": "Næstved"
+        },
+        {
+          "id": "306",
+          "text": "Odsherred"
+        },
+        {
+          "id": "329",
+          "text": "Ringsted"
+        },
+        {
+          "id": "330",
+          "text": "Slagelse"
+        },
+        {
+          "id": "340",
+          "text": "Sorø"
+        },
+        {
+          "id": "336",
+          "text": "Stevns"
+        },
+        {
+          "id": "390",
+          "text": "Vordingborg"
+        },
+        {
+          "id": "07",
+          "text": "Landsdel Fyn"
+        },
+        {
+          "id": "420",
+          "text": "Assens"
+        },
+        {
+          "id": "430",
+          "text": "Faaborg-Midtfyn"
+        },
+        {
+          "id": "440",
+          "text": "Kerteminde"
+        },
+        {
+          "id": "482",
+          "text": "Langeland"
+        },
+        {
+          "id": "410",
+          "text": "Middelfart"
+        },
+        {
+          "id": "480",
+          "text": "Nordfyns"
+        },
+        {
+          "id": "450",
+          "text": "Nyborg"
+        },
+        {
+          "id": "461",
+          "text": "Odense"
+        },
+        {
+          "id": "479",
+          "text": "Svendborg"
+        },
+        {
+          "id": "492",
+          "text": "Ærø"
+        },
+        {
+          "id": "08",
+          "text": "Landsdel Sydjylland"
+        },
+        {
+          "id": "530",
+          "text": "Billund"
+        },
+        {
+          "id": "561",
+          "text": "Esbjerg"
+        },
+        {
+          "id": "563",
+          "text": "Fanø"
+        },
+        {
+          "id": "607",
+          "text": "Fredericia"
+        },
+        {
+          "id": "510",
+          "text": "Haderslev"
+        },
+        {
+          "id": "621",
+          "text": "Kolding"
+        },
+        {
+          "id": "540",
+          "text": "Sønderborg"
+        },
+        {
+          "id": "550",
+          "text": "Tønder"
+        },
+        {
+          "id": "573",
+          "text": "Varde"
+        },
+        {
+          "id": "575",
+          "text": "Vejen"
+        },
+        {
+          "id": "630",
+          "text": "Vejle"
+        },
+        {
+          "id": "580",
+          "text": "Aabenraa"
+        },
+        {
+          "id": "09",
+          "text": "Landsdel Østjylland"
+        },
+        {
+          "id": "710",
+          "text": "Favrskov"
+        },
+        {
+          "id": "766",
+          "text": "Hedensted"
+        },
+        {
+          "id": "615",
+          "text": "Horsens"
+        },
+        {
+          "id": "707",
+          "text": "Norddjurs"
+        },
+        {
+          "id": "727",
+          "text": "Odder"
+        },
+        {
+          "id": "730",
+          "text": "Randers"
+        },
+        {
+          "id": "741",
+          "text": "Samsø"
+        },
+        {
+          "id": "740",
+          "text": "Silkeborg"
+        },
+        {
+          "id": "746",
+          "text": "Skanderborg"
+        },
+        {
+          "id": "706",
+          "text": "Syddjurs"
+        },
+        {
+          "id": "751",
+          "text": "Aarhus"
+        },
+        {
+          "id": "10",
+          "text": "Landsdel Vestjylland"
+        },
+        {
+          "id": "657",
+          "text": "Herning"
+        },
+        {
+          "id": "661",
+          "text": "Holstebro"
+        },
+        {
+          "id": "756",
+          "text": "Ikast-Brande"
+        },
+        {
+          "id": "665",
+          "text": "Lemvig"
+        },
+        {
+          "id": "760",
+          "text": "Ringkøbing-Skjern"
+        },
+        {
+          "id": "779",
+          "text": "Skive"
+        },
+        {
+          "id": "671",
+          "text": "Struer"
+        },
+        {
+          "id": "791",
+          "text": "Viborg"
+        },
+        {
+          "id": "11",
+          "text": "Landsdel Nordjylland"
+        },
+        {
+          "id": "810",
+          "text": "Brønderslev"
+        },
+        {
+          "id": "813",
+          "text": "Frederikshavn"
+        },
+        {
+          "id": "860",
+          "text": "Hjørring"
+        },
+        {
+          "id": "849",
+          "text": "Jammerbugt"
+        },
+        {
+          "id": "825",
+          "text": "Læsø"
+        },
+        {
+          "id": "846",
+          "text": "Mariagerfjord"
+        },
+        {
+          "id": "773",
+          "text": "Morsø"
+        },
+        {
+          "id": "840",
+          "text": "Rebild"
+        },
+        {
+          "id": "787",
+          "text": "Thisted"
+        },
+        {
+          "id": "820",
+          "text": "Vesthimmerlands"
+        },
+        {
+          "id": "851",
+          "text": "Aalborg"
+        }
+      ]
+    },
+    {
+      "id": "ENHED",
+      "text": "enhed",
+      "elimination": false,
+      "time": false,
+      "values": [
+        {
+          "id": "103",
+          "text": "Personer i gruppen (antal)"
+        },
+        {
+          "id": "110",
+          "text": "Indkomstbeløb (1.000 kr.)"
+        },
+        {
+          "id": "118",
+          "text": "Gennemsnit for personer i gruppen (kr.)"
+        }
+      ]
+    },
+    {
+      "id": "KOEN",
+      "text": "køn",
+      "elimination": true,
+      "time": false,
+      "values": [
+        {
+          "id": "MOK",
+          "text": "Mænd og kvinder i alt"
+        },
+        {
+          "id": "M",
+          "text": "Mænd"
+        },
+        {
+          "id": "K",
+          "text": "Kvinder"
+        }
+      ]
+    },
+    {
+      "id": "ALDER1",
+      "text": "alder",
+      "elimination": true,
+      "time": false,
+      "values": [
+        {
+          "id": "00",
+          "text": "I alt"
+        },
+        {
+          "id": "15-19",
+          "text": "15-19 år"
+        },
+        {
+          "id": "20-24",
+          "text": "20-24 år"
+        },
+        {
+          "id": "25-29",
+          "text": "25-29 år"
+        },
+        {
+          "id": "30-34",
+          "text": "30-34 år"
+        },
+        {
+          "id": "35-39",
+          "text": "35-39 år"
+        },
+        {
+          "id": "40-44",
+          "text": "40-44 år"
+        },
+        {
+          "id": "45-49",
+          "text": "45-49 år"
+        },
+        {
+          "id": "50-54",
+          "text": "50-54 år"
+        },
+        {
+          "id": "55-59",
+          "text": "55-59 år"
+        },
+        {
+          "id": "60-64",
+          "text": "60-64 år"
+        },
+        {
+          "id": "65-69",
+          "text": "65-69 år"
+        },
+        {
+          "id": "70-74",
+          "text": "70-74 år"
+        },
+        {
+          "id": "74-00",
+          "text": "Over 74 år"
+        }
+      ]
+    },
+    {
+      "id": "INDKINTB",
+      "text": "indkomstinterval",
+      "elimination": true,
+      "time": false,
+      "values": [
+        {
+          "id": "000",
+          "text": "Alle"
+        },
+        {
+          "id": "010",
+          "text": "Under 25.000 kr."
+        },
+        {
+          "id": "020",
+          "text": "25.000 - 49.999 kr."
+        },
+        {
+          "id": "030",
+          "text": "50.000 - 74.999 kr."
+        },
+        {
+          "id": "040",
+          "text": "75.000 - 99.999 kr."
+        },
+        {
+          "id": "105",
+          "text": "100.000 - 124.999 kr."
+        },
+        {
+          "id": "115",
+          "text": "125.000 - 149.999 kr."
+        },
+        {
+          "id": "125",
+          "text": "150.000 - 174.999 kr."
+        },
+        {
+          "id": "130",
+          "text": "175.000 - 199.999 kr."
+        },
+        {
+          "id": "135",
+          "text": "200.000 - 224.999 kr."
+        },
+        {
+          "id": "255",
+          "text": "225.000 - 249.999 kr."
+        },
+        {
+          "id": "300",
+          "text": "250.000 - 299.999 kr."
+        },
+        {
+          "id": "350",
+          "text": "300.000 - 349.999 kr."
+        },
+        {
+          "id": "400",
+          "text": "350.000 - 399.999 kr."
+        },
+        {
+          "id": "450",
+          "text": "400.000 - 449.999 kr."
+        },
+        {
+          "id": "500",
+          "text": "450.000 - 499.999 kr."
+        },
+        {
+          "id": "905",
+          "text": "500.000 kr. og derover"
+        }
+      ]
+    },
+    {
+      "id": "Tid",
+      "text": "tid",
+      "elimination": false,
+      "time": true,
+      "values": [
+        {
+          "id": "1987",
+          "text": "1987"
+        },
+        {
+          "id": "1988",
+          "text": "1988"
+        },
+        {
+          "id": "1989",
+          "text": "1989"
+        },
+        {
+          "id": "1990",
+          "text": "1990"
+        },
+        {
+          "id": "1991",
+          "text": "1991"
+        },
+        {
+          "id": "1992",
+          "text": "1992"
+        },
+        {
+          "id": "1993",
+          "text": "1993"
+        },
+        {
+          "id": "1994",
+          "text": "1994"
+        },
+        {
+          "id": "1995",
+          "text": "1995"
+        },
+        {
+          "id": "1996",
+          "text": "1996"
+        },
+        {
+          "id": "1997",
+          "text": "1997"
+        },
+        {
+          "id": "1998",
+          "text": "1998"
+        },
+        {
+          "id": "1999",
+          "text": "1999"
+        },
+        {
+          "id": "2000",
+          "text": "2000"
+        },
+        {
+          "id": "2001",
+          "text": "2001"
+        },
+        {
+          "id": "2002",
+          "text": "2002"
+        },
+        {
+          "id": "2003",
+          "text": "2003"
+        },
+        {
+          "id": "2004",
+          "text": "2004"
+        },
+        {
+          "id": "2005",
+          "text": "2005"
+        },
+        {
+          "id": "2006",
+          "text": "2006"
+        },
+        {
+          "id": "2007",
+          "text": "2007"
+        },
+        {
+          "id": "2008",
+          "text": "2008"
+        },
+        {
+          "id": "2009",
+          "text": "2009"
+        },
+        {
+          "id": "2010",
+          "text": "2010"
+        },
+        {
+          "id": "2011",
+          "text": "2011"
+        },
+        {
+          "id": "2012",
+          "text": "2012"
+        },
+        {
+          "id": "2013",
+          "text": "2013"
+        },
+        {
+          "id": "2014",
+          "text": "2014"
+        },
+        {
+          "id": "2015",
+          "text": "2015"
+        },
+        {
+          "id": "2016",
+          "text": "2016"
+        },
+        {
+          "id": "2017",
+          "text": "2017"
+        },
+        {
+          "id": "2018",
+          "text": "2018"
+        },
+        {
+          "id": "2019",
+          "text": "2019"
+        },
+        {
+          "id": "2020",
+          "text": "2020"
+        },
+        {
+          "id": "2021",
+          "text": "2021"
+        },
+        {
+          "id": "2022",
+          "text": "2022"
+        },
+        {
+          "id": "2023",
+          "text": "2023"
+        },
+        {
+          "id": "2024",
+          "text": "2024"
+        },
+        {
+          "id": "2025",
+          "text": "2025"
+        }
+      ]
+    }
+  ]
+}

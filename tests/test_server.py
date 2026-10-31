@@ -21,6 +21,7 @@ async def _session() -> None:
         hent = next(tool for tool in listed.tools if tool.name == "hent_data")
         assert hent.description is not None
         assert "sum_from" in hent.description
+        assert "sum_range" in hent.description
 
         found = await client.call_tool("find_tabel", {"query": "befolkning", "limit": 1})
         assert not found.is_error
@@ -52,6 +53,26 @@ async def _session() -> None:
         assert isinstance(payload, dict)
         assert payload["rows"][0]["value"] == 5045
         assert payload["rows"][0]["ALDER"] == "80+"
+
+        children = await client.call_tool(
+            "hent_data",
+            {
+                "table": "FOLK1A",
+                "values": {
+                    "OMRÅDE": ["230", "223"],
+                    "KØN": ["TOT"],
+                    "CIVILSTAND": ["TOT"],
+                    "Tid": ["2026K3"],
+                },
+                "sum_range": {"ALDER": ["0", "17"]},
+            },
+        )
+        assert not children.is_error
+        child_payload = _payload(children)
+        assert isinstance(child_payload, dict)
+        assert [row["value"] for row in child_payload["rows"]] == [12770, 4916]
+        assert child_payload["rows"][0]["ALDER"] == "0-17"
+        assert child_payload["periods"] == ["2026K3"]
 
         missing = await client.call_tool("tabelinfo", {"table": "NOTATABLE"})
         assert missing.is_error is True

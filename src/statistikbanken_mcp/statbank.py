@@ -104,9 +104,10 @@ class StatbankClient:
         table: str,
         values: dict[str, list[str]] | None = None,
         sum_from: dict[str, str] | None = None,
+        sum_range: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         metadata = self._metadata_for(table)
-        selections = _build_selections(metadata, values, sum_from)
+        selections = _build_selections(metadata, values, sum_from, sum_range)
         variables = [{"code": code, "values": selected} for code, selected in selections.items()]
         payload: dict[str, Any] = {
             "table": metadata.id,
@@ -124,8 +125,10 @@ class StatbankClient:
         return {
             "table": metadata.id,
             "title": metadata.title,
+            "description": metadata.description,
             "unit": metadata.unit,
             "updated": metadata.updated,
+            "periods": _periods(metadata, rows),
             "source": source or "Danmarks Statistik",
             "rows": rows,
         }
@@ -303,15 +306,22 @@ def _build_selections(
     table: _Table,
     values: dict[str, list[str]] | None,
     sum_from: dict[str, str] | None,
+    sum_range: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
     if values is None:
         values = {}
     if sum_from is None:
         sum_from = {}
-    if not isinstance(values, dict) or not isinstance(sum_from, dict):
+    if sum_range is None:
+        sum_range = {}
+    maps_ok = (
+        isinstance(values, dict) and isinstance(sum_from, dict) and isinstance(sum_range, dict)
+    )
+    if not maps_ok:
         raise StatbankError(
-            "values must be a map of variable id to a list of codes, "
-            "and sum_from a map of variable id to one numeric code."
+            "values maps a variable id to a list of codes. "
+            "sum_from maps a variable id to one numeric code. "
+            "sum_range maps a variable id to two numeric codes, low then high."
         )
 
     chosen: dict[str, list[str]] = {}
@@ -329,6 +339,15 @@ def _build_selections(
                 "Put it in only one of them."
             )
         chosen[variable.id] = [_sum_expression(variable, start)]
+
+    for code, bounds in sum_range.items():
+        variable = _require_variable(table, str(code))
+        if variable.id in chosen:
+            raise StatbankError(
+                f"Variable {variable.id} is listed in sum_range and also in values or sum_from. "
+                "Put it in only one of them."
+            )
+        chosen[variable.id] = [_sum_range_expression(variable, bounds)]
 
     return {
         variable.id: chosen[variable.id] for variable in table.variables if variable.id in chosen
@@ -403,6 +422,44 @@ def _sum_expression(variable: _Variable, start: Any) -> str:
     return f"sum({label}|{label}={';'.join(codes)})"
 
 
+def _sum_range_expression(variable: _Variable, bounds: Any) -> str:
+    if (
+        not isinstance(bounds, list)
+        or len(bounds) != 2
+        or not all(isinstance(item, str) for item in bounds)
+    ):
+        raise StatbankError(
+            f"sum_range for {variable.id} must be two numeric codes, low then high, "
+            "for example ['0', '17']."
+        )
+    low_token, high_token = bounds[0].strip(), bounds[1].strip()
+    if not low_token.isdigit() or not high_token.isdigit():
+        raise StatbankError(
+            f"sum_range for {variable.id} must be two numeric codes "
+            f"(got '{low_token}' and '{high_token}'). {_value_hint(variable)}"
+        )
+    low, high = int(low_token), int(high_token)
+    if low > high:
+        raise StatbankError(
+            f"sum_range for {variable.id} must run from a lower code to a higher one "
+            f"(got {low_token} then {high_token})."
+        )
+    codes = [
+        item["id"]
+        for item in variable.values
+        if item["id"].isdigit() and low <= int(item["id"]) <= high
+    ]
+    if not codes:
+        raise StatbankError(
+            f"No numeric codes on {variable.id} fall between {low} and {high}. "
+            f"{_value_hint(variable)}"
+        )
+    if len(codes) == 1:
+        return codes[0]
+    label = f"{low}-{high}"
+    return f"sum({label}|{label}={';'.join(codes)})"
+
+
 def _value_hint(variable: _Variable) -> str:
     numeric, explicit = _split_numeric_run(variable.values)
     if numeric is not None and len(explicit) <= 20:
@@ -411,7 +468,8 @@ def _value_hint(variable: _Variable) -> str:
         return (
             f"Numeric codes run from {numeric['from']} to {numeric['to']} "
             f"(the code is the number).{suffix} "
-            "To total codes from N upward, use sum_from instead of listing them."
+            "To total a closed range, use sum_range, for example ['0', '17']. "
+            "To total codes from N upward, use sum_from."
         )
     if len(variable.values) <= 20:
         listed = ", ".join(f"{item['id']} ({item['text']})" for item in variable.values)
@@ -477,6 +535,19 @@ def _rows_from_jsonstat(payload: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _periods(table: _Table, rows: list[dict[str, Any]]) -> list[str]:
+    time_ids = [variable.id for variable in table.variables if variable.time]
+    periods: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for time_id in time_ids:
+            period = row.get(time_id)
+            if isinstance(period, str) and period not in seen:
+                seen.add(period)
+                periods.append(period)
+    return periods
+
+
 def _number(value: Any) -> Any:
     if isinstance(value, float) and value.is_integer():
         return int(value)
@@ -514,7 +585,8 @@ def _message_from_api_error(payload: Any, status: int) -> str:
         return (
             f"Unknown value '{value}' for variable {variable}. "
             "Call tabelinfo to list valid codes. "
-            "To total numeric codes from N upward, use sum_from instead of listing them."
+            "To total a closed numeric range, use sum_range. "
+            "To total codes from N upward, use sum_from."
         )
     if message:
         return (
