@@ -38,6 +38,58 @@ def test_search_and_metadata(live_client: StatbankClient) -> None:
     assert areas["157"] == "Gentofte"
 
 
+def test_ambiguous_time_sum_is_rejected_live(live_client: StatbankClient) -> None:
+    with pytest.raises(ToolError, match="not every period") as caught:
+        hent_data(
+            "FOLK1A",
+            values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+            sum_range={"Tid": ["2015K1", "2026K3"]},
+        )
+    message = str(caught.value)
+    assert ">=2015K1" in message
+    assert "13078" not in message
+    assert "Traceback" not in message
+
+
+def test_equivalent_age_sum_is_one_number_live(live_client: StatbankClient) -> None:
+    result = hent_data(
+        "FOLK1A",
+        values={"OMRÅDE": ["Rudersdal"], "ALDER": [">=80"], "Tid": ["(1)"]},
+        sum_from={"ALDER": "80"},
+    )
+    assert len(result["rows"]) == 1
+    row = result["rows"][0]
+    assert row["OMRÅDE"] == "Rudersdal"
+    assert row["ALDER"] == "80+"
+    assert isinstance(row["value"], int)
+    assert 1000 < row["value"] < 20000
+    assert any("sum_from" in note for note in result["notes"])
+
+
+def test_open_ended_age_returns_the_80_plus_series(live_client: StatbankClient) -> None:
+    for phrase in ("80+", ">=80"):
+        result = hent_data(
+            "FOLK1A",
+            values={
+                "OMRÅDE": ["Rudersdal", "Hørsholm"],
+                "ALDER": [phrase],
+                "Tid": [">=2015K1"],
+            },
+        )
+        by_place = {}
+        for row in result["rows"]:
+            by_place.setdefault(row["OMRÅDE"], []).append(row)
+        assert set(by_place) == {"Rudersdal", "Hørsholm"}, phrase
+        rudersdal = by_place["Rudersdal"]
+        horsholm = by_place["Hørsholm"]
+        assert rudersdal[0]["Tid"] == "2015K1", phrase
+        assert rudersdal[0]["ALDER"] == "80+", phrase
+        assert rudersdal[0]["value"] > 2000, phrase
+        assert rudersdal[-1]["value"] > 2000, phrase
+        assert horsholm[0]["value"] > 1000, phrase
+        assert any("sum_from" in note for note in result["notes"]), phrase
+
+
 def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
     info = tabelinfo("FOLK1A")
     tid = next(item for item in info["variables"] if item["id"] == "Tid")

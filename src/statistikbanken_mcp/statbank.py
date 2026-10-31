@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -132,9 +133,11 @@ class StatbankClient:
         http: httpx.Client | None = None,
         *,
         base_url: str = BASE_URL,
-        timeout: float = 60.0,
+        timeout: float = 30.0,
     ) -> None:
         self._owns_http = http is None
+        if http is None and os.environ.get("STATBANK_HTTP_TIMEOUT"):
+            timeout = float(os.environ["STATBANK_HTTP_TIMEOUT"])
         self._http = http or httpx.Client(
             base_url=base_url,
             timeout=timeout,
@@ -217,13 +220,28 @@ class StatbankClient:
     def fetch(
         self,
         table: str,
-        values: dict[str, list[str]] | None = None,
-        sum_from: dict[str, str] | None = None,
-        sum_range: dict[str, list[str]] | None = None,
+        values: dict[str, Any] | None = None,
+        sum_from: dict[str, Any] | None = None,
+        sum_range: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        values, sum_from, sum_range, notes = _hoist_nested_sums(values, sum_from, sum_range)
+        values = _coerce_code_map(values, "values")
+        sum_range = _coerce_code_map(sum_range, "sum_range")
+        sum_from = _coerce_sum_from(sum_from)
         metadata = self._metadata_for(table)
+        values, sum_from, sum_range, aliased = _alias_arguments(
+            metadata, values, sum_from, sum_range
+        )
+        notes.extend(aliased)
+        values, sum_from, sum_range, promoted = _promote_open_ended(
+            metadata, values, sum_from, sum_range
+        )
+        notes.extend(promoted)
+        values, dropped = _drop_equivalent_value_sums(values, sum_from)
+        notes.extend(dropped)
         selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
         assumed = _fill_required(metadata, selections)
+        _guard_time_sums(metadata, selections, explicit)
         variables = [{"code": code, "values": selected} for code, selected in selections.items()]
         payload: dict[str, Any] = {
             "table": metadata.id,
@@ -255,6 +273,8 @@ class StatbankClient:
         }
         if assumed:
             result["defaults"] = assumed
+        if notes:
+            result["notes"] = notes
         return result
 
     def _fetch_sum_locally(
@@ -286,6 +306,14 @@ class StatbankClient:
         with self._lock:
             self._tables = data
         return data
+
+    def place_names(self, table: str) -> list[str]:
+        """Every area label on the table, including those past the tabelinfo cap."""
+        metadata = self._metadata_for(table)
+        for variable in metadata.variables:
+            if _fold(variable.id) == "omraade":
+                return [item["text"] for item in variable.values]
+        return []
 
     def _metadata_for(self, table: str) -> _Table:
         if not isinstance(table, str) or not table.strip():
@@ -463,8 +491,19 @@ def _public_variable(variable: _Variable, *, values_filter: str | None = None) -
     total = _unique_total(variable)
     if total is not None:
         published["total"] = {"id": total["id"], "text": total["text"]}
-    needle = values_filter.casefold().strip() if values_filter and values_filter.strip() else ""
-    if variable.time and not needle:
+    terms = _filter_terms(values_filter)
+    if terms:
+        shown = [
+            {"id": item["id"], "text": item["text"]}
+            for item in variable.values
+            if _value_matches_terms(item, terms)
+        ]
+        if shown:
+            published["values"] = shown
+            published["value_count"] = len(shown)
+            return published
+        published["filter_note"] = "No match for the filter on this variable."
+    if variable.time:
         values = variable.values
         if values:
             published["time_span"] = {
@@ -474,15 +513,6 @@ def _public_variable(variable: _Variable, *, values_filter: str | None = None) -
             }
         else:
             published["time_span"] = {"first": None, "last": None, "count": 0}
-        return published
-    if needle:
-        shown = [
-            {"id": item["id"], "text": item["text"]}
-            for item in variable.values
-            if needle in item["id"].casefold() or needle in item["text"].casefold()
-        ]
-        published["values"] = shown
-        published["value_count"] = len(shown)
         return published
     numeric, explicit = _split_numeric_run(variable.values)
     if numeric is not None:
@@ -516,6 +546,444 @@ def _split_numeric_run(
     if not contiguous:
         return None, [dict(item) for item in values]
     return {"from": str(numbers[0]), "to": str(numbers[-1])}, [dict(item) for item in explicit]
+
+
+def _filter_terms(values_filter: str | None) -> list[str]:
+    if not values_filter or not values_filter.strip():
+        return []
+    return [part for part in re.split(r"[\s,;]+", values_filter.casefold()) if len(part) >= 2]
+
+
+def _value_matches_terms(item: dict[str, str], terms: list[str]) -> bool:
+    fields = (
+        item["id"].casefold(),
+        item["text"].casefold(),
+        _fold(item["id"]),
+        _fold(item["text"]),
+    )
+    for term in terms:
+        folded = _fold(term)
+        if any(term in field or folded in field for field in fields):
+            return True
+    return False
+
+
+def _sum_argument_help(kind: str) -> str:
+    if kind == "sum_range":
+        return (
+            "sum_range is an argument beside values, not a key inside values. "
+            'Call hent_data with values {"OMRÅDE": ["230"]} and '
+            'sum_range {"ALDER": ["0", "17"]}.'
+        )
+    return (
+        "sum_from is an argument beside values, not a key inside values. "
+        'Call hent_data with values {"OMRÅDE": ["230"]} and sum_from {"ALDER": "80"}.'
+    )
+
+
+def _hoist_nested_sums(
+    values: Any,
+    sum_from: Any,
+    sum_range: Any,
+) -> tuple[Any, Any, Any, list[str]]:
+    """Lift sum_from and sum_range that the model nested inside values."""
+    notes: list[str] = []
+    if not isinstance(values, dict):
+        return values, sum_from, sum_range, notes
+    if sum_from is not None and not isinstance(sum_from, dict):
+        return values, sum_from, sum_range, notes
+    if sum_range is not None and not isinstance(sum_range, dict):
+        return values, sum_from, sum_range, notes
+    values = dict(values)
+    from_map = dict(sum_from or {})
+    range_map = dict(sum_range or {})
+    from_used = sum_from is not None
+    range_used = sum_range is not None
+
+    for kind, target in (("sum_from", from_map), ("sum_range", range_map)):
+        if kind not in values:
+            continue
+        nested = values.pop(kind)
+        if not isinstance(nested, dict) or not nested:
+            raise StatbankError(_sum_argument_help(kind))
+        for var, spec in nested.items():
+            previous = target.get(var)
+            if previous is not None and str(previous).strip() != str(spec).strip():
+                raise StatbankError(
+                    f"{kind} for {var} is inside values and also passed beside values, "
+                    f"and they differ. {_sum_argument_help(kind)}"
+                )
+            target[var] = spec
+        if kind == "sum_from":
+            from_used = True
+        else:
+            range_used = True
+        notes.append(f"Moved {kind} out of values. {_sum_argument_help(kind)}")
+
+    for var, raw in list(values.items()):
+        if not isinstance(raw, dict):
+            continue
+        keys = {str(key) for key in raw}
+        if keys == {"sum_from"} or keys == {"sum_range"}:
+            kind = next(iter(raw))
+            spec = raw[kind]
+            target = from_map if kind == "sum_from" else range_map
+            previous = target.get(var)
+            if previous is not None and str(previous).strip() != str(spec).strip():
+                raise StatbankError(
+                    f"{kind} for {var} disagrees with the value inside values. "
+                    f"{_sum_argument_help(kind)}"
+                )
+            target[var] = spec
+            values.pop(var)
+            if kind == "sum_from":
+                from_used = True
+            else:
+                range_used = True
+            notes.append(f"Moved {kind} for {var} out of values. {_sum_argument_help(kind)}")
+            continue
+        raise StatbankError(
+            f"values for {var} must be a code or a list of codes. {_sum_argument_help('sum_from')}"
+        )
+    return (
+        values,
+        from_map if from_used else None,
+        range_map if range_used else None,
+        notes,
+    )
+
+
+def _coerce_sum_from(raw: Any) -> dict[str, str] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise StatbankError(_sum_argument_help("sum_from"))
+    coerced: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(value, bool):
+            raise StatbankError(_sum_argument_help("sum_from"))
+        if isinstance(value, int):
+            coerced[str(key)] = str(value)
+        elif isinstance(value, str) and value.strip():
+            coerced[str(key)] = value.strip()
+        elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], str):
+            coerced[str(key)] = value[0].strip()
+        else:
+            raise StatbankError(
+                f"sum_from for {key} must be one numeric code such as '80'. "
+                f"{_sum_argument_help('sum_from')}"
+            )
+    return coerced
+
+
+_VARIABLE_ALIASES = {
+    "kom": "OMRÅDE",
+    "kommune": "OMRÅDE",
+    "kommuner": "OMRÅDE",
+    "omraade": "OMRÅDE",
+    "alder": "ALDER",
+    "tid": "Tid",
+    "aar": "Tid",
+}
+
+
+def _alias_variable(table: _Table, code: str) -> str:
+    found = table.variable(code)
+    if found is not None:
+        return found.id
+    target = _VARIABLE_ALIASES.get(_fold(code).replace(" ", ""))
+    if target is None:
+        return code
+    match = table.variable(target)
+    return match.id if match is not None else code
+
+
+def _alias_arguments(
+    table: _Table,
+    values: dict[str, list[str]] | None,
+    sum_from: dict[str, str] | None,
+    sum_range: dict[str, list[str]] | None,
+) -> tuple[
+    dict[str, list[str]] | None, dict[str, str] | None, dict[str, list[str]] | None, list[str]
+]:
+    notes: list[str] = []
+    return (
+        _alias_map(table, values, notes),
+        _alias_map(table, sum_from, notes),
+        _alias_map(table, sum_range, notes),
+        notes,
+    )
+
+
+def _alias_map(
+    table: _Table, mapping: dict[str, Any] | None, notes: list[str]
+) -> dict[str, Any] | None:
+    if not mapping:
+        return mapping
+    renamed: dict[str, Any] = {}
+    for key, value in mapping.items():
+        canonical = _alias_variable(table, str(key))
+        if table.variable(str(key)) is None and canonical != key:
+            notes.append(f"Used {canonical} for {key}.")
+        if canonical in renamed:
+            raise StatbankError(f"Variable {canonical} was given more than once.")
+        renamed[canonical] = value
+    return renamed
+
+
+def _promote_open_ended(
+    table: _Table,
+    values: dict[str, list[str]] | None,
+    sum_from: dict[str, str] | None,
+    sum_range: dict[str, list[str]] | None,
+) -> tuple[
+    dict[str, list[str]] | None, dict[str, str] | None, dict[str, list[str]] | None, list[str]
+]:
+    """Turn 80+, >=80 and 0-17 into the sum the API actually understands.
+
+    A code of 80 is one year of age. The models write 80+ for everyone older,
+    and the close match '80 år' then charts that one year.
+    """
+    notes: list[str] = []
+    if not values:
+        return values, sum_from, sum_range, notes
+    values = {key: list(codes) for key, codes in values.items()}
+    from_map = dict(sum_from or {})
+    range_map = dict(sum_range or {})
+    for key in list(values):
+        variable = table.variable(key)
+        if variable is None or variable.time:
+            continue
+        numeric, _explicit = _split_numeric_run(variable.values)
+        if numeric is None:
+            continue
+        kept: list[str] = []
+        for token in values[key]:
+            if _value_matches(variable, token):
+                kept.append(token)
+                continue
+            threshold = _open_ended_age(token)
+            span = None if threshold is not None else _closed_age_span(token)
+            if threshold is not None:
+                note = (
+                    f'Treated {variable.id} "{token}" as '
+                    f'sum_from {{"{variable.id}": "{threshold}"}}.'
+                )
+                _store_sum(from_map, variable.id, threshold, note, notes)
+            elif span is not None:
+                low, high = span
+                _store_sum(
+                    range_map,
+                    variable.id,
+                    [low, high],
+                    f'Treated {variable.id} "{token}" as sum_range '
+                    f'{{"{variable.id}": ["{low}", "{high}"]}}.',
+                    notes,
+                )
+            else:
+                kept.append(token)
+        if kept:
+            values[key] = kept
+        else:
+            values.pop(key)
+    return (
+        values,
+        from_map or None,
+        range_map or None,
+        notes,
+    )
+
+
+def _store_sum(
+    target: dict[str, Any], variable_id: str, value: Any, note: str, notes: list[str]
+) -> None:
+    previous = target.get(variable_id)
+    if previous is not None and previous != value:
+        raise StatbankError(
+            f"Variable {variable_id} asks for two different totals ({previous} and {value}). "
+            "Pass one sum_from or sum_range."
+        )
+    target[variable_id] = value
+    if note not in notes:
+        notes.append(note)
+
+
+def _open_ended_age(token: str) -> str | None:
+    folded = _fold(token.strip())
+    match = re.fullmatch(
+        r">=?\s*(\d+)|(\d+)\s*\+|(\d+)\s*-|(\d+)\s+og\s+derover|over\s+(\d+)|(\d+)\s+aar\s+og\s+derover",
+        folded,
+    )
+    if match is None:
+        return None
+    return next(group for group in match.groups() if group is not None)
+
+
+def _closed_age_span(token: str) -> tuple[str, str] | None:
+    folded = _fold(token.strip())
+    match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", folded) or re.fullmatch(
+        r"(\d+)\s+til\s+(\d+)", folded
+    )
+    if match is None:
+        return None
+    low, high = int(match.group(1)), int(match.group(2))
+    if low > high:
+        return None
+    return str(low), str(high)
+
+
+def _drop_equivalent_value_sums(
+    values: dict[str, list[str]] | None,
+    sum_from: dict[str, str] | None,
+) -> tuple[dict[str, list[str]] | None, list[str]]:
+    """Treat values '>=80' plus sum_from '80' as one request."""
+    if not values or not sum_from:
+        return values, []
+    notes: list[str] = []
+    folded = {key.casefold(): key for key in values}
+    for code, start in sum_from.items():
+        key = folded.get(str(code).casefold())
+        if key is None:
+            continue
+        if _equivalent_sum(values[key], start):
+            shown = ", ".join(values.pop(key))
+            notes.append(
+                f"Ignored values for {key} ({shown}); it is the same request as "
+                f'sum_from {{"{code}": "{start}"}}.'
+            )
+            continue
+        raise StatbankError(
+            f"Variable {key} is listed in both values and sum_from, and they differ. "
+            f"Remove {key} from values. "
+            f'Keep sum_from {{"{code}": "{start}"}} and pass the other variables in values.'
+        )
+    return values, notes
+
+
+def _equivalent_sum(raw: list[str], start: str) -> bool:
+    token = start.strip()
+    if not token.isdigit():
+        return False
+    threshold = int(token)
+    if not raw:
+        return False
+    for item in raw:
+        text = item.strip()
+        lower_bound = re.fullmatch(r">=\s*(\d+)", text)
+        if lower_bound and int(lower_bound.group(1)) == threshold:
+            continue
+        if text.isdigit() and int(text) == threshold:
+            continue
+        if text == f"{threshold}+":
+            continue
+        return False
+    return True
+
+
+def _coerce_code_map(raw: Any, name: str) -> dict[str, list[str]] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise StatbankError(f"{name} maps a variable id to a list of codes, or to one code.")
+    return {str(key): _coerce_code_list(value, f"{name}.{key}") for key, value in raw.items()}
+
+
+def _coerce_code_list(value: Any, name: str) -> list[str]:
+    if isinstance(value, str):
+        return _split_codes(value)
+    if isinstance(value, list):
+        codes: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise StatbankError(f"{name} must be a list of codes, or one code.")
+            codes.extend(_split_codes(item))
+        return codes
+    raise StatbankError(f"{name} must be a list of codes, or one code.")
+
+
+def _split_codes(text: str) -> list[str]:
+    """Turn one code, or an unambiguous comma-separated list, into codes.
+
+    Expressions such as ``>=2015K1`` are one value. A comma splits only when
+    every piece is its own code.
+    """
+    stripped = text.strip()
+    if "," not in stripped or _is_expression(stripped):
+        return [stripped]
+    parts = [part.strip() for part in stripped.split(",") if part.strip()]
+    if len(parts) < 2 or any(_is_expression(part) for part in parts):
+        return [stripped]
+    return parts
+
+
+def _guard_time_sums(
+    table: _Table,
+    selections: dict[str, list[str]],
+    explicit: dict[str, list[str]],
+) -> None:
+    """Refuse a time sum that would hide rows or add only the two endpoints.
+
+    The API often rejects ``sum()`` on Tid. Adding the cells afterwards used
+    the first row's labels for every other variable, so a second municipality
+    and every age except the first disappeared into one plausible number.
+    """
+    for var_id, codes in explicit.items():
+        variable = table.variable(var_id)
+        if variable is None or not variable.time or not codes:
+            continue
+        conflicts = [
+            other_id
+            for other_id, selected in selections.items()
+            if other_id != var_id
+            and selected
+            and (len(selected) != 1 or _is_expression(selected[0]))
+        ]
+        if len(codes) != 2 and not conflicts:
+            continue
+        raise StatbankError(_time_sum_error(var_id, codes, conflicts, selections))
+
+
+def _time_sum_error(
+    var_id: str,
+    codes: list[str],
+    conflicts: list[str],
+    selections: dict[str, list[str]],
+) -> str:
+    start, end = codes[0], codes[-1]
+    parts = []
+    if len(codes) == 2:
+        parts.append(
+            f"sum_range on {var_id} with {start} and {end} adds only those two periods, "
+            "not every period between them."
+        )
+    if conflicts:
+        listed = ", ".join(conflicts)
+        parts.append(
+            f"Refusing to add {var_id} while {listed} has several values or a range. "
+            "That would hide rows."
+        )
+    parts.append(
+        f'For the development over time, use values {{"{var_id}": [">={start}"]}} '
+        f'or {{"{var_id}": [">={start}<={end}"]}}. '
+        "Each period comes back as its own row."
+    )
+    advice = _older_than_advice(selections)
+    if advice:
+        parts.append(advice)
+    return " ".join(parts)
+
+
+def _older_than_advice(selections: dict[str, list[str]]) -> str:
+    selected = selections.get("ALDER") or []
+    if len(selected) != 1:
+        return ""
+    match = re.fullmatch(r">=(\d+)", selected[0].strip())
+    if match is None:
+        return ""
+    start = match.group(1)
+    return (
+        f'Use sum_from {{"ALDER": "{start}"}} for ages {start} and older, not values [">={start}"].'
+    )
 
 
 def _build_selections(
@@ -553,8 +1021,8 @@ def _build_selections(
         variable = _require_variable(table, str(code))
         if variable.id in chosen:
             raise StatbankError(
-                f"Variable {variable.id} is listed in both values and sum_from. "
-                "Put it in only one of them."
+                f"Variable {variable.id} is listed in both values and sum_from, and they differ. "
+                f"Remove {variable.id} from values."
             )
         chosen[variable.id] = [_sum_expression(variable, start)]
 
@@ -934,25 +1402,40 @@ def _sum_rows(
     variable_id: str,
     codes: list[str],
 ) -> list[dict[str, Any]]:
+    """Add one variable inside each other combination of values.
+
+    One group per series. The first row's labels are not reused for a second
+    municipality or a second age.
+    """
     if not rows:
         raise StatbankError(f"Statistikbanken returned no rows to add for {variable_id}.")
-    total = 0
+    grouped: dict[tuple[tuple[str, Any], ...], dict[str, Any]] = {}
+    order: list[tuple[tuple[str, Any], ...]] = []
     for row in rows:
         value = row.get("value")
         if isinstance(value, bool) or not isinstance(value, int | float):
             label = row.get(variable_id, "")
             raise StatbankError(f"Could not add {variable_id} because '{label}' has no number.")
-        total += value
-    if isinstance(total, float) and total.is_integer():
-        total = int(total)
-    summed = {
-        key: value
-        for key, value in rows[0].items()
-        if key not in {variable_id, "value", "unpublished"}
-    }
-    summed[variable_id] = "+".join(codes)
-    summed["value"] = total
-    return [summed]
+        identity = tuple(
+            (key, row.get(key)) for key in row if key not in {variable_id, "value", "unpublished"}
+        )
+        current = grouped.get(identity)
+        if current is None:
+            current = {key: item for key, item in identity}
+            current[variable_id] = "+".join(codes)
+            current["value"] = 0
+            grouped[identity] = current
+            order.append(identity)
+        current["value"] += value
+    summed_rows: list[dict[str, Any]] = []
+    for identity in order:
+        summed = grouped[identity]
+        total = summed["value"]
+        if isinstance(total, float) and total.is_integer():
+            total = int(total)
+        summed["value"] = total
+        summed_rows.append(summed)
+    return summed_rows
 
 
 def _periods(table: _Table, rows: list[dict[str, Any]]) -> list[str]:
