@@ -11,6 +11,7 @@ import asyncio
 import csv
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -25,6 +26,8 @@ from typing import Any, Protocol
 
 import httpx
 from mcp import Client, StdioServerParameters
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
 XAI_BASE_URL = "https://api.x.ai/v1"
@@ -62,6 +65,8 @@ For a change over time, fetch every period in one hent_data call.
 Pass Tid as one range in values, for example >=2015K1.
 Each period comes back as its own row. Do not put Tid in sum_range.
 Do not sum periods together with several places or an age range.
+Quote only values from the tool results. For each series, quote the first value and the last value.
+Do not compute a difference, a change, or a percentage.
 Municipality names may be passed as labels.
 One code may be a string. Several codes are a list, or one comma-separated string.
 Answer in the same language as the question.
@@ -788,7 +793,7 @@ def guard_answer(
     if not facts:
         if _is_page_message(answer):
             return answer
-        if _unverified_numbers(answer, question, facts, calls):
+        if _log_unverified(answer, question, facts, calls):
             return NO_FETCHED_NUMBERS
         return NO_DATA_ANSWER
     refusal = _relevance_refusal(question, facts)
@@ -798,7 +803,7 @@ def guard_answer(
         lines = _latest_lines(facts)
         if lines:
             return "\n".join(lines)
-    if _unverified_numbers(answer, question, facts, calls):
+    if _log_unverified(answer, question, facts, calls):
         if _single_fact(facts):
             return _summary_line(facts[0])
         return UNVERIFIED_NUMBERS
@@ -1020,6 +1025,23 @@ def _da_number(value: int | float) -> str:
     number = int(value)
     sign = "-" if number < 0 else ""
     return sign + f"{abs(number):,}".replace(",", ".")
+
+
+def _log_unverified(
+    answer: str,
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]] | None,
+) -> list[float]:
+    flagged = _unverified_numbers(answer, question, facts, calls)
+    if flagged:
+        logger.info("Suppressed prose; flagged numbers: %s", _flagged_text(flagged))
+    return flagged
+
+
+def _flagged_text(numbers: list[float]) -> str:
+    shown = sorted({int(number) if float(number).is_integer() else number for number in numbers})
+    return ", ".join(str(number) for number in shown)
 
 
 def _unverified_numbers(
@@ -1300,6 +1322,9 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
 
 
 def serve(settings: Settings, answer: Any | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     limited = Limiter(settings.daily_cap, settings.per_minute)
     handler = _handler(settings, limited, answer or _default_answer(settings))
     server = ThreadingHTTPServer((settings.host, settings.port), handler)
