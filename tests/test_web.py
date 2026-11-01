@@ -443,7 +443,7 @@ def test_unverified_numbers_are_removed_when_facts_exist() -> None:
 def test_single_fact_summary_does_not_depend_on_the_prose() -> None:
     fact = _population_fact(5045)
     question = "Hvor mange over 80 bor i Rudersdal?"
-    line = "5.045 (FOLK1A, 2026 3. kvt., Antal, OMRÅDE: Rudersdal, ALDER: 80+)"
+    line = "5.045 (FOLK1A, 2026 3. kvt., Antal, Rudersdal, 80+)"
     honest = guard_answer(
         question,
         "Der bor 5.045 personer på 80 år eller derover i Rudersdal i 2026K3.",
@@ -467,8 +467,8 @@ def test_a_count_question_uses_only_the_latest_period() -> None:
         facts,
     )
     assert answer == (
-        "5.045 (FOLK1A, 2026 3. kvt., Antal, OMRÅDE: Rudersdal, ALDER: 80+)\n"
-        "2.790 (FOLK1A, 2026 3. kvt., Antal, OMRÅDE: Hørsholm, ALDER: 80+)"
+        "5.045 (FOLK1A, 2026 3. kvt., Antal, Rudersdal, 80+)\n"
+        "2.790 (FOLK1A, 2026 3. kvt., Antal, Hørsholm, 80+)"
     )
     assert "2016" not in answer
     assert "4.200" not in answer
@@ -736,12 +736,13 @@ def test_page_has_basis_and_avanceret_modes() -> None:
     assert 'return mode === "advanced" && data.show_numbers !== false;' in PAGE
     assert "advancedView(data) && data.facts && data.facts.length && data.csv" in PAGE
     assert "advancedView(data) && data.chart && data.chart.length" in PAGE
-    assert "if (data.show_numbers === false) return;" in PAGE
     assert "if (data.error)" in PAGE
     render = PAGE.split("function render", 1)[1].split("form.addEventListener", 1)[0]
     assert 'if (mode === "advanced") out.append(advancedOnly(toolCalls(data)));' in render
     assert "Værktøjskald" not in render
     assert render.index("if (data.error)") < render.index("toolCalls")
+    assert render.index("out.append(facts)") < render.index("toolCalls(data)")
+    assert "show_numbers === false) return" not in render
     assert render.index("drawGrid") < render.index("Hent Excel")
     assert "Hent Excel" in PAGE
     assert "Hent JSON" in PAGE
@@ -750,10 +751,16 @@ def test_page_has_basis_and_avanceret_modes() -> None:
     assert "<script src=" not in PAGE
 
 
-def test_chart_keeps_the_last_period_inside_the_frame() -> None:
-    assert "right = 56" in PAGE
-    assert 'text-anchor": last ? "end"' in PAGE
-    assert "width - 4" in PAGE
+def test_chart_labels_sit_on_the_points() -> None:
+    chart = PAGE.split("function drawChart", 1)[1].split("function daDigits", 1)[0]
+    assert "right = 56" in chart
+    assert "x: xOf(period)" in chart
+    assert "width - 4" not in chart
+    assert 'text-anchor": last ? "end"' in chart
+    assert 'font-family": "system-ui, sans-serif"' in chart
+    png = PAGE.split("function pngButton", 1)[1].split("function drawGrid", 1)[0]
+    assert ".legend" in png
+    assert "system-ui, sans-serif" in png
 
 
 def test_turn_stops_at_the_tool_cap() -> None:

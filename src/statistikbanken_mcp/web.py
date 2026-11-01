@@ -211,7 +211,11 @@ function drawChart(series) {
   const span = Math.max(periods.length - 1, 1);
   const xOf = (period) => left + (periods.indexOf(period) / span) * (width - left - right);
   const yOf = (value) => top + (1 - (value - min) / (max - min)) * (height - top - bottom);
-  const svg = svgEl("svg", {viewBox: "0 0 " + width + " " + height, role: "img"});
+  const svg = svgEl("svg", {
+    viewBox: "0 0 " + width + " " + height,
+    role: "img",
+    "font-family": "system-ui, sans-serif"
+  });
   const title = svgEl("title", {});
   title.textContent = "Udvikling over tid";
   svg.append(title);
@@ -233,7 +237,7 @@ function drawChart(series) {
     const last = index === periods.length - 1;
     const first = index === 0;
     const label = svgEl("text", {
-      x: last ? width - 4 : (first ? left : xOf(period)),
+      x: xOf(period),
       y: height - 12,
       "text-anchor": last ? "end" : (first ? "start" : "middle"),
       fill: "#4a453e",
@@ -340,13 +344,30 @@ function pngButton(svg) {
     const url = URL.createObjectURL(new Blob([xml], {type: "image/svg+xml;charset=utf-8"}));
     const image = new Image();
     image.onload = () => {
+      const legend = svg.closest("section").querySelector(".legend");
+      const bits = legend ? [...legend.children] : [];
+      const extra = bits.length ? 40 : 0;
+      const scale = 2;
       const canvas = document.createElement("canvas");
-      canvas.width = 1280;
-      canvas.height = 560;
+      canvas.width = 640 * scale;
+      canvas.height = (280 + extra) * scale;
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, 640 * scale, 280 * scale);
+      ctx.font = (15 * scale) + "px system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      let x = 8 * scale;
+      const y = (280 + extra / 2) * scale;
+      bits.forEach((bit, index) => {
+        ctx.fillStyle = COLORS[index % COLORS.length];
+        ctx.fillRect(x, y - 6 * scale, 12 * scale, 12 * scale);
+        x += 18 * scale;
+        ctx.fillStyle = "#1c1915";
+        const text = bit.textContent || "";
+        ctx.fillText(text, x, y);
+        x += ctx.measureText(text).width + 16 * scale;
+      });
       URL.revokeObjectURL(url);
       canvas.toBlob((png) => download(png, "statistikbanken.png"));
     };
@@ -415,34 +436,35 @@ function render(data) {
     out.append(advancedOnly(chart));
   }
 
-  if (data.show_numbers === false) return;
-  const facts = el("section");
-  facts.append(el("h2", "Tal"));
-  if (advancedView(data)) {
-    const linked = new Set();
-    for (const fact of data.facts || []) {
-      if (fact.url && fact.table && !linked.has(fact.table)) {
-        linked.add(fact.table);
-        const link = document.createElement("a");
-        link.href = fact.url;
-        link.target = "_blank";
-        link.rel = "noopener";
-        const title = fact.title ? ", " + fact.title : "";
-        link.textContent = "Tabel " + fact.table + title + " på Statistikbanken";
-        facts.append(advancedOnly(link));
+  if (data.show_numbers !== false) {
+    const facts = el("section");
+    facts.append(el("h2", "Tal"));
+    if (advancedView(data)) {
+      const linked = new Set();
+      for (const fact of data.facts || []) {
+        if (fact.url && fact.table && !linked.has(fact.table)) {
+          linked.add(fact.table);
+          const link = document.createElement("a");
+          link.href = fact.url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          const title = fact.title ? ", " + fact.title : "";
+          link.textContent = "Tabel " + fact.table + title + " på Statistikbanken";
+          facts.append(advancedOnly(link));
+        }
       }
     }
+    facts.append(drawGrid(data.grid));
+    if (advancedView(data) && data.facts && data.facts.length && data.csv) {
+      const row = el("div", null, "exports");
+      row.append(advancedOnly(csvButton(data.csv)));
+      row.append(advancedOnly(fileButton("Hent Excel", "xlsx", data.facts)));
+      row.append(advancedOnly(fileButton("Hent JSON", "json", data.facts)));
+      if (chartSvg) row.append(advancedOnly(pngButton(chartSvg)));
+      facts.append(row);
+    }
+    out.append(facts);
   }
-  facts.append(drawGrid(data.grid));
-  if (advancedView(data) && data.facts && data.facts.length && data.csv) {
-    const row = el("div", null, "exports");
-    row.append(advancedOnly(csvButton(data.csv)));
-    row.append(advancedOnly(fileButton("Hent Excel", "xlsx", data.facts)));
-    row.append(advancedOnly(fileButton("Hent JSON", "json", data.facts)));
-    if (chartSvg) row.append(advancedOnly(pngButton(chartSvg)));
-    facts.append(row);
-  }
-  out.append(facts);
   if (mode === "advanced") out.append(advancedOnly(toolCalls(data)));
 }
 
@@ -1245,7 +1267,7 @@ def _summary_line(fact: dict[str, Any]) -> str:
         period_label(str(fact.get("period") or "")),
         str(fact.get("unit") or ""),
     ]
-    detail = str(fact.get("detail") or "")
+    detail = display_label(str(fact.get("detail") or ""))
     if detail:
         bits.append(detail)
     label = ", ".join(bit for bit in bits if bit)
