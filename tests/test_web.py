@@ -43,6 +43,7 @@ from statistikbanken_mcp.web import (
     facts_to_xlsx,
     guard_answer,
     list_server_tools,
+    period_label,
     run_turn,
     server_command,
     settings_from_env,
@@ -166,8 +167,9 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "Do not answer in English when the question is Danish" in SYSTEM_PROMPT
     assert "only the latest period" in SYSTEM_PROMPT
     assert "5.045" in SYSTEM_PROMPT
-    assert "2026K3" in SYSTEM_PROMPT
-    assert "2026Q3" in SYSTEM_PROMPT
+    assert "1. kvartal 2015" in SYSTEM_PROMPT
+    assert "2015 1. kvt." in SYSTEM_PROMPT
+    assert "Do not write 2015K1 or 2026Q3." in SYSTEM_PROMPT
     assert "Do not put Tid in sum_range" in SYSTEM_PROMPT
     assert "first value and the last value" in SYSTEM_PROMPT
     assert "Do not compute a difference" in SYSTEM_PROMPT
@@ -175,6 +177,7 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "Do not open with the table id or the table title." in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Rudersdal?")
     assert "Do not open with the table id or the table title." in single
+    assert "2015 1. kvt." in single
     assert "Danish" in single
     assert "latest period" in single
     assert "do not invent" in single.casefold()
@@ -440,7 +443,7 @@ def test_unverified_numbers_are_removed_when_facts_exist() -> None:
 def test_single_fact_summary_does_not_depend_on_the_prose() -> None:
     fact = _population_fact(5045)
     question = "Hvor mange over 80 bor i Rudersdal?"
-    line = "5.045 (FOLK1A, 2026K3, Antal, OMRÅDE: Rudersdal, ALDER: 80+)"
+    line = "5.045 (FOLK1A, 2026 3. kvt., Antal, OMRÅDE: Rudersdal, ALDER: 80+)"
     honest = guard_answer(
         question,
         "Der bor 5.045 personer på 80 år eller derover i Rudersdal i 2026K3.",
@@ -464,8 +467,8 @@ def test_a_count_question_uses_only_the_latest_period() -> None:
         facts,
     )
     assert answer == (
-        "5.045 (FOLK1A, 2026K3, Antal, OMRÅDE: Rudersdal, ALDER: 80+)\n"
-        "2.790 (FOLK1A, 2026K3, Antal, OMRÅDE: Hørsholm, ALDER: 80+)"
+        "5.045 (FOLK1A, 2026 3. kvt., Antal, OMRÅDE: Rudersdal, ALDER: 80+)\n"
+        "2.790 (FOLK1A, 2026 3. kvt., Antal, OMRÅDE: Hørsholm, ALDER: 80+)"
     )
     assert "2016" not in answer
     assert "4.200" not in answer
@@ -876,6 +879,8 @@ def test_chart_series_groups_periods_and_skips_a_single_point() -> None:
     ]
     assert [point["period"] for point in series[0]["points"]] == ["2015K1", "2026K3"]
     assert series[0]["points"][1]["value"] == 5045
+    assert series[0]["points"][0]["label"] == "2015 1. kvt."
+    assert series[0]["points"][1]["label"] == "2026 3. kvt."
     assert series[1]["unit"] == "Antal"
 
 
@@ -887,7 +892,7 @@ def test_display_label_drops_variable_names_and_totals() -> None:
 def test_grid_is_periods_by_series_with_plain_labels() -> None:
     one = facts_to_grid([_population_fact(5045)])
     assert one["columns"] == ["Periode", "Rudersdal, 80+"]
-    assert one["rows"] == [["2026K3", "5.045"]]
+    assert one["rows"] == [["2026 3. kvt.", "5.045"]]
     two = facts_to_grid(
         [
             _population_fact(3524, "2015K1"),
@@ -898,18 +903,53 @@ def test_grid_is_periods_by_series_with_plain_labels() -> None:
     )
     assert two["columns"] == ["Periode", "Rudersdal, 80+", "Hørsholm, 80+"]
     assert two["rows"] == [
-        ["2015K1", "3.524", "1.719"],
-        ["2026K3", "5.045", "2.790"],
+        ["2015 1. kvt.", "3.524", "1.719"],
+        ["2026 3. kvt.", "5.045", "2.790"],
     ]
     long = facts_to_grid(
         [_population_fact(3000 + index, f"20{index:02d}K1") for index in range(20)]
     )
     assert len(long["rows"]) == 20
-    assert long["rows"][0][0] == "2000K1"
-    assert long["rows"][-1][0] == "2019K1"
+    assert long["rows"][0][0] == "2000 1. kvt."
+    assert long["rows"][-1][0] == "2019 1. kvt."
 
 
-def test_json_and_xlsx_match_the_csv_rows() -> None:
+def test_period_label_uses_danish_names_and_keeps_unknown_codes() -> None:
+    assert period_label("2015K1") == "2015 1. kvt."
+    assert period_label("2015k4") == "2015 4. kvt."
+    assert period_label("2015M03") == "marts 2015"
+    assert period_label("2015M12") == "december 2015"
+    assert period_label("2015H1") == "2015 1. halvår"
+    assert period_label("2015H2") == "2015 2. halvår"
+    assert period_label("2015") == "2015"
+    assert period_label("2015K5") == "2015K5"
+    assert period_label(">=2015K1") == ">=2015K1"
+    assert period_label("2015K1+2026K3") == "2015K1+2026K3"
+
+
+def test_friendly_period_forms_are_not_extra_figures() -> None:
+    question = "Hvordan har udviklingen været?"
+    quarters = [
+        _population_fact(3524, "2015K1"),
+        _population_fact(5045, "2026K3"),
+    ]
+    kept = [
+        "Fra 2015 1. kvt. til 2026 3. kvt. var tallene 3.524 og 5.045.",
+        "Fra 1. kvartal 2015 til 3. kvartal 2026 var tallene 3.524 og 5.045.",
+    ]
+    for text in kept:
+        assert guard_answer(question, text, quarters) == text
+    invented = "Fra 2015 1. kvt. til 2026 3. kvt., i alt 1 person."
+    assert guard_answer(question, invented, quarters) == UNVERIFIED_NUMBERS
+    month = [_population_fact(100, "2015M03"), _population_fact(110, "2015M04")]
+    march = "Fra marts 2015 til april 2015 var tallene 100 og 110."
+    assert guard_answer(question, march, month) == march
+    halves = [_population_fact(100, "2015H1"), _population_fact(110, "2015H2")]
+    half = "Fra 2015 1. halvår til 2015 2. halvår var tallene 100 og 110."
+    assert guard_answer(question, half, halves) == half
+
+
+def test_json_keeps_the_period_code_and_csv_uses_the_label() -> None:
     facts = [
         _fact("Rudersdal", "2015K1", 5045),
         _fact("Rudersdal", "2015K2", 12.5),
@@ -917,9 +957,16 @@ def test_json_and_xlsx_match_the_csv_rows() -> None:
     text = facts_to_csv(facts).lstrip("\ufeff")
     reader = csv.reader(io.StringIO(text), delimiter=";")
     header = next(reader)
-    expected = [dict(zip(header, row, strict=True)) for row in reader]
-    assert json.loads(facts_to_json(facts)) == expected
-    assert _xlsx_rows(facts_to_xlsx(facts)) == [header, *[list(item.values()) for item in expected]]
+    csv_rows = list(reader)
+    assert header == ["tabel", "periode", "dimensioner", "værdi", "enhed"]
+    assert csv_rows[0][1] == "2015 1. kvt."
+    assert _xlsx_rows(facts_to_xlsx(facts)) == [header, *csv_rows]
+    exported = json.loads(facts_to_json(facts))
+    assert exported[0]["periode"] == "2015K1"
+    assert exported[0]["periode_label"] == "2015 1. kvt."
+    assert exported[0]["værdi"] == "5045"
+    assert exported[1]["periode"] == "2015K2"
+    assert exported[1]["værdi"] == "12,5"
 
 
 def test_export_endpoint_writes_a_file_and_does_not_ask_again() -> None:
@@ -953,6 +1000,7 @@ def test_export_endpoint_writes_a_file_and_does_not_ask_again() -> None:
         rows = _xlsx_rows(workbook.read())
         assert rows[0] == ["tabel", "periode", "dimensioner", "værdi", "enhed"]
         assert rows[1][0] == "FOLK1A"
+        assert rows[1][1] == "2015 1. kvt."
         assert rows[1][3] == "5045"
         exported = _post(port, {"format": "json", "facts": facts}, "/api/export")
         assert exported.status == 200
@@ -989,8 +1037,8 @@ def test_csv_uses_bom_semicolon_and_decimal_comma() -> None:
     assert text.startswith("\ufeff")
     header = text.splitlines()[0].lstrip("\ufeff")
     assert header == "tabel;periode;dimensioner;værdi;enhed"
-    assert "FOLK1A;2015K1;OMRÅDE: Rudersdal;5045;Antal" in text
-    assert "FOLK1A;2015K2;OMRÅDE: Rudersdal;12,5;Antal" in text
+    assert "FOLK1A;2015 1. kvt.;OMRÅDE: Rudersdal;5045;Antal" in text
+    assert "FOLK1A;2015 2. kvt.;OMRÅDE: Rudersdal;12,5;Antal" in text
 
 
 @pytest.mark.live

@@ -76,7 +76,8 @@ Answer in the same language as the question.
 A Danish question gets a Danish answer, even if the tool text is English.
 Do not answer in English when the question is Danish.
 Write Danish numbers with a dot as the thousands separator: 5.045, never 5,045.
-Write periods as Statistikbanken does: 2026K3, never 2026Q3."""
+Write periods like 1. kvartal 2015 or 2015 1. kvt., marts 2015, or 2015 1. halvår.
+A year stays 2015. Do not write 2015K1 or 2026Q3."""
 
 PAGE = """<!DOCTYPE html>
 <html lang="da">
@@ -195,8 +196,10 @@ function drawChart(series) {
   const width = 640, height = 280, left = 64, right = 56, top = 16, bottom = 36;
   const periods = [];
   const seen = new Set();
+  const labelOf = new Map();
   for (const item of series) for (const point of item.points) {
     if (!seen.has(point.period)) { seen.add(point.period); periods.push(point.period); }
+    if (point.label) labelOf.set(point.period, point.label);
   }
   periods.sort();
   let min = Infinity, max = -Infinity;
@@ -224,7 +227,7 @@ function drawChart(series) {
     label.textContent = daDigits(Math.round(value));
     svg.append(label);
   }
-  const step = Math.ceil(periods.length / 6);
+  const step = Math.ceil(periods.length / 4);
   periods.forEach((period, index) => {
     if (index % step && index !== periods.length - 1) return;
     const last = index === periods.length - 1;
@@ -234,16 +237,30 @@ function drawChart(series) {
       y: height - 12,
       "text-anchor": last ? "end" : (first ? "start" : "middle"),
       fill: "#4a453e",
-      "font-size": "11"
+      "font-size": "10"
     });
-    label.textContent = period;
+    const shown = labelOf.get(period) || period;
+    label.textContent = shown;
+    const tip = svgEl("title", {});
+    tip.textContent = shown;
+    label.append(tip);
     svg.append(label);
   });
   series.forEach((item, index) => {
+    const color = COLORS[index % COLORS.length];
     const points = item.points.map((point) => xOf(point.period) + "," + yOf(point.value)).join(" ");
     svg.append(svgEl("polyline", {
-      points, fill: "none", stroke: COLORS[index % COLORS.length], "stroke-width": "2"
+      points, fill: "none", stroke: color, "stroke-width": "2"
     }));
+    for (const point of item.points) {
+      const dot = svgEl("circle", {
+        cx: xOf(point.period), cy: yOf(point.value), r: "3.5", fill: color
+      });
+      const tip = svgEl("title", {});
+      tip.textContent = (point.label || point.period) + ": " + daDigits(point.value);
+      dot.append(tip);
+      svg.append(dot);
+    }
   });
   const wrap = el("div", null, "chart");
   wrap.append(svg);
@@ -730,6 +747,57 @@ def _table_url(table: str) -> str:
 
 
 _TOTAL_LABELS = frozenset({"i alt", "total", "tot", "alle"})
+_MONTHS = (
+    "januar",
+    "februar",
+    "marts",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "august",
+    "september",
+    "oktober",
+    "november",
+    "december",
+)
+_QUARTER_RE = re.compile(r"((?:19|20)\d{2})K([1-4])\Z", re.IGNORECASE)
+_MONTH_RE = re.compile(r"((?:19|20)\d{2})M(0[1-9]|1[0-2])\Z", re.IGNORECASE)
+_HALF_RE = re.compile(r"((?:19|20)\d{2})H([12])\Z", re.IGNORECASE)
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}\Z")
+
+
+def period_label(code: str) -> str:
+    """Friendly Danish period. Unknown codes are returned unchanged."""
+    text = str(code).strip()
+    quarter = _QUARTER_RE.fullmatch(text)
+    if quarter:
+        return f"{quarter.group(1)} {quarter.group(2)}. kvt."
+    month = _MONTH_RE.fullmatch(text)
+    if month:
+        return f"{_MONTHS[int(month.group(2)) - 1]} {month.group(1)}"
+    half = _HALF_RE.fullmatch(text)
+    if half:
+        return f"{half.group(1)} {half.group(2)}. halvår"
+    if _YEAR_RE.fullmatch(text):
+        return text
+    return text
+
+
+def _period_phrases(code: str) -> list[str]:
+    """Writings of one fetched period whose digits are not separate figures."""
+    text = str(code).strip()
+    label = period_label(text)
+    phrases = [label] if label != text else []
+    if label.endswith("."):
+        phrases.append(label[:-1])
+    quarter = _QUARTER_RE.fullmatch(text)
+    if quarter:
+        phrases.append(f"{quarter.group(2)}. kvartal {quarter.group(1)}")
+    half = _HALF_RE.fullmatch(text)
+    if half:
+        phrases.append(f"{half.group(2)}. halvår {half.group(1)}")
+    return phrases
 
 
 def display_label(detail: str, table: str = "") -> str:
@@ -774,7 +842,7 @@ def facts_to_grid(facts: list[dict[str, Any]]) -> dict[str, list[Any]]:
     return {
         "columns": ["Periode", *labels],
         "rows": [
-            [period, *[by_period[period].get(key, "–") for key in keys]]
+            [period_label(period), *[by_period[period].get(key, "–") for key in keys]]
             for period in sorted(by_period)
         ],
     }
@@ -821,7 +889,12 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "table": table,
                 "unit": unit,
                 "points": [
-                    {"period": period, "value": points[period]} for period in sorted(points)
+                    {
+                        "period": period,
+                        "label": period_label(period),
+                        "value": points[period],
+                    }
+                    for period in sorted(points)
                 ],
             }
         )
@@ -839,7 +912,7 @@ def _export_rows(facts: list[dict[str, Any]]) -> tuple[list[str], list[list[str]
         rows.append(
             [
                 str(fact.get("table") or ""),
-                str(fact.get("period") or ""),
+                period_label(str(fact.get("period") or "")),
                 str(fact.get("detail") or ""),
                 _csv_number(fact.get("value")),
                 str(fact.get("unit") or ""),
@@ -859,9 +932,23 @@ def facts_to_csv(facts: list[dict[str, Any]]) -> str:
 
 
 def facts_to_json(facts: list[dict[str, Any]]) -> str:
-    """The same columns and cell text as the CSV, as a list of objects."""
-    header, rows = _export_rows(facts)
-    return json.dumps([dict(zip(header, row, strict=True)) for row in rows], ensure_ascii=False)
+    """CSV columns, but periode stays the raw code and periode_label is friendly."""
+    rows = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        raw = str(fact.get("period") or "")
+        rows.append(
+            {
+                "tabel": str(fact.get("table") or ""),
+                "periode": raw,
+                "periode_label": period_label(raw),
+                "dimensioner": str(fact.get("detail") or ""),
+                "værdi": _csv_number(fact.get("value")),
+                "enhed": str(fact.get("unit") or ""),
+            }
+        )
+    return json.dumps(rows, ensure_ascii=False)
 
 
 def facts_to_xlsx(facts: list[dict[str, Any]]) -> bytes:
@@ -1028,9 +1115,9 @@ _TREND_MARKERS = (
     "history",
 )
 _PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
-# The year in 2015K1 or in a bare period such as 2024. The quarter digit is not a figure.
+# The year in 2015K1, 2015H1, or a bare period such as 2024. The quarter digit is not a figure.
 _PERIOD_YEAR_RE = re.compile(
-    r"\b((?:19|20)\d{2})(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))?\b",
+    r"\b((?:19|20)\d{2})(?:K[1-4]|Q[1-4]|H[12]|M(?:0[1-9]|1[0-2]))?\b",
     re.IGNORECASE,
 )
 _TITLE_RE = re.compile(r'"title"\s*:\s*"((?:\\.|[^"\\])*)"')
@@ -1063,7 +1150,7 @@ def _closing_instruction(question: str) -> str:
     if _looks_danish(question):
         language = (
             "The question is Danish. Answer in Danish. Do not answer in English. "
-            "Write 5.045 and 2026K3."
+            "Write 5.045 and 2015 1. kvt."
         )
     else:
         language = "Answer in the same language as the question."
@@ -1153,7 +1240,11 @@ def _is_page_message(answer: str) -> bool:
 
 def _summary_line(fact: dict[str, Any]) -> str:
     value = _da_number(fact["value"])
-    bits = [str(fact.get(key) or "") for key in ("table", "period", "unit")]
+    bits = [
+        str(fact.get("table") or ""),
+        period_label(str(fact.get("period") or "")),
+        str(fact.get("unit") or ""),
+    ]
     detail = str(fact.get("detail") or "")
     if detail:
         bits.append(detail)
@@ -1363,7 +1454,9 @@ def _unverified_numbers(
     titles = _fetched_titles(calls)
     allowed = _numbers_in_context(question, facts, titles)
     allowed.update(_argument_figures(calls))
-    flagged = [number for number in _numbers_in(answer) if not _near(number, allowed)]
+    fetched = {str(fact.get("period") or "") for fact in facts}
+    scanned = _mask_friendly_periods(answer, fetched)
+    flagged = [number for number in _numbers_in(scanned) if not _near(number, allowed)]
     known_periods = _period_tokens(question)
     for fact in facts:
         known_periods.update(_period_tokens(str(fact.get("period") or "")))
@@ -1486,6 +1579,16 @@ def _numbers_in(text: str) -> list[float]:
 
 def _mask_periods(text: str) -> str:
     return _PERIOD_RE.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def _mask_friendly_periods(text: str, periods: set[str]) -> str:
+    """Hide digits that only name a fetched quarter, month, or half-year."""
+    phrases: list[str] = []
+    for code in periods:
+        phrases.extend(_period_phrases(code))
+    for phrase in sorted(set(phrases), key=len, reverse=True):
+        text = re.sub(re.escape(phrase), " " * len(phrase), text, flags=re.IGNORECASE)
+    return text
 
 
 def _parse_stat_number(token: str) -> float:
