@@ -2,18 +2,18 @@
 
 An MCP server for [Danmarks Statistik](https://www.dst.dk)'s public Statistikbanken API. No API key.
 
-Statistikbanken has more than 2,000 tables and no free-text search. This server gives an assistant three small tools, so a question such as "How many people over 80 live in Rudersdal?" comes back as a number from a named table and period, with Danmarks Statistik as the source.
+Statistikbanken has more than 2,000 tables and no free-text search. This server gives an assistant three small tools, so a question such as "How many people over 80 live in Esbjerg?" comes back as a number from a named table and period, with Danmarks Statistik as the source.
 
 ## Example
 
-**How many people over 80 live in Rudersdal?**
+**How many people over 80 live in Esbjerg?**
 
 `find_tabel("befolkning")` returns `FOLK1A`, "Befolkningen den 1. i kvartalet", latest period `2026K3`.
 
 ```text
 hent_data(
   table="FOLK1A",
-  values={"OMRÅDE": ["Rudersdal"], "KØN": ["TOT"], "CIVILSTAND": ["TOT"], "Tid": ["(1)"]},
+  values={"OMRÅDE": ["Esbjerg"], "KØN": ["TOT"], "CIVILSTAND": ["TOT"], "Tid": ["(1)"]},
   sum_from={"ALDER": "80"}
 )
 ```
@@ -22,20 +22,20 @@ Ages in FOLK1A are single years. `sum_from` asks the API to add 80 through 125. 
 
 | Table | Period | Place | Age | Value |
 |---|---|---|---|---|
-| FOLK1A | 2026K3 | Rudersdal | 80+ | 5,045 |
+| FOLK1A | 2026K3 | Esbjerg | 80+ | 7,556 |
 
 Unit is people (`Antal`). Source: Danmarks Statistik.
 
-**Children aged 0–17 in Rudersdal and Hørsholm**, same table and quarter, with `sum_range={"ALDER": ["0", "17"]}`:
+**Children aged 0–17 in Esbjerg and Viborg**, same table and quarter, with `sum_range={"ALDER": ["0", "17"]}`:
 
 | Place | Value |
 |---|---|
-| Rudersdal | 12,770 |
-| Hørsholm | 4,916 |
+| Esbjerg | 21,616 |
+| Viborg | 19,171 |
 
 **A misspelled name.** `hent_data` with `OMRÅDE: ["Kobenhavn"]` resolves to København. Total population in FOLK1A, 2026K3: 670,389.
 
-These three calls were run against `https://api.statbank.dk` on 31 October 2026.
+These three calls were run against `https://api.statbank.dk` on 1 November 2026.
 
 ## Tools
 
@@ -45,7 +45,7 @@ Names are Danish. Arguments and descriptions are English.
 |---|---|---|---|
 | `find_tabel` | Find a table | `query`, `limit` (1–25, default 10) | Matches id, title, and variable names. Some words are enough. A long word drops a trailing e, and a compound splits on s (`gennemsnitsindkomst`). A few synonyms are built in (`population`, `bruttoledighed`, `huspriser`, `husdyr`, `indbrud`). A query that says "før skat" prefers a title of "Indkomst i alt" over "Disponibel indkomst". Municipality names are matched against FOLK1A and returned with their codes. A miss is an error, not an empty list. |
 | `tabelinfo` | Read codes | `table`, optional `variable`, `values_filter` | Time is first, last, and count. Long value lists are capped; `values_filter` looks up the rest, and several words match any of them. |
-| `hent_data` | Fetch rows | `table`, `values`, `sum_from`, `sum_range` | Values may be codes or labels (`Rudersdal`, `Kobenhavn`). A required variable with one total is filled in. One with no total returns its codes. `sum_from` and `sum_range` use the API's own sum. `>=80` on its own is one row per code. A time sum that would hide rows, including two periods passed where a range was meant, is an error. A trailing 0 marked `unpublished` is a period the API has not published yet. |
+| `hent_data` | Fetch rows | `table`, `values`, `sum_from`, `sum_range` | Values may be codes or labels (`Esbjerg`, `Kobenhavn`). A required variable with one total is filled in. One with no total returns its codes. `sum_from` and `sum_range` use the API's own sum. `>=80` on its own is one row per code. A time sum that would hide rows, including two periods passed where a range was meant, is an error. A trailing 0 marked `unpublished` is a period the API has not published yet. |
 
 Read `title`, `description`, `unit`, and `periods` on the result. They say what the number measures. A search hit can be narrower than the question.
 
@@ -163,14 +163,14 @@ uv run ruff format --check .
 
 GitHub Actions runs those Ruff commands and `uv run pytest` with no marker, so the live tests run there, on every push and pull request.
 
-Six questions, checked against the live API on 1 November 2026. The same figures are asserted from the recorded responses in `tests/test_acceptance.py` (`ACCEPTANCE_QUESTIONS`). Hørsholm's club counts are in that list; the recording used for the assert is Rudersdal only.
+Six questions, checked against the live API on 1 November 2026. The same figures are asserted from the recorded responses in `tests/test_acceptance.py` (`ACCEPTANCE_QUESTIONS`). Viborg's club counts are in that list; the recording used for the assert is Esbjerg only.
 
-1. Hvor mange over 80 bor i Rudersdal? FOLK1A 2026K3: 5045.
-2. Hvordan har befolkningstallet i Rudersdal udviklet sig de seneste 10 år? FOLK1A: 55915 in 2016K3, 58381 in 2026K3.
-3. Hvor mange over 80 bor i Gentofte, Rudersdal og Hørsholm? FOLK1A 2026K3: 5486 / 5045 / 2790.
-4. Hvor mange foreningsmedlemmer er der i Rudersdal? IDRFOR01 2025: 83 clubs and 29632 memberships. Hørsholm: 37 and 15784.
-5. Hvor mange børn mellem 0 og 17 år bor i Rudersdal og Hørsholm? FOLK1A 2026K3: 12770 / 4916.
-6. Hvad er den gennemsnitlige indkomst i alt før skat i Rudersdal og Hørsholm? INDKP105 2025: 757969 / 679635.
+1. Hvor mange over 80 bor i Esbjerg? FOLK1A 2026K3: 7556.
+2. Hvordan har befolkningstallet i Viborg udviklet sig de seneste 10 år? FOLK1A: 96166 in 2016K3, 98104 in 2026K3.
+3. Hvor mange over 80 bor i Gentofte, Esbjerg og Viborg? FOLK1A 2026K3: 5486 / 7556 / 6420.
+4. Hvor mange foreningsmedlemmer er der i Esbjerg? IDRFOR01 2025: 212 clubs and 54205 memberships. Viborg: 208 and 49821.
+5. Hvor mange børn mellem 0 og 17 år bor i Esbjerg og Viborg? FOLK1A 2026K3: 21616 / 19171.
+6. Hvad er den gennemsnitlige indkomst i alt før skat i Esbjerg og Viborg? INDKP105 2025: 407775 / 402605.
 
 On 31 October 2026 a real MCP client answered 50 Danish questions through this server. 37 were fine, 5 were near matches (the table was narrower than the question), and none of the numbers were wrong. Five invalid inputs were rejected clearly. Three were not: `Kobenhavn` without ø, an English question, and the name Silkeborg. Search was also too strict, and a missing required variable came back as a raw Danish API error.
 

@@ -53,8 +53,6 @@ def test_tabelinfo_compacts_ages_and_lists_areas() -> None:
     assert variables["OMRÅDE"]["values_truncated"] is True
     assert variables["OMRÅDE"]["value_count"] == 105
     areas = {item["id"]: item["text"] for item in variables["OMRÅDE"]["values"]}
-    assert areas["230"] == "Rudersdal"
-    assert areas["223"] == "Hørsholm"
     assert areas["157"] == "Gentofte"
     assert variables["KØN"]["values"][0] == {"id": "TOT", "text": "I alt"}
 
@@ -89,7 +87,7 @@ def test_api_rejects_a_bad_sum_expression(calls: list[dict[str, object]]) -> Non
     with pytest.raises(ToolError, match="Unknown value '99999' for variable ALDER") as caught:
         hent_data(
             "FOLK1A",
-            {"OMRÅDE": ["230"], "ALDER": ["sum(bad=99999)"], "Tid": ["(1)"]},
+            {"OMRÅDE": ["561"], "ALDER": ["sum(bad=99999)"], "Tid": ["(1)"]},
         )
     message = str(caught.value)
     assert "sum_from" in message
@@ -122,7 +120,7 @@ def test_income_before_tax_by_sex_is_not_overridden() -> None:
     assert find_tabel("indkomst før skat køn", limit=1)[0]["id"] == "INDKP221"
 
 
-@pytest.mark.parametrize("query", ["foreningsmedlemmer", "foreningsmedlemmer Rudersdal"])
+@pytest.mark.parametrize("query", ["foreningsmedlemmer", "foreningsmedlemmer Esbjerg"])
 def test_club_members_are_not_board_members(query: str) -> None:
     hits = find_tabel(query, limit=15)
     ids = [hit["id"] for hit in hits]
@@ -180,12 +178,12 @@ def test_ambiguous_time_sum_is_rejected_before_any_number(
     with pytest.raises(ToolError, match="not every period") as caught:
         hent_data(
             "FOLK1A",
-            values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+            values={"ALDER": [">=80"], "OMRÅDE": ["Esbjerg", "Viborg"]},
             sum_range={"Tid": ["2015K1", "2026K3"]},
         )
     message = str(caught.value)
     assert ">=2015K1" in message
-    assert "13078" not in message
+    assert "22780" not in message
     assert "hide rows" in message
     assert not any(str(call["path"]).endswith("/data") for call in calls)
 
@@ -194,7 +192,7 @@ def test_two_period_sum_is_not_a_time_range(calls: list[dict[str, object]]) -> N
     with pytest.raises(ToolError, match="not every period") as caught:
         hent_data(
             "FOLK1A",
-            values={"OMRÅDE": ["230"], "ALDER": ["IALT"]},
+            values={"OMRÅDE": ["561"], "ALDER": ["IALT"]},
             sum_range={"Tid": ["2015K1", "2026K3"]},
         )
     assert ">=2015K1" in str(caught.value)
@@ -205,27 +203,27 @@ def test_local_sum_keeps_each_series() -> None:
     from statistikbanken_mcp.statbank import _sum_rows
 
     rows = [
-        {"OMRÅDE": "Rudersdal", "ALDER": "80 år", "Tid": "2015K1", "value": 3524},
-        {"OMRÅDE": "Rudersdal", "ALDER": "80 år", "Tid": "2026K3", "value": 5045},
-        {"OMRÅDE": "Hørsholm", "ALDER": "80 år", "Tid": "2015K1", "value": 1719},
-        {"OMRÅDE": "Hørsholm", "ALDER": "80 år", "Tid": "2026K3", "value": 2790},
-        {"OMRÅDE": "Rudersdal", "ALDER": "81 år", "Tid": "2015K1", "value": 1},
-        {"OMRÅDE": "Rudersdal", "ALDER": "81 år", "Tid": "2026K3", "value": 2},
+        {"OMRÅDE": "Esbjerg", "ALDER": "80 år", "Tid": "2015K1", "value": 4678},
+        {"OMRÅDE": "Esbjerg", "ALDER": "80 år", "Tid": "2026K3", "value": 7556},
+        {"OMRÅDE": "Viborg", "ALDER": "80 år", "Tid": "2015K1", "value": 4126},
+        {"OMRÅDE": "Viborg", "ALDER": "80 år", "Tid": "2026K3", "value": 6420},
+        {"OMRÅDE": "Esbjerg", "ALDER": "81 år", "Tid": "2015K1", "value": 1},
+        {"OMRÅDE": "Esbjerg", "ALDER": "81 år", "Tid": "2026K3", "value": 2},
     ]
     summed = _sum_rows(rows, "Tid", ["2015K1", "2026K3"])
     by_series = {(row["OMRÅDE"], row["ALDER"]): row for row in summed}
     assert len(by_series) == 3
-    assert by_series[("Rudersdal", "80 år")]["value"] == 8569
-    assert by_series[("Hørsholm", "80 år")]["value"] == 4509
-    assert by_series[("Rudersdal", "81 år")]["Tid"] == "2015K1+2026K3"
-    assert 13078 not in {row["value"] for row in summed}
+    assert by_series[("Esbjerg", "80 år")]["value"] == 12234
+    assert by_series[("Viborg", "80 år")]["value"] == 10546
+    assert by_series[("Esbjerg", "81 år")]["Tid"] == "2015K1+2026K3"
+    assert 22780 not in {row["value"] for row in summed}
 
 
 def test_values_filter_splits_words_and_keeps_unmatched_variables() -> None:
-    info = tabelinfo("FOLK1A", values_filter="Rudersdal, Hørsholm")
+    info = tabelinfo("FOLK1A", values_filter="Esbjerg, Viborg")
     variables = {item["id"]: item for item in info["variables"]}
     areas = {item["id"]: item["text"] for item in variables["OMRÅDE"]["values"]}
-    assert areas == {"223": "Hørsholm", "230": "Rudersdal"}
+    assert areas == {"791": "Viborg", "561": "Esbjerg"}
     assert "filter_note" not in variables["OMRÅDE"]
     assert variables["Tid"]["time_span"]["first"]["id"] == "2008K1"
     assert variables["Tid"]["time_span"]["count"] == 75
@@ -234,9 +232,9 @@ def test_values_filter_splits_words_and_keeps_unmatched_variables() -> None:
     assert variables["KØN"]["values"]
     assert "No match" in variables["KØN"]["filter_note"]
 
-    spaced = tabelinfo("FOLK1A", values_filter="Rudersdal Hørsholm")
+    spaced = tabelinfo("FOLK1A", values_filter="Esbjerg Viborg")
     spaced_areas = next(item for item in spaced["variables"] if item["id"] == "OMRÅDE")
-    assert {item["text"] for item in spaced_areas["values"]} == {"Rudersdal", "Hørsholm"}
+    assert {item["text"] for item in spaced_areas["values"]} == {"Esbjerg", "Viborg"}
 
 
 def test_string_codes_are_coerced_to_lists(calls: list[dict[str, object]]) -> None:
@@ -246,7 +244,7 @@ def test_string_codes_are_coerced_to_lists(calls: list[dict[str, object]]) -> No
     parsed = tool.fn_metadata.validate_arguments(
         {
             "table": "FOLK1A",
-            "values": {"OMRÅDE": "Rudersdal, Hørsholm", "ALDER": "IALT", "Tid": ">=2016K3"},
+            "values": {"OMRÅDE": "Esbjerg, Viborg", "ALDER": "IALT", "Tid": ">=2016K3"},
         }
     )
     assert parsed["values"]["Tid"] == ">=2016K3"
@@ -255,16 +253,16 @@ def test_string_codes_are_coerced_to_lists(calls: list[dict[str, object]]) -> No
     sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
     assert isinstance(sent, dict)
     variables = {item["code"]: item["values"] for item in sent["variables"]}
-    assert variables["OMRÅDE"] == ["230", "223"]
+    assert variables["OMRÅDE"] == ["561", "791"]
     assert variables["ALDER"] == ["IALT"]
     assert variables["Tid"] == [">=2016K3"]
 
     children = hent_data(
         "FOLK1A",
-        values={"OMRÅDE": "230, 223"},
+        values={"OMRÅDE": "561, 791"},
         sum_range={"ALDER": "0, 17"},
     )
-    assert {row["OMRÅDE"] for row in children["rows"]} == {"Rudersdal", "Hørsholm"}
+    assert {row["OMRÅDE"] for row in children["rows"]} == {"Esbjerg", "Viborg"}
     assert children["rows"][0]["ALDER"] == "0-17"
 
 
@@ -273,11 +271,11 @@ def test_equivalent_age_expression_and_sum_from_are_one_request(
 ) -> None:
     result = hent_data(
         "FOLK1A",
-        values={"OMRÅDE": ["230"], "ALDER": [">=80"]},
+        values={"OMRÅDE": ["561"], "ALDER": [">=80"]},
         sum_from={"ALDER": "80"},
     )
     assert result["rows"][0]["ALDER"] == "80+"
-    assert result["rows"][0]["value"] == 5045
+    assert result["rows"][0]["value"] == 7556
     assert any("sum_from" in note for note in result["notes"])
     sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
     assert isinstance(sent, dict)
@@ -287,25 +285,25 @@ def test_equivalent_age_expression_and_sum_from_are_one_request(
 
     as_text = hent_data(
         "FOLK1A",
-        values={"OMRÅDE": "230", "ALDER": ">=80"},
+        values={"OMRÅDE": "561", "ALDER": ">=80"},
         sum_from={"ALDER": "80"},
     )
-    assert as_text["rows"][0]["value"] == 5045
+    assert as_text["rows"][0]["value"] == 7556
 
 
 def test_sum_from_nested_in_values_is_moved_out(calls: list[dict[str, object]]) -> None:
     from statistikbanken_mcp.server import mcp
 
     tool = mcp._tool_manager.get_tool("hent_data")
-    arguments = {"table": "FOLK1A", "values": {"OMRÅDE": "230", "sum_from": {"ALDER": "80"}}}
+    arguments = {"table": "FOLK1A", "values": {"OMRÅDE": "561", "sum_from": {"ALDER": "80"}}}
     tool.fn_metadata.validate_arguments(arguments)
     result = hent_data("FOLK1A", values=arguments["values"])
-    assert result["rows"][0]["value"] == 5045
+    assert result["rows"][0]["value"] == 7556
     assert any("Moved sum_from" in note for note in result["notes"])
     assert "validation error" not in " ".join(result["notes"]).casefold()
 
     with pytest.raises(ToolError, match="beside values") as caught:
-        hent_data("FOLK1A", values={"OMRÅDE": "230", "sum_from": "80"})
+        hent_data("FOLK1A", values={"OMRÅDE": "561", "sum_from": "80"})
     message = str(caught.value)
     assert "sum_from" in message
     assert 'sum_from {"ALDER": "80"}' in message
@@ -316,9 +314,9 @@ def test_sum_from_nested_in_values_is_moved_out(calls: list[dict[str, object]]) 
 def test_open_ended_age_becomes_sum_from(calls: list[dict[str, object]]) -> None:
     phrases = ["80+", ">=80", "80-", "80 og derover", "over 80"]
     for phrase in phrases:
-        result = hent_data("FOLK1A", values={"OMRÅDE": ["230"], "ALDER": [phrase]})
+        result = hent_data("FOLK1A", values={"OMRÅDE": ["561"], "ALDER": [phrase]})
         assert result["rows"][0]["ALDER"] == "80+", phrase
-        assert result["rows"][0]["value"] == 5045, phrase
+        assert result["rows"][0]["value"] == 7556, phrase
         assert any("sum_from" in note and phrase in note for note in result["notes"]), phrase
     sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
     assert isinstance(sent, dict)
@@ -328,7 +326,7 @@ def test_open_ended_age_becomes_sum_from(calls: list[dict[str, object]]) -> None
 
 def test_plain_age_80_stays_one_year(calls: list[dict[str, object]]) -> None:
     with pytest.raises(ToolError):
-        hent_data("FOLK1A", {"OMRÅDE": ["230"], "ALDER": ["80"], "Tid": ["2026K3"]})
+        hent_data("FOLK1A", {"OMRÅDE": ["561"], "ALDER": ["80"], "Tid": ["2026K3"]})
     sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
     assert isinstance(sent, dict)
     ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
@@ -336,16 +334,16 @@ def test_plain_age_80_stays_one_year(calls: list[dict[str, object]]) -> None:
 
 
 def test_closed_age_text_becomes_sum_range() -> None:
-    result = hent_data("FOLK1A", values={"OMRÅDE": ["230", "223"], "ALDER": ["0-17"]})
-    assert {row["OMRÅDE"] for row in result["rows"]} == {"Rudersdal", "Hørsholm"}
+    result = hent_data("FOLK1A", values={"OMRÅDE": ["561", "791"], "ALDER": ["0-17"]})
+    assert {row["OMRÅDE"] for row in result["rows"]} == {"Esbjerg", "Viborg"}
     assert result["rows"][0]["ALDER"] == "0-17"
     assert any('sum_range {"ALDER": ["0", "17"]}' in note for note in result["notes"])
 
 
 def test_kom_is_an_alias_for_area() -> None:
-    result = hent_data("FOLK1A", values={"KOM": "Rudersdal", "alder": "80+"})
-    assert result["rows"][0]["OMRÅDE"] == "Rudersdal"
-    assert result["rows"][0]["value"] == 5045
+    result = hent_data("FOLK1A", values={"KOM": "Esbjerg", "alder": "80+"})
+    assert result["rows"][0]["OMRÅDE"] == "Esbjerg"
+    assert result["rows"][0]["value"] == 7556
     assert any("Used OMRÅDE for KOM." in note for note in result["notes"])
 
 
@@ -428,13 +426,13 @@ def test_sum_from_and_bad_sum_arguments() -> None:
 
 
 def test_omitted_time_is_the_latest_total() -> None:
-    result = hent_data("FOLK1A", {"område": [" 230 "], "alder": ["ialt"]})
+    result = hent_data("FOLK1A", {"område": [" 561 "], "alder": ["ialt"]})
     assert result["rows"] == [
         {
-            "OMRÅDE": "Rudersdal",
+            "OMRÅDE": "Esbjerg",
             "ALDER": "Alder i alt",
             "Tid": "2026K3",
-            "value": 58381,
+            "value": 114824,
         }
     ]
     assert result["unit"] == "Antal"
