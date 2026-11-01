@@ -69,6 +69,7 @@ Quote only values from the tool results. For each series, quote the first value 
 Do not compute a difference, a change, or a percentage.
 Municipality names may be passed as labels.
 One code may be a string. Several codes are a list, or one comma-separated string.
+Refer to areas and categories by name, not by code.
 Answer in the same language as the question.
 A Danish question gets a Danish answer, even if the tool text is English.
 Do not answer in English when the question is Danish.
@@ -690,7 +691,8 @@ def _turn(
     calls: list[dict[str, str]],
 ) -> TurnResult:
     # A figure in the prose is kept when it is in the question, a hent_data
-    # value, a period or row label from those rows, or the fetched table title.
+    # value, a period or row label from those rows, the fetched table title,
+    # or a variable value on this turn's hent_data arguments.
     refusal = _relevance_refusal(question, facts)
     if refusal:
         # The rows are real, but they are not the question. Do not chart them.
@@ -794,7 +796,8 @@ def guard_answer(
     """Drop prose that states a number this turn did not fetch.
 
     Allowed figures are the question, a hent_data value, a period or row label
-    from those rows, and the fetched table title. A question that asks for one
+    from those rows, the fetched table title, and a variable value on this
+    turn's hent_data arguments. A question that asks for one
     figure is answered with the page's own line for the latest period. The
     model's sentence is not used, so a long series or an invented total cannot
     become the answer.
@@ -1061,6 +1064,7 @@ def _unverified_numbers(
 ) -> list[float]:
     titles = _fetched_titles(calls)
     allowed = _numbers_in_context(question, facts, titles)
+    allowed.update(_argument_figures(calls))
     flagged = [number for number in _numbers_in(answer) if not _near(number, allowed)]
     known_periods = _period_tokens(question)
     for fact in facts:
@@ -1093,6 +1097,43 @@ def _numbers_in_context(
     for title in titles:
         found.update(_label_figures(title))
     return found
+
+
+def _argument_figures(calls: list[dict[str, str]] | None) -> set[float]:
+    """Numbers the model passed as hent_data variable values this turn."""
+    found: set[float] = set()
+    for call in calls or []:
+        if call.get("name") != "hent_data":
+            continue
+        try:
+            payload = json.loads(str(call.get("arguments") or ""))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for key in ("values", "sum_from", "sum_range"):
+            found.update(_value_figures(payload.get(key)))
+    return found
+
+
+def _value_figures(value: Any) -> set[float]:
+    if isinstance(value, bool) or value is None:
+        return set()
+    if isinstance(value, int | float):
+        return {float(value)}
+    if isinstance(value, str):
+        return _label_figures(value)
+    if isinstance(value, dict):
+        found: set[float] = set()
+        for item in value.values():
+            found.update(_value_figures(item))
+        return found
+    if isinstance(value, list):
+        found = set()
+        for item in value:
+            found.update(_value_figures(item))
+        return found
+    return set()
 
 
 def _label_figures(text: str) -> set[float]:

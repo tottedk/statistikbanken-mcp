@@ -164,6 +164,7 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "Do not put Tid in sum_range" in SYSTEM_PROMPT
     assert "first value and the last value" in SYSTEM_PROMPT
     assert "Do not compute a difference" in SYSTEM_PROMPT
+    assert "Refer to areas and categories by name, not by code." in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Rudersdal?")
     assert "Danish" in single
     assert "latest period" in single
@@ -371,6 +372,47 @@ def test_prose_numbers_only_in_metadata_are_suppressed(
         assert guarded == UNVERIFIED_NUMBERS
         assert str(number) not in guarded
         assert caplog.messages == [f"Suppressed prose; flagged numbers: {number}"]
+
+
+def test_area_code_from_hent_data_arguments_may_be_quoted(
+    caplog: pytest.LogCaptureFixture[str],
+) -> None:
+    question = "Hvordan har udviklingen været?"
+    facts = [
+        _population_fact(3524, "2015K1"),
+        _population_fact(5045, "2026K3"),
+    ]
+    text = "Område 230 og 223 havde 3.524 og 5.045."
+    metadata = '{"values": [{"id": "230", "text": "Rudersdal"}, {"id": "223", "text": "Hørsholm"}]}'
+    with_codes = [
+        {"name": "tabelinfo", "arguments": "{}", "result": metadata},
+        {
+            "name": "hent_data",
+            "arguments": json.dumps({"table": "FOLK1A", "values": {"OMRÅDE": ["230", "223"]}}),
+            "result": "{}",
+        },
+    ]
+    assert guard_answer(question, text, facts, with_codes) == text
+    names_only = [
+        {"name": "tabelinfo", "arguments": "{}", "result": metadata},
+        {
+            "name": "find_tabel",
+            "arguments": json.dumps({"query": "230 223"}),
+            "result": metadata,
+        },
+        {
+            "name": "hent_data",
+            "arguments": json.dumps(
+                {"table": "FOLK1A", "values": {"OMRÅDE": ["Rudersdal", "Hørsholm"]}}
+            ),
+            "result": "{}",
+        },
+    ]
+    caplog.clear()
+    with caplog.at_level("INFO", logger="statistikbanken_mcp.web"):
+        guarded = guard_answer(question, text, facts, names_only)
+    assert guarded == UNVERIFIED_NUMBERS
+    assert caplog.messages == ["Suppressed prose; flagged numbers: 223, 230"]
 
 
 def test_unverified_numbers_are_removed_when_facts_exist() -> None:
