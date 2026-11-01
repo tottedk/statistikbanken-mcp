@@ -77,7 +77,9 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
 
     Matches table id, title, and variable names. A hit can match some of the
     words rather than every word, and a few everyday synonyms are recognised
-    (for example bruttoledighed, huspriser, husdyr, population, people, indbrud).
+    (for example bruttoledighed, huspriser, husdyr, population, people, indbrud,
+    togpassagerer, gini). Danmark, Denmark, and Danish are ignored when the
+    query also names a subject.
     Municipality names are matched against FOLK1A areas and returned on that hit
     as matched_values with their codes. Matching is not case-sensitive.
     "befolkning" returns FOLK1A near the top. `limit` is 1–25 and defaults to 10.
@@ -137,8 +139,10 @@ def hent_data(
     ("Esbjerg, Viborg"). On an age variable, "80+", ">=80", "80-" and
     "80 og derover" are the sum from that age upward, and "0-17" is the
     closed range. The result notes the substitution. An unknown value names
-    the closest labels and,
-    for Tid, the latest period. These expressions are passed through: "*"
+    the closest labels. For Tid, the error states the available period range,
+    and a bare year on a quarterly or monthly table suggests that year's
+    sub-periods (for example ">=2025K1<=2025K4"). These expressions are passed
+    through: "*"
     (every code), "(1)" (latest period), "(-n+4)" (the four latest periods),
     and a range such as ">=2016K3". A range lists matching periods. It does
     not add them together.

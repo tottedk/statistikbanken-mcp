@@ -41,9 +41,36 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "immigrants": ("indvandr",),
     "income": ("indkomst",),
     "kommune": ("område",),
+    # Kept so a query that is only "Denmark" still resolves. Mixed queries drop
+    # the word in _STOPWORDS before synonyms are applied.
     "denmark": ("danmark",),
     "danish": ("danmark",),
+    "tog": ("jernbane",),
+    "togpassagerer": ("jernbanetransport af passagerer",),
+    "vareeksport": ("eksport",),
+    "dødsårsager": ("dødsårsag",),
+    "kræft": ("dødsårsag",),
+    "gini": ("indkomstfordeling",),
+    "iværksættere": ("erhvervsdemografi",),
+    "iværksætter": ("erhvervsdemografi",),
+    "nyetablerede": ("erhvervsdemografi",),
+    "nyetableret": ("erhvervsdemografi",),
+    "etablerede": ("erhvervsdemografi",),
+    "etableret": ("erhvervsdemografi",),
+    "månedsfortjeneste": ("løn",),
+    "aku": ("arbejdsmarkedstilknytning",),
+    "påbegyndte": ("boligbyggeri",),
+    "påbegyndt": ("boligbyggeri",),
+    "unemployed": ("ledige",),
+    "jobless": ("ledige",),
 }
+# Replaced before tokenising. The separate words hit the wrong titles
+# ("nye" + "virksomheder" is inside "højvækstvirksomheder").
+_PHRASES: tuple[tuple[str, str], ...] = (
+    ("nyetablerede virksomheder", "erhvervsdemografi"),
+    ("etablerede virksomheder", "erhvervsdemografi"),
+    ("nye virksomheder", "erhvervsdemografi"),
+)
 _STOPWORDS = frozenset(
     {
         "og",
@@ -66,6 +93,10 @@ _STOPWORDS = frozenset(
         "mange",
         "hvordan",
         "hvad",
+        "danmark",
+        "danmarks",
+        "denmark",
+        "danish",
         "the",
         "of",
         "in",
@@ -371,13 +402,21 @@ class StatbankClient:
 
 
 def _query_tokens(query: str) -> list[str]:
+    folded = " ".join(query.casefold().split())
+    for phrase, replacement in _PHRASES:
+        folded = folded.replace(phrase, replacement)
     parts = []
-    for part in query.casefold().split():
+    for part in folded.split():
         cleaned = part.strip(".,;:!?\"'()[]")
         if cleaned:
             parts.append(cleaned)
     kept = [part for part in parts if part not in _STOPWORDS and len(part) >= 3]
-    return kept or parts
+    if kept:
+        return kept
+    # A query that is only "Danmark" or "i Danmark" still searches Danmark.
+    # Short function words are not put back, or "i" would match half the catalogue.
+    content = [part for part in parts if len(part) >= 3]
+    return content or parts
 
 
 def _with_stem(token: str, found: list[str]) -> None:
@@ -433,6 +472,25 @@ def _field_weight(table_id: str, title: str, variables: str, term: str) -> int:
     return 0
 
 
+def _form_weight(table_id: str, title: str, variables: str, form: str) -> int:
+    """One word uses the usual field weight.
+
+    A synonym of several words has to hit every word, and those hits add up,
+    so "jernbanetransport" plus "passagerer" outranks a table that only says
+    jernbane. A single word is unchanged.
+    """
+    parts = [part for part in form.split() if part not in _STOPWORDS]
+    if len(parts) <= 1:
+        return _field_weight(table_id, title, variables, parts[0] if parts else form)
+    total = 0
+    for part in parts:
+        weight = _field_weight(table_id, title, variables, part)
+        if not weight:
+            return 0
+        total += weight
+    return total
+
+
 def _token_score(table_id: str, title: str, variables: str, token: str) -> int:
     """Full word first. Compound pieces count only when the word itself misses.
 
@@ -440,7 +498,7 @@ def _token_score(table_id: str, title: str, variables: str, token: str) -> int:
     outranks a table that only matched forening inside foreningsmedlemmer.
     """
     primary = max(
-        (_field_weight(table_id, title, variables, term) for term in _primary_forms(token)),
+        (_form_weight(table_id, title, variables, term) for term in _primary_forms(token)),
         default=0,
     )
     if primary:
@@ -1119,14 +1177,42 @@ def _canonical_value(table: _Table, variable: _Variable, token: str) -> str:
         raise StatbankError(
             f"Value '{token}' matches several codes on {variable.id}: {listed}. Pass one code."
         )
+    if variable.time:
+        raise StatbankError(
+            f"Unknown value '{token}' for variable {variable.id} on table {table.id}. "
+            f"{_time_advice(variable, token)}"
+        )
     suggestions = _close_values(variable, token)
-    latest = ""
-    if variable.time and variable.values:
-        latest = f" Latest period is {variable.values[-1]['id']}."
     advice = suggestions or _value_hint(variable)
     raise StatbankError(
-        f"Unknown value '{token}' for variable {variable.id} on table {table.id}.{latest} {advice}"
+        f"Unknown value '{token}' for variable {variable.id} on table {table.id}. {advice}"
     )
+
+
+def _time_advice(variable: _Variable, token: str) -> str:
+    """The real period span. Near-miss codes such as 2023K1 are not useful."""
+    if not variable.values:
+        return "Call tabelinfo to list valid codes."
+    first = variable.values[0]["id"]
+    last = variable.values[-1]["id"]
+    advice = f"Available: {first}–{last}."
+    hint = _year_span_hint(variable, token)
+    if hint:
+        advice = f"{advice} {hint}"
+    return advice
+
+
+def _year_span_hint(variable: _Variable, token: str) -> str:
+    """A bare year on a quarterly or monthly table names the sub-periods."""
+    year = token.strip()
+    if not re.fullmatch(r"\d{4}", year):
+        return ""
+    codes = [
+        item["id"] for item in variable.values if item["id"].startswith(year) and item["id"] != year
+    ]
+    if len(codes) < 2:
+        return ""
+    return f"For {year}, pass >={codes[0]}<={codes[-1]}."
 
 
 def _value_matches(variable: _Variable, token: str) -> list[str]:
@@ -1151,7 +1237,28 @@ def _value_matches(variable: _Variable, token: str) -> list[str]:
     return labels
 
 
-def _close_values(variable: _Variable, token: str) -> str:
+def _prefix_hits(variable: _Variable, token: str) -> list[dict[str, str]]:
+    """Labels whose hyphen or space parts start with the token.
+
+    Difflib's cutoff misses a short prefix of a hyphenated name, so Lyngby
+    never suggests Lyngby-Taarbæk. Suggest only; the value is still unknown.
+    """
+    folded = _fold(token)
+    if len(folded) < 4:
+        return []
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in variable.values:
+        if item["id"] in seen:
+            continue
+        parts = [part for part in re.split(r"[\s\-]+", _fold(item["text"])) if part]
+        if any(part.startswith(folded) for part in parts):
+            seen.add(item["id"])
+            found.append(item)
+    return found
+
+
+def _similar_values(variable: _Variable, token: str) -> list[dict[str, str]]:
     folded = _fold(token)
     pool: list[str] = []
     owner: dict[str, dict[str, str]] = {}
@@ -1161,16 +1268,22 @@ def _close_values(variable: _Variable, token: str) -> str:
                 pool.append(key)
                 owner[key] = item
     found = difflib.get_close_matches(folded, pool, n=3, cutoff=0.72)
-    if not found:
-        return ""
-    shown: list[str] = []
+    items: list[dict[str, str]] = []
     seen: set[str] = set()
     for key in found:
         item = owner[key]
         if item["id"] in seen:
             continue
         seen.add(item["id"])
-        shown.append(f"{item['text']} ({item['id']})")
+        items.append(item)
+    return items
+
+
+def _close_values(variable: _Variable, token: str) -> str:
+    items = _prefix_hits(variable, token)[:3] or _similar_values(variable, token)
+    if not items:
+        return ""
+    shown = [f"{item['text']} ({item['id']})" for item in items]
     return "Did you mean " + ", ".join(shown) + "?"
 
 
