@@ -43,7 +43,7 @@ Names are Danish. Arguments and descriptions are English.
 
 | Tool | Purpose | Main inputs | Behaviour worth knowing |
 |---|---|---|---|
-| `find_tabel` | Find a table | `query`, `limit` (1–25, default 10) | Matches id, title, and variable names. Some words are enough. A few synonyms are built in (`population`, `bruttoledighed`, `huspriser`, `husdyr`, `indbrud`). Municipality names are matched against FOLK1A and returned with their codes. A miss is an error, not an empty list. |
+| `find_tabel` | Find a table | `query`, `limit` (1–25, default 10) | Matches id, title, and variable names. Some words are enough. A long word drops a trailing e, and a compound splits on s (`gennemsnitsindkomst`). A few synonyms are built in (`population`, `bruttoledighed`, `huspriser`, `husdyr`, `indbrud`). A query that says "før skat" prefers a title of "Indkomst i alt" over "Disponibel indkomst". Municipality names are matched against FOLK1A and returned with their codes. A miss is an error, not an empty list. |
 | `tabelinfo` | Read codes | `table`, optional `variable`, `values_filter` | Time is first, last, and count. Long value lists are capped; `values_filter` looks up the rest, and several words match any of them. |
 | `hent_data` | Fetch rows | `table`, `values`, `sum_from`, `sum_range` | Values may be codes or labels (`Rudersdal`, `Kobenhavn`). A required variable with one total is filled in. One with no total returns its codes. `sum_from` and `sum_range` use the API's own sum. `>=80` on its own is one row per code. A time sum that would hide rows, including two periods passed where a range was meant, is an error. A trailing 0 marked `unpublished` is a period the API has not published yet. |
 
@@ -162,6 +162,15 @@ uv run ruff format --check .
 ```
 
 GitHub Actions runs those Ruff commands and `uv run pytest` with no marker, so the live tests run there, on every push and pull request.
+
+Six questions, checked against the live API on 1 November 2026. The same figures are asserted from the recorded responses in `tests/test_acceptance.py` (`ACCEPTANCE_QUESTIONS`). Hørsholm's club counts are in that list; the recording used for the assert is Rudersdal only.
+
+1. Hvor mange over 80 bor i Rudersdal? FOLK1A 2026K3: 5045.
+2. Hvordan har befolkningstallet i Rudersdal udviklet sig de seneste 10 år? FOLK1A: 55915 in 2016K3, 58381 in 2026K3.
+3. Hvor mange over 80 bor i Gentofte, Rudersdal og Hørsholm? FOLK1A 2026K3: 5486 / 5045 / 2790.
+4. Hvor mange foreningsmedlemmer er der i Rudersdal? IDRFOR01 2025: 83 clubs and 29632 memberships. Hørsholm: 37 and 15784.
+5. Hvor mange børn mellem 0 og 17 år bor i Rudersdal og Hørsholm? FOLK1A 2026K3: 12770 / 4916.
+6. Hvad er den gennemsnitlige indkomst i alt før skat i Rudersdal og Hørsholm? INDKP105 2025: 757969 / 679635.
 
 On 31 October 2026 a real MCP client answered 50 Danish questions through this server. 37 were fine, 5 were near matches (the table was narrower than the question), and none of the numbers were wrong. Five invalid inputs were rejected clearly. Three were not: `Kobenhavn` without ø, an English question, and the name Silkeborg. Search was also too strict, and a missing required variable came back as a raw Danish API error.
 

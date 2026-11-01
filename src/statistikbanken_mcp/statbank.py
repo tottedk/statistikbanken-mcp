@@ -168,7 +168,13 @@ class StatbankClient:
                 score = (score or 0) + 250
             if score is None:
                 continue
-            hit = _public_table(table)
+            hit = {
+                "id": table.get("id"),
+                "title": table.get("text") or "",
+                "unit": table.get("unit") or "",
+                "latest_period": table.get("latestPeriod"),
+                "variables": list(table.get("variables") or []),
+            }
             if place_hit:
                 hit["matched_values"] = [
                     {"variable": "OMRÅDE", "id": item["id"], "text": item["text"]}
@@ -347,7 +353,10 @@ class StatbankClient:
                 "Could not reach Statistikbanken (https://api.statbank.dk). Try again."
             ) from exc
         if response.status_code >= 400:
-            payload_error = _json_or_none(response)
+            try:
+                payload_error = response.json()
+            except json.JSONDecodeError:
+                payload_error = None
             raw = ""
             if isinstance(payload_error, dict) and payload_error.get("message"):
                 raw = str(payload_error["message"])
@@ -362,19 +371,111 @@ class StatbankClient:
 
 
 def _query_tokens(query: str) -> list[str]:
-    parts = [part for part in query.casefold().split() if part]
+    parts = []
+    for part in query.casefold().split():
+        cleaned = part.strip(".,;:!?\"'()[]")
+        if cleaned:
+            parts.append(cleaned)
     kept = [part for part in parts if part not in _STOPWORDS and len(part) >= 3]
     return kept or parts
 
 
-def _expansions(token: str) -> tuple[str, ...]:
-    return (token, *_SYNONYMS.get(token, ()))
+def _with_stem(token: str, found: list[str]) -> None:
+    """Trailing e: 'gennemsnitlige' also matches 'gennemsnitlig'."""
+    if len(token) >= 10 and token.endswith("e"):
+        found.append(token[:-1])
+
+
+# Person-dimension words. "før skat" must not outrank a table that actually
+# breaks the figure down by one of these.
+_BREAKDOWNS = frozenset({"kon", "alder", "uddannelse", "civilstand", "herkomst"})
+
+
+def _compound_parts(token: str) -> tuple[str, ...]:
+    """Split gennemsnitsindkomst on the linking s into gennemsnit + indkomst."""
+    if len(token) < 14:
+        return ()
+    parts: list[str] = []
+    for index in range(7, len(token) - 7):
+        if token[index] != "s":
+            continue
+        left, right = token[:index], token[index + 1 :]
+        if len(left) < 7 or len(right) < 7:
+            continue
+        for part in (left, right):
+            parts.append(part)
+            _with_stem(part, parts)
+    return tuple(dict.fromkeys(parts))
+
+
+def _primary_forms(token: str) -> tuple[str, ...]:
+    """The word itself, a trailing e, and synonyms. Not the compound pieces."""
+    found = [token]
+    _with_stem(token, found)
+    for item in tuple(found):
+        found.extend(_SYNONYMS.get(item, ()))
+    return tuple(dict.fromkeys(found))
 
 
 def _contains_token(haystack: str, token: str) -> bool:
     if len(token) >= 4:
         return token in haystack
     return re.search(rf"(?<!\w){re.escape(token)}(?!\w)", haystack) is not None
+
+
+def _field_weight(table_id: str, title: str, variables: str, term: str) -> int:
+    if _contains_token(table_id, term):
+        return 80
+    if _contains_token(title, term):
+        return 40
+    if _contains_token(variables, term):
+        return 15
+    return 0
+
+
+def _token_score(table_id: str, title: str, variables: str, token: str) -> int:
+    """Full word first. Compound pieces count only when the word itself misses.
+
+    A piece is worth less than a variable hit (15), so a real word always
+    outranks a table that only matched forening inside foreningsmedlemmer.
+    """
+    primary = max(
+        (_field_weight(table_id, title, variables, term) for term in _primary_forms(token)),
+        default=0,
+    )
+    if primary:
+        return primary
+    # Title 8, id 6, variables 3. Several pieces add up, still under 15.
+    fallback = 0
+    for part in _compound_parts(token):
+        weight = _field_weight(table_id, title, variables, part)
+        if weight == 80:
+            fallback += 6
+        elif weight == 40:
+            fallback += 8
+        elif weight:
+            fallback += 3
+    return min(fallback, 14)
+
+
+def _pre_tax_adjustment(query: str, title: str, tokens: list[str]) -> int:
+    """Prefer "Indkomst i alt" for income before tax, unless a breakdown is named.
+
+    The boost has to clear three ordinary title hits (about 200) or INDKP105
+    never reaches the top three. A query that also says køn, alder, or
+    uddannelse only gets a tie-breaker, so the table that carries that
+    dimension stays first.
+    """
+    if "for skat" not in " ".join(_fold(query).split()):
+        return 0
+    folded = _fold(title)
+    breakdown = any(_fold(token) in _BREAKDOWNS for token in tokens)
+    score = 0
+    if "indkomst i alt" in folded:
+        score += 1 if breakdown else 170
+    if "disponibel" in folded:
+        score -= 1 if breakdown else 40
+    return score
 
 
 def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int | None:
@@ -391,14 +492,7 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
         score += 200
     matched = 0
     for token in tokens:
-        best = 0
-        for alt in _expansions(token):
-            if _contains_token(haystack_id, alt):
-                best = max(best, 80)
-            elif _contains_token(haystack_title, alt):
-                best = max(best, 40)
-            elif _contains_token(haystack_variables, alt):
-                best = max(best, 15)
+        best = _token_score(haystack_id, haystack_title, haystack_variables, token)
         if best:
             matched += 1
             score += best
@@ -409,17 +503,7 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
         score += 30
     if table.get("active") is True:
         score += 5
-    return score
-
-
-def _public_table(table: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": table.get("id"),
-        "title": table.get("text") or "",
-        "unit": table.get("unit") or "",
-        "latest_period": table.get("latestPeriod"),
-        "variables": list(table.get("variables") or []),
-    }
+    return score + _pre_tax_adjustment(folded, haystack_title, tokens)
 
 
 def _parse_table(data: Any) -> _Table:
@@ -491,7 +575,9 @@ def _public_variable(variable: _Variable, *, values_filter: str | None = None) -
     total = _unique_total(variable)
     if total is not None:
         published["total"] = {"id": total["id"], "text": total["text"]}
-    terms = _filter_terms(values_filter)
+    terms: list[str] = []
+    if values_filter and values_filter.strip():
+        terms = [part for part in re.split(r"[\s,;]+", values_filter.casefold()) if len(part) >= 2]
     if terms:
         shown = [
             {"id": item["id"], "text": item["text"]}
@@ -548,12 +634,6 @@ def _split_numeric_run(
     return {"from": str(numbers[0]), "to": str(numbers[-1])}, [dict(item) for item in explicit]
 
 
-def _filter_terms(values_filter: str | None) -> list[str]:
-    if not values_filter or not values_filter.strip():
-        return []
-    return [part for part in re.split(r"[\s,;]+", values_filter.casefold()) if len(part) >= 2]
-
-
 def _value_matches_terms(item: dict[str, str], terms: list[str]) -> bool:
     fields = (
         item["id"].casefold(),
@@ -588,67 +668,61 @@ def _hoist_nested_sums(
 ) -> tuple[Any, Any, Any, list[str]]:
     """Lift sum_from and sum_range that the model nested inside values."""
     notes: list[str] = []
-    if not isinstance(values, dict):
-        return values, sum_from, sum_range, notes
-    if sum_from is not None and not isinstance(sum_from, dict):
-        return values, sum_from, sum_range, notes
-    if sum_range is not None and not isinstance(sum_range, dict):
+    bad_outer = any(
+        item is not None and not isinstance(item, dict) for item in (sum_from, sum_range)
+    )
+    if not isinstance(values, dict) or bad_outer:
         return values, sum_from, sum_range, notes
     values = dict(values)
-    from_map = dict(sum_from or {})
-    range_map = dict(sum_range or {})
-    from_used = sum_from is not None
-    range_used = sum_range is not None
+    lifted = {"sum_from": dict(sum_from or {}), "sum_range": dict(sum_range or {})}
+    used = {"sum_from": sum_from is not None, "sum_range": sum_range is not None}
 
-    for kind, target in (("sum_from", from_map), ("sum_range", range_map)):
+    def take(kind: str, var: Any, spec: Any, clash: str) -> None:
+        previous = lifted[kind].get(var)
+        if previous is not None and str(previous).strip() != str(spec).strip():
+            raise StatbankError(f"{clash} {_sum_argument_help(kind)}")
+        lifted[kind][var] = spec
+        used[kind] = True
+
+    for kind in ("sum_from", "sum_range"):
         if kind not in values:
             continue
         nested = values.pop(kind)
         if not isinstance(nested, dict) or not nested:
             raise StatbankError(_sum_argument_help(kind))
         for var, spec in nested.items():
-            previous = target.get(var)
-            if previous is not None and str(previous).strip() != str(spec).strip():
-                raise StatbankError(
+            take(
+                kind,
+                var,
+                spec,
+                (
                     f"{kind} for {var} is inside values and also passed beside values, "
-                    f"and they differ. {_sum_argument_help(kind)}"
-                )
-            target[var] = spec
-        if kind == "sum_from":
-            from_used = True
-        else:
-            range_used = True
+                    "and they differ."
+                ),
+            )
         notes.append(f"Moved {kind} out of values. {_sum_argument_help(kind)}")
-
     for var, raw in list(values.items()):
         if not isinstance(raw, dict):
             continue
         keys = {str(key) for key in raw}
-        if keys == {"sum_from"} or keys == {"sum_range"}:
-            kind = next(iter(raw))
-            spec = raw[kind]
-            target = from_map if kind == "sum_from" else range_map
-            previous = target.get(var)
-            if previous is not None and str(previous).strip() != str(spec).strip():
-                raise StatbankError(
-                    f"{kind} for {var} disagrees with the value inside values. "
-                    f"{_sum_argument_help(kind)}"
-                )
-            target[var] = spec
-            values.pop(var)
-            if kind == "sum_from":
-                from_used = True
-            else:
-                range_used = True
-            notes.append(f"Moved {kind} for {var} out of values. {_sum_argument_help(kind)}")
-            continue
-        raise StatbankError(
-            f"values for {var} must be a code or a list of codes. {_sum_argument_help('sum_from')}"
+        if keys not in ({"sum_from"}, {"sum_range"}):
+            raise StatbankError(
+                f"values for {var} must be a code or a list of codes. "
+                f"{_sum_argument_help('sum_from')}"
+            )
+        kind = next(iter(raw))
+        take(
+            kind,
+            var,
+            raw[kind],
+            f"{kind} for {var} disagrees with the value inside values.",
         )
+        values.pop(var)
+        notes.append(f"Moved {kind} for {var} out of values. {_sum_argument_help(kind)}")
     return (
         values,
-        from_map if from_used else None,
-        range_map if range_used else None,
+        lifted["sum_from"] if used["sum_from"] else None,
+        lifted["sum_range"] if used["sum_range"] else None,
         notes,
     )
 
@@ -687,17 +761,6 @@ _VARIABLE_ALIASES = {
 }
 
 
-def _alias_variable(table: _Table, code: str) -> str:
-    found = table.variable(code)
-    if found is not None:
-        return found.id
-    target = _VARIABLE_ALIASES.get(_fold(code).replace(" ", ""))
-    if target is None:
-        return code
-    match = table.variable(target)
-    return match.id if match is not None else code
-
-
 def _alias_arguments(
     table: _Table,
     values: dict[str, list[str]] | None,
@@ -707,28 +770,27 @@ def _alias_arguments(
     dict[str, list[str]] | None, dict[str, str] | None, dict[str, list[str]] | None, list[str]
 ]:
     notes: list[str] = []
-    return (
-        _alias_map(table, values, notes),
-        _alias_map(table, sum_from, notes),
-        _alias_map(table, sum_range, notes),
-        notes,
-    )
 
+    def rename(mapping: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not mapping:
+            return mapping
+        renamed: dict[str, Any] = {}
+        for key, value in mapping.items():
+            found = table.variable(str(key))
+            if found is not None:
+                canonical = found.id
+            else:
+                target = _VARIABLE_ALIASES.get(_fold(str(key)).replace(" ", ""))
+                match = table.variable(target) if target else None
+                canonical = match.id if match is not None else str(key)
+                if canonical != key:
+                    notes.append(f"Used {canonical} for {key}.")
+            if canonical in renamed:
+                raise StatbankError(f"Variable {canonical} was given more than once.")
+            renamed[canonical] = value
+        return renamed
 
-def _alias_map(
-    table: _Table, mapping: dict[str, Any] | None, notes: list[str]
-) -> dict[str, Any] | None:
-    if not mapping:
-        return mapping
-    renamed: dict[str, Any] = {}
-    for key, value in mapping.items():
-        canonical = _alias_variable(table, str(key))
-        if table.variable(str(key)) is None and canonical != key:
-            notes.append(f"Used {canonical} for {key}.")
-        if canonical in renamed:
-            raise StatbankError(f"Variable {canonical} was given more than once.")
-        renamed[canonical] = value
-    return renamed
+    return rename(values), rename(sum_from), rename(sum_range), notes
 
 
 def _promote_open_ended(
@@ -940,50 +1002,33 @@ def _guard_time_sums(
         ]
         if len(codes) != 2 and not conflicts:
             continue
-        raise StatbankError(_time_sum_error(var_id, codes, conflicts, selections))
-
-
-def _time_sum_error(
-    var_id: str,
-    codes: list[str],
-    conflicts: list[str],
-    selections: dict[str, list[str]],
-) -> str:
-    start, end = codes[0], codes[-1]
-    parts = []
-    if len(codes) == 2:
+        start, end = codes[0], codes[-1]
+        parts = []
+        if len(codes) == 2:
+            parts.append(
+                f"sum_range on {var_id} with {start} and {end} adds only those two periods, "
+                "not every period between them."
+            )
+        if conflicts:
+            listed = ", ".join(conflicts)
+            parts.append(
+                f"Refusing to add {var_id} while {listed} has several values or a range. "
+                "That would hide rows."
+            )
         parts.append(
-            f"sum_range on {var_id} with {start} and {end} adds only those two periods, "
-            "not every period between them."
+            f'For the development over time, use values {{"{var_id}": [">={start}"]}} '
+            f'or {{"{var_id}": [">={start}<={end}"]}}. '
+            "Each period comes back as its own row."
         )
-    if conflicts:
-        listed = ", ".join(conflicts)
-        parts.append(
-            f"Refusing to add {var_id} while {listed} has several values or a range. "
-            "That would hide rows."
-        )
-    parts.append(
-        f'For the development over time, use values {{"{var_id}": [">={start}"]}} '
-        f'or {{"{var_id}": [">={start}<={end}"]}}. '
-        "Each period comes back as its own row."
-    )
-    advice = _older_than_advice(selections)
-    if advice:
-        parts.append(advice)
-    return " ".join(parts)
-
-
-def _older_than_advice(selections: dict[str, list[str]]) -> str:
-    selected = selections.get("ALDER") or []
-    if len(selected) != 1:
-        return ""
-    match = re.fullmatch(r">=(\d+)", selected[0].strip())
-    if match is None:
-        return ""
-    start = match.group(1)
-    return (
-        f'Use sum_from {{"ALDER": "{start}"}} for ages {start} and older, not values [">={start}"].'
-    )
+        ages = selections.get("ALDER") or []
+        age_match = re.fullmatch(r">=(\d+)", ages[0].strip()) if len(ages) == 1 else None
+        if age_match is not None:
+            age = age_match.group(1)
+            parts.append(
+                f'Use sum_from {{"ALDER": "{age}"}} for ages {age} and older, '
+                f'not values [">={age}"].'
+            )
+        raise StatbankError(" ".join(parts))
 
 
 def _build_selections(
@@ -992,23 +1037,9 @@ def _build_selections(
     sum_from: dict[str, str] | None,
     sum_range: dict[str, list[str]] | None = None,
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    if values is None:
-        values = {}
-    if sum_from is None:
-        sum_from = {}
-    if sum_range is None:
-        sum_range = {}
-    maps_ok = (
-        isinstance(values, dict) and isinstance(sum_from, dict) and isinstance(sum_range, dict)
-    )
-    if not maps_ok:
-        raise StatbankError(
-            "values maps a variable id to a list of codes. "
-            "sum_from maps a variable id to one numeric code. "
-            "sum_range maps a variable id to two numeric codes, low then high, "
-            "or to a list of codes to add."
-        )
-
+    values = values or {}
+    sum_from = sum_from or {}
+    sum_range = sum_range or {}
     chosen: dict[str, list[str]] = {}
     explicit: dict[str, list[str]] = {}
     for code, raw_values in values.items():
@@ -1147,6 +1178,23 @@ def _is_expression(token: str) -> bool:
     return token == "*" or token.startswith((">", "<", "(", "sum(", "SUM(")) or "*" in token
 
 
+def _sum_call(codes: list[str], label: str) -> str:
+    if len(label) > 80:
+        label = f"{codes[0]}+…+{codes[-1]}"
+    return f"sum({label}|{label}={';'.join(codes)})"
+
+
+def _numeric_codes(variable: _Variable, low: int, high: int | None = None) -> list[str]:
+    codes = []
+    for item in variable.values:
+        if not item["id"].isdigit():
+            continue
+        number = int(item["id"])
+        if number >= low and (high is None or number <= high):
+            codes.append(item["id"])
+    return codes
+
+
 def _sum_expression(variable: _Variable, start: Any) -> str:
     if not isinstance(start, str) or not start.strip():
         raise StatbankError(f"sum_from for {variable.id} must be a numeric code such as '80'.")
@@ -1157,17 +1205,23 @@ def _sum_expression(variable: _Variable, start: Any) -> str:
             f"{_value_hint(variable)}"
         )
     threshold = int(token)
-    codes = [
-        item["id"]
-        for item in variable.values
-        if item["id"].isdigit() and int(item["id"]) >= threshold
-    ]
+    codes = _numeric_codes(variable, threshold)
     if not codes:
         raise StatbankError(
             f"No codes on {variable.id} are numeric and >= {threshold}. {_value_hint(variable)}"
         )
-    label = f"{threshold}+"
-    return f"sum({label}|{label}={';'.join(codes)})"
+    return _sum_call(codes, f"{threshold}+")
+
+
+def _numeric_span(bounds: Any) -> tuple[int, int] | None:
+    if not isinstance(bounds, list) or len(bounds) != 2:
+        return None
+    if not all(isinstance(item, str) for item in bounds):
+        return None
+    low, high = bounds[0].strip(), bounds[1].strip()
+    if not (low.isdigit() and high.isdigit() and str(int(low)) == low and str(int(high)) == high):
+        return None
+    return int(low), int(high)
 
 
 def _sum_range_or_codes(
@@ -1175,8 +1229,23 @@ def _sum_range_or_codes(
     variable: _Variable,
     bounds: Any,
 ) -> tuple[str, list[str] | None]:
-    if _is_numeric_span(bounds):
-        return _sum_range_expression(variable, bounds), None
+    span = _numeric_span(bounds)
+    if span is not None:
+        low, high = span
+        if low > high:
+            raise StatbankError(
+                f"sum_range for {variable.id} must run from a lower code to a higher one "
+                f"(got {low} then {high})."
+            )
+        codes = _numeric_codes(variable, low, high)
+        if not codes:
+            raise StatbankError(
+                f"No numeric codes on {variable.id} fall between {low} and {high}. "
+                f"{_value_hint(variable)}"
+            )
+        if len(codes) == 1:
+            return codes[0], None
+        return _sum_call(codes, f"{low}-{high}"), None
     codes_ok = (
         isinstance(bounds, list)
         and len(bounds) >= 2
@@ -1188,61 +1257,7 @@ def _sum_range_or_codes(
             "or a list of codes to add such as ['25-29', '30-34']."
         )
     codes = [_canonical_value(table, variable, item) for item in bounds]
-    return _sum_expression_from_codes(codes), codes
-
-
-def _is_numeric_span(bounds: Any) -> bool:
-    if not isinstance(bounds, list) or len(bounds) != 2:
-        return False
-    if not all(isinstance(item, str) for item in bounds):
-        return False
-    low, high = bounds[0].strip(), bounds[1].strip()
-    return low.isdigit() and high.isdigit() and str(int(low)) == low and str(int(high)) == high
-
-
-def _sum_expression_from_codes(codes: list[str]) -> str:
-    label = "+".join(codes)
-    if len(label) > 80:
-        label = f"{codes[0]}+…+{codes[-1]}"
-    return f"sum({label}|{label}={';'.join(codes)})"
-
-
-def _sum_range_expression(variable: _Variable, bounds: Any) -> str:
-    if (
-        not isinstance(bounds, list)
-        or len(bounds) != 2
-        or not all(isinstance(item, str) for item in bounds)
-    ):
-        raise StatbankError(
-            f"sum_range for {variable.id} must be two numeric codes, low then high, "
-            "for example ['0', '17']."
-        )
-    low_token, high_token = bounds[0].strip(), bounds[1].strip()
-    if not low_token.isdigit() or not high_token.isdigit():
-        raise StatbankError(
-            f"sum_range for {variable.id} must be two numeric codes "
-            f"(got '{low_token}' and '{high_token}'). {_value_hint(variable)}"
-        )
-    low, high = int(low_token), int(high_token)
-    if low > high:
-        raise StatbankError(
-            f"sum_range for {variable.id} must run from a lower code to a higher one "
-            f"(got {low_token} then {high_token})."
-        )
-    codes = [
-        item["id"]
-        for item in variable.values
-        if item["id"].isdigit() and low <= int(item["id"]) <= high
-    ]
-    if not codes:
-        raise StatbankError(
-            f"No numeric codes on {variable.id} fall between {low} and {high}. "
-            f"{_value_hint(variable)}"
-        )
-    if len(codes) == 1:
-        return codes[0]
-    label = f"{low}-{high}"
-    return f"sum({label}|{label}={';'.join(codes)})"
+    return _sum_call(codes, "+".join(codes)), codes
 
 
 def _value_hint(variable: _Variable) -> str:
@@ -1324,14 +1339,13 @@ def _fold(text: str) -> str:
     return text.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
 
 
-def _is_total_value(item: dict[str, str]) -> bool:
-    code = item["id"].casefold()
-    text = item["text"].casefold().strip()
-    return code in {"tot", "ialt"} or text in {"i alt", "alle", "total"}
-
-
 def _unique_total(variable: _Variable) -> dict[str, str] | None:
-    totals = [item for item in variable.values if _is_total_value(item)]
+    def is_total(item: dict[str, str]) -> bool:
+        code = item["id"].casefold()
+        text = item["text"].casefold().strip()
+        return code in {"tot", "ialt"} or text in {"i alt", "alle", "total"}
+
+    totals = [item for item in variable.values if is_total(item)]
     if len(totals) == 1:
         return totals[0]
     return None
@@ -1350,7 +1364,12 @@ def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict
         selections[variable.id] = [total["id"]]
         assumed.append({"variable": variable.id, "id": total["id"], "text": total["text"]})
     if missing:
-        raise StatbankError(_missing_variables_message(table, missing))
+        detail = " ".join(
+            f"Variable {variable.id} on {table.id} has no total and must be set. "
+            f"{_code_sample(variable)}"
+            for variable in missing
+        )
+        raise StatbankError(detail)
     ordered = {
         variable.id: selections[variable.id]
         for variable in table.variables
@@ -1359,15 +1378,6 @@ def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict
     selections.clear()
     selections.update(ordered)
     return assumed
-
-
-def _missing_variables_message(table: _Table, missing: list[_Variable]) -> str:
-    parts = [
-        f"Variable {variable.id} on {table.id} has no total and must be set. "
-        f"{_code_sample(variable)}"
-        for variable in missing
-    ]
-    return " ".join(parts)
 
 
 def _code_sample(variable: _Variable) -> str:
@@ -1455,13 +1465,6 @@ def _number(value: Any) -> Any:
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return value
-
-
-def _json_or_none(response: httpx.Response) -> Any:
-    try:
-        return response.json()
-    except json.JSONDecodeError:
-        return None
 
 
 def _message_from_api_error(payload: Any, status: int) -> str:

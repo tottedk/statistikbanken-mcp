@@ -98,6 +98,41 @@ def test_api_rejects_a_bad_sum_expression(calls: list[dict[str, object]]) -> Non
     assert data_calls
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "gennemsnitlig indkomst før skat",
+        "indkomst i alt før skat",
+        "gennemsnitsindkomst før skat",
+    ],
+)
+def test_pre_tax_income_search_ranks_indkp105(query: str) -> None:
+    ids = [hit["id"] for hit in find_tabel(query, limit=3)]
+    assert "INDKP105" in ids
+
+
+def test_labour_force_survey_keeps_the_whole_word() -> None:
+    ids = [
+        hit["id"] for hit in find_tabel("arbejdskraftundersøgelsen beskæftigelsesstatus", limit=3)
+    ]
+    assert "AKU101K" in ids
+
+
+def test_income_before_tax_by_sex_is_not_overridden() -> None:
+    assert find_tabel("indkomst før skat køn", limit=1)[0]["id"] == "INDKP221"
+
+
+@pytest.mark.parametrize("query", ["foreningsmedlemmer", "foreningsmedlemmer Rudersdal"])
+def test_club_members_are_not_board_members(query: str) -> None:
+    hits = find_tabel(query, limit=15)
+    ids = [hit["id"] for hit in hits]
+    assert ids.index("IDRFOR01") < 3
+    club = ids.index("IDRFOR01")
+    for index, hit in enumerate(hits):
+        if "bestyrelsesmedlemmer" in hit["title"].casefold():
+            assert index > club
+
+
 def test_search_partial_synonym_and_place_names() -> None:
     befolkning = [hit["id"] for hit in find_tabel("befolkning kommune", limit=5)]
     assert "FOLK1A" in befolkning

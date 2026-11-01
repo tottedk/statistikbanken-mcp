@@ -2,9 +2,41 @@
 
 Population figures are the FOLK1A release of 2026-08-10 (latest period 2026K3).
 Income is INDKP105 for 2025, updated 2026-10-02. Sports clubs are IDRFOR01 for 2025.
+The same figures were checked against the live API on 2026-11-01, including
+Hørsholm in IDRFOR01 (37 clubs, 15784 memberships), which is not in the
+Rudersdal recording below.
 """
 
 from statistikbanken_mcp.server import find_tabel, hent_data, tabelinfo
+
+# Official wording. The tests below keep their own asserts; this list is the
+# question a person actually asks, with the figure that question should return.
+ACCEPTANCE_QUESTIONS: tuple[tuple[str, str], ...] = (
+    (
+        "Hvor mange over 80 bor i Rudersdal?",
+        "FOLK1A 2026K3: 5045",
+    ),
+    (
+        "Hvordan har befolkningstallet i Rudersdal udviklet sig de seneste 10 år?",
+        "FOLK1A: 55915 i 2016K3, 58381 i 2026K3",
+    ),
+    (
+        "Hvor mange over 80 bor i Gentofte, Rudersdal og Hørsholm?",
+        "FOLK1A 2026K3: Gentofte 5486, Rudersdal 5045, Hørsholm 2790",
+    ),
+    (
+        "Hvor mange foreningsmedlemmer er der i Rudersdal?",
+        "IDRFOR01 2025: Rudersdal 83 foreninger og 29632 medlemmer; Hørsholm 37 og 15784",
+    ),
+    (
+        "Hvor mange børn mellem 0 og 17 år bor i Rudersdal og Hørsholm?",
+        "FOLK1A 2026K3: Rudersdal 12770, Hørsholm 4916",
+    ),
+    (
+        "Hvad er den gennemsnitlige indkomst i alt før skat i Rudersdal og Hørsholm?",
+        "INDKP105 2025: Rudersdal 757969, Hørsholm 679635",
+    ),
+)
 
 # Same quarter, ten years apart, plus the quarters in between. 2023K3 dips.
 RUDERSDAL_K3 = {
@@ -144,6 +176,10 @@ def test_children_0_to_17_in_rudersdal_and_horsholm(calls: list[dict[str, object
 
 
 def test_average_income_in_rudersdal_and_horsholm() -> None:
+    question = ACCEPTANCE_QUESTIONS[5][0]
+    assert question.startswith("Hvad er den gennemsnitlige indkomst")
+    ids = [hit["id"] for hit in find_tabel(question, limit=3)]
+    assert "INDKP105" in ids
     hits = find_tabel("indkomst", limit=15)
     match = next(hit for hit in hits if hit["id"] == "INDKP105")
     assert match["title"] == "Indkomst i alt"
