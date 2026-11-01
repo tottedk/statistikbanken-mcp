@@ -293,6 +293,86 @@ def test_suppressed_prose_logs_the_flagged_numbers(caplog: pytest.LogCaptureFixt
     assert "9.999" not in logged
 
 
+def _fetched_series() -> tuple[str, list[dict], list[dict[str, str]]]:
+    """Trend question, hent_data rows, and metadata that must not authorise numbers."""
+    question = "Hvordan har udviklingen været?"
+    facts = [
+        _population_fact(3524, "2015K1"),
+        _population_fact(5045, "2026K3"),
+        _population_fact(1785.5, "2024"),
+    ]
+    for fact in facts:
+        fact["detail"] = "ALDER: 80 år"
+    calls = [
+        {
+            "name": "find_tabel",
+            "arguments": "{}",
+            "result": '[{"id": "FOLK1A", "title": "Tabel 42"}]',
+        },
+        {
+            "name": "tabelinfo",
+            "arguments": "{}",
+            "result": (
+                '{"numeric_codes": {"from": "0", "to": "125"}, '
+                '"values": [{"id": "79", "text": "79 år"}, {"id": "230", "text": "Rudersdal"}], '
+                '"time_span": {"first": "2008K1", "count": 75}}'
+            ),
+        },
+        {
+            "name": "hent_data",
+            "arguments": "{}",
+            "result": (
+                '{"table": "FOLK1A", "title": "Befolkningen den 1. i kvartalet", '
+                '"description": "Se også tabel 99", "rows": ['
+            ),
+        },
+    ]
+    return question, facts, calls
+
+
+def test_prose_may_quote_question_values_labels_and_title() -> None:
+    question, facts, calls = _fetched_series()
+    kept = [
+        "I 2015, 2024 og 2026 var tallene 3.524, 1.785,5 og 5.045.",
+        "Fra 2015K1 til 2026K3.",
+        "5045 er det samme som 5.045 og 5 045.",
+        "Decimalen er 1.785,5 og 1785,5 og 1 785,5.",
+        "Gruppen 80 år havde 3.524.",
+        "Befolkningen den 1. i kvartalet havde 3.524.",
+        "5\u00a0045 personer.",
+    ]
+    for text in kept:
+        assert guard_answer(question, text, facts, calls) == text
+    asked = "Hvordan har udviklingen været sammenlignet med 1.800?"
+    quoted = "Tallet 3.524 er ikke 1.800."
+    assert guard_answer(asked, quoted, facts, calls) == quoted
+
+
+def test_prose_numbers_only_in_metadata_are_suppressed(
+    caplog: pytest.LogCaptureFixture[str],
+) -> None:
+    question, facts, calls = _fetched_series()
+    blocked = {
+        125: "Der er 125 alderskoder, og tallet er 3.524.",
+        79: "Gruppen 79 år havde 3.524.",
+        230: "Område 230 havde 3.524.",
+        1800: "Omkring 1.800 i 2024, mens det hentede tal er 3.524.",
+        1521: "Fra 3.524 til 5.045, en forskel på 1.521.",
+        2008: "Siden 2008 er tallet 3.524.",
+        2016: "I 2016K2 var tallet 3.524.",
+        42: "Tabel 42 viser 3.524.",
+        99: "Se tabel 99 med tallet 3.524.",
+        75: "Der er 75 perioder, og tallet er 3.524.",
+    }
+    for number, text in blocked.items():
+        caplog.clear()
+        with caplog.at_level("INFO", logger="statistikbanken_mcp.web"):
+            guarded = guard_answer(question, text, facts, calls)
+        assert guarded == UNVERIFIED_NUMBERS
+        assert str(number) not in guarded
+        assert caplog.messages == [f"Suppressed prose; flagged numbers: {number}"]
+
+
 def test_unverified_numbers_are_removed_when_facts_exist() -> None:
     facts = [
         _population_fact(3524, "2015K1"),

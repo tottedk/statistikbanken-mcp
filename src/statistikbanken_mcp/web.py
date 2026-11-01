@@ -689,8 +689,8 @@ def _turn(
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
 ) -> TurnResult:
-    # A figure in the prose is kept when the same number appears in the question
-    # or anywhere in this turn's tool results. Anything else is dropped.
+    # A figure in the prose is kept when it is in the question, a hent_data
+    # value, a period or row label from those rows, or the fetched table title.
     refusal = _relevance_refusal(question, facts)
     if refusal:
         # The rows are real, but they are not the question. Do not chart them.
@@ -729,12 +729,19 @@ _TREND_MARKERS = (
     "history",
 )
 _PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
-_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+# The year in 2015K1 or in a bare period such as 2024. The quarter digit is not a figure.
+_PERIOD_YEAR_RE = re.compile(
+    r"\b((?:19|20)\d{2})(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))?\b",
+    re.IGNORECASE,
+)
+_TITLE_RE = re.compile(r'"title"\s*:\s*"((?:\\.|[^"\\])*)"')
 # A figure stands alone. Digits inside FOLK1A or INDKP106 are not figures.
+# A space is a Danish thousands separator, as in 5 045.
 _NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_])("
     r"\d{1,3}(?:\.\d{3})+(?:,\d+)?"
     r"|\d{1,3}(?:,\d{3})+(?:\.\d+)?"
+    r"|\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:,\d+)?"
     r"|\d+(?:[.,]\d+)?"
     r")(?![A-Za-z0-9_])"
 )
@@ -786,9 +793,11 @@ def guard_answer(
 ) -> str:
     """Drop prose that states a number this turn did not fetch.
 
-    A question that asks for one figure is answered with the page's own line
-    for the latest period. The model's sentence is not used, so a long series
-    or an invented total cannot become the answer.
+    Allowed figures are the question, a hent_data value, a period or row label
+    from those rows, and the fetched table title. A question that asks for one
+    figure is answered with the page's own line for the latest period. The
+    model's sentence is not used, so a long series or an invented total cannot
+    become the answer.
     """
     if not facts:
         if _is_page_message(answer):
@@ -1050,30 +1059,81 @@ def _unverified_numbers(
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]] | None = None,
 ) -> list[float]:
-    allowed = _numbers_in_context(question, facts, calls)
-    return [number for number in _numbers_in(answer) if not _near(number, allowed)]
+    titles = _fetched_titles(calls)
+    allowed = _numbers_in_context(question, facts, titles)
+    flagged = [number for number in _numbers_in(answer) if not _near(number, allowed)]
+    known_periods = _period_tokens(question)
+    for fact in facts:
+        known_periods.update(_period_tokens(str(fact.get("period") or "")))
+    for title in titles:
+        known_periods.update(_period_tokens(title))
+    for token in _period_tokens(answer):
+        if token not in known_periods:
+            flagged.append(float(token[:4]))
+    return flagged
 
 
 def _numbers_in_context(
     question: str,
     facts: list[dict[str, Any]],
-    calls: list[dict[str, str]] | None,
+    titles: list[str],
 ) -> set[float]:
-    """Numbers already present in the question or in this turn's tool results."""
-    texts = [question]
-    for call in calls or []:
-        texts.append(str(call.get("result") or ""))
-    found: set[float] = set()
+    """Question, hent_data values, period and row labels, and the table title.
+
+    A number that appears only in tabelinfo or find_tabel is not allowed.
+    """
+    found = _label_figures(question)
     for fact in facts:
         value = fact.get("value")
         if isinstance(value, bool) or not isinstance(value, int | float):
             continue
         found.add(float(value))
-        for key in ("table", "period", "unit", "detail"):
-            texts.append(str(fact.get(key) or ""))
-    for text in texts:
-        found.update(_numbers_in(text))
+        found.update(_label_figures(str(fact.get("period") or "")))
+        found.update(_label_figures(str(fact.get("detail") or "")))
+    for title in titles:
+        found.update(_label_figures(title))
     return found
+
+
+def _label_figures(text: str) -> set[float]:
+    return set(_numbers_in(text)) | _period_years(text)
+
+
+def _period_years(text: str) -> set[float]:
+    return {float(year) for year in _PERIOD_YEAR_RE.findall(text)}
+
+
+def _period_tokens(text: str) -> set[str]:
+    return {match.group(0).casefold() for match in _PERIOD_RE.finditer(text)}
+
+
+def _fetched_titles(calls: list[dict[str, str]] | None) -> list[str]:
+    titles: list[str] = []
+    for call in calls or []:
+        if call.get("name") != "hent_data":
+            continue
+        title = _title_in(str(call.get("result") or ""))
+        if title:
+            titles.append(title)
+    return titles
+
+
+def _title_in(result: str) -> str:
+    try:
+        payload = json.loads(result)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        title = payload.get("title")
+        if isinstance(title, str):
+            return title
+    match = _TITLE_RE.search(result)
+    if not match:
+        return ""
+    try:
+        return json.loads(f'"{match.group(1)}"')
+    except json.JSONDecodeError:
+        return ""
 
 
 def _near(number: float, allowed: set[float]) -> bool:
@@ -1081,7 +1141,7 @@ def _near(number: float, allowed: set[float]) -> bool:
 
 
 def _numbers_in(text: str) -> list[float]:
-    masked = _YEAR_RE.sub(lambda match: " " * len(match.group(0)), _mask_periods(text))
+    masked = _mask_periods(text)
     return [_parse_stat_number(match.group(1)) for match in _NUMBER_RE.finditer(masked)]
 
 
@@ -1090,6 +1150,7 @@ def _mask_periods(text: str) -> str:
 
 
 def _parse_stat_number(token: str) -> float:
+    token = token.replace(" ", "").replace("\u00a0", "").replace("\u202f", "")
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
         return float(token.replace(".", ""))
     if re.fullmatch(r"\d{1,3}(?:,\d{3})+", token):
