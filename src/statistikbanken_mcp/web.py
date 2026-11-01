@@ -42,7 +42,7 @@ MAX_BODY_BYTES = 32_768
 EXPORT_MAX_BYTES = 1_048_576
 DEFAULT_LLM_TIMEOUT = 45.0
 DEFAULT_TOOL_TIMEOUT = 30.0
-PUBLIC_MAX_TOKENS = 1024
+PUBLIC_MAX_TOKENS = 2048
 PUBLIC_MAX_CONCURRENT = 2
 NO_FETCHED_NUMBERS = "Jeg fik ikke hentet tal, så jeg viser ingen."
 NO_DATA_ANSWER = "Jeg fandt ingen tal i Statistikbanken for det, du spørger om."
@@ -1865,7 +1865,6 @@ class Settings:
     llm_timeout: float
     tool_timeout: float
     public: bool = False
-    trust_proxy: bool = False
     proxy_secret: str = ""
     frame_ancestors: str = "'self'"
     max_tokens: int | None = None
@@ -1975,11 +1974,6 @@ def settings_from_env(argv: list[str] | None = None) -> Settings:
             model = args.model or os.environ.get("STATBANK_MODEL", DEFAULT_OLLAMA_MODEL)
             api_key = os.environ.get("STATBANK_API_KEY", "ollama")
         daily_default, rate_default, chars_default, tools_default = 200, 30, 1000, 8
-    trust_raw = os.environ.get("STATBANK_TRUST_PROXY")
-    if trust_raw is None or trust_raw.strip() == "":
-        trust_proxy = public
-    else:
-        trust_proxy = _env_flag("STATBANK_TRUST_PROXY")
     return Settings(
         llm=llm,
         base_url=base_url,
@@ -1994,7 +1988,6 @@ def settings_from_env(argv: list[str] | None = None) -> Settings:
         llm_timeout=float(os.environ.get("STATBANK_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT))),
         tool_timeout=float(os.environ.get("STATBANK_TOOL_TIMEOUT", str(DEFAULT_TOOL_TIMEOUT))),
         public=public,
-        trust_proxy=trust_proxy,
         proxy_secret=_proxy_secret(),
         frame_ancestors=_frame_ancestors(),
         max_tokens=PUBLIC_MAX_TOKENS if llm == "xai" else None,
@@ -2141,7 +2134,8 @@ def _forwarded_ip(headers: Any) -> str:
     raw = headers.get("X-Forwarded-For")
     if not isinstance(raw, str):
         return ""
-    return raw.split(",", 1)[0].strip()
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    return parts[-1] if parts else ""
 
 
 def _page_bytes(settings: Settings) -> bytes:
@@ -2232,9 +2226,6 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             if len(question) > settings.max_question_chars:
                 self._json(400, {"error": "Spørgsmålet er for langt."})
                 return
-            if settings.daily_cap <= 0:
-                self._json(503, {"error": _LIMIT_TEXT["stopped"]})
-                return
             held = False
             if gate is not None:
                 if not gate.try_enter():
@@ -2251,7 +2242,7 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             ip = client_ip(
                 self.client_address[0],
                 self.headers,
-                trust_proxy=settings.trust_proxy,
+                trust_proxy=self._secret_matches(),
             )
             limited = limiter.allow(ip)
             if limited:
@@ -2282,12 +2273,15 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                 },
             )
 
-        def _proxy_ok(self) -> bool:
+        def _secret_matches(self) -> bool:
             secret = settings.proxy_secret
             if not secret:
-                return True
+                return False
             provided = self.headers.get("X-Proxy-Secret", "")
-            if hmac.compare_digest(provided.encode(), secret.encode()):
+            return hmac.compare_digest(provided.encode(), secret.encode())
+
+        def _proxy_ok(self) -> bool:
+            if not settings.proxy_secret or self._secret_matches():
                 return True
             self._send(403, b"Forbidden\n", "text/plain; charset=utf-8")
             return False

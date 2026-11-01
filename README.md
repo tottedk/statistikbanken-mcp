@@ -105,7 +105,7 @@ ollama pull qwen2.5
 uv run statistikbanken-web
 ```
 
-xAI uses `https://api.x.ai/v1`. The model is `STATBANK_XAI_MODEL`, or `grok-4` when that is unset. `grok-4` may be retired, so set the model when you deploy. Each xAI request sends `max_tokens` (1024). Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
+xAI uses `https://api.x.ai/v1`. The model is `STATBANK_XAI_MODEL`, or `grok-4` when that is unset. `grok-4` may be retired, so set the model when you deploy. Each xAI request sends `max_tokens` (2048). Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
 
 ```bash
 uv run statistikbanken-web --llm xai --model grok-4
@@ -132,11 +132,11 @@ docker run --rm -p 8080:8080 \
   statistikbanken-web
 ```
 
-The image is Python 3.12. It listens on `STATBANK_HOST` (the image sets `0.0.0.0`) and on `PORT` when that is set, otherwise `STATBANK_PORT` (8080). `GET /healthz` returns 200 and does not call the model or Statistikbanken.
+The image is Python 3.12. It listens on `STATBANK_HOST` (the image sets `0.0.0.0`) and on `PORT` when that is set, otherwise `STATBANK_PORT` (8080). `GET /healthz` returns 200 and does not call the model or Statistikbanken. The image health check requests that path.
 
 `STATBANK_PUBLIC=1` uses xAI only. Ollama is ignored, and so are `--llm`, `STATBANK_BASE_URL`, and `STATBANK_MODEL`. The process exits at startup when `XAI_API_KEY` is missing. Pass the key in from the environment (`-e XAI_API_KEY` with no value copies it from the shell). Do not write `XAI_API_KEY` or `STATBANK_PROXY_SECRET` into a file, the image, or the repo.
 
-Set `STATBANK_XAI_MODEL` when you deploy. The default is `grok-4`, and that name may be retired. `--model` overrides it for one run. Every request to xAI includes `max_tokens` (1024).
+Set `STATBANK_XAI_MODEL` when you deploy. The default is `grok-4`, and that name may be retired. `--model` overrides it for one run. Every request to xAI includes `max_tokens` (2048).
 
 Public defaults, each still overridable by its `STATBANK_*` variable: 40 questions a day in total (`STATBANK_DAILY_CAP`), 3 per minute per visitor (`STATBANK_RATE_PER_MINUTE`), 6 tool calls (`STATBANK_MAX_TOOL_CALLS`), and 300 characters (`STATBANK_MAX_QUESTION_CHARS`). At most two questions run at once. The page shows a short Danish line with the daily cap.
 
@@ -146,7 +146,7 @@ The daily count and the per-minute window are kept in memory. A free container t
 
 Emergency stop: set `STATBANK_DAILY_CAP=0` and restart. Questions then get a closed message until the cap is raised.
 
-The per-minute limit uses `CF-Connecting-IP`, or else the first `X-Forwarded-For` entry, only when `STATBANK_TRUST_PROXY` is on (the default in public mode). Addresses are not logged. When `STATBANK_PROXY_SECRET` is set, every route except `/healthz` requires the header `X-Proxy-Secret`. `STATBANK_FRAME_ANCESTORS` is the CSP `frame-ancestors` source list. The default is `'self'`.
+The per-minute limit uses the socket address. It reads `CF-Connecting-IP`, or else the last `X-Forwarded-For` entry, only when `STATBANK_PROXY_SECRET` is set and the request carried that value in `X-Proxy-Secret`. A fake `X-Forwarded-For` on a direct request does not change the limit. Addresses are not logged. When the secret is set, every route except `/healthz` requires the header. `STATBANK_FRAME_ANCESTORS` is the CSP `frame-ancestors` source list. The default is `'self'`.
 
 ## Tests
 

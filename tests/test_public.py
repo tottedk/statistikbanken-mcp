@@ -44,7 +44,6 @@ _ENV_KEYS = (
     "STATBANK_RATE_PER_MINUTE",
     "STATBANK_MAX_QUESTION_CHARS",
     "STATBANK_MAX_TOOL_CALLS",
-    "STATBANK_TRUST_PROXY",
     "STATBANK_PROXY_SECRET",
     "STATBANK_FRAME_ANCESTORS",
 )
@@ -132,7 +131,6 @@ def test_local_defaults_are_unchanged(clean_env: None) -> None:
     assert settings.max_question_chars == 1000
     assert settings.max_tool_calls == 8
     assert settings.public is False
-    assert settings.trust_proxy is False
     assert settings.max_tokens is None
     assert settings.max_concurrent is None
     assert settings.proxy_secret == ""
@@ -171,7 +169,6 @@ def test_public_mode_forces_xai_and_tighter_defaults(
     assert settings.per_minute == 3
     assert settings.max_tool_calls == 6
     assert settings.max_question_chars == 300
-    assert settings.trust_proxy is True
     assert settings.max_concurrent == 2
     assert settings.max_tokens == PUBLIC_MAX_TOKENS
     assert settings.host == "127.0.0.1"
@@ -185,7 +182,6 @@ def test_public_limits_stay_overridable(clean_env: None, monkeypatch: pytest.Mon
     monkeypatch.setenv("STATBANK_RATE_PER_MINUTE", "1")
     monkeypatch.setenv("STATBANK_MAX_TOOL_CALLS", "2")
     monkeypatch.setenv("STATBANK_MAX_QUESTION_CHARS", "50")
-    monkeypatch.setenv("STATBANK_TRUST_PROXY", "0")
     monkeypatch.setenv("STATBANK_MODEL", "qwen2.5")
     monkeypatch.setenv("STATBANK_XAI_MODEL", "grok-4-fast")
     settings = settings_from_env([])
@@ -193,7 +189,6 @@ def test_public_limits_stay_overridable(clean_env: None, monkeypatch: pytest.Mon
     assert settings.per_minute == 1
     assert settings.max_tool_calls == 2
     assert settings.max_question_chars == 50
-    assert settings.trust_proxy is False
     assert settings.model == "grok-4-fast"
     assert settings.llm == "xai"
     assert settings_from_env(["--model", "grok-3"]).model == "grok-3"
@@ -286,58 +281,82 @@ def test_concurrency_limit_returns_a_busy_error() -> None:
             thread.join(timeout=5)
 
 
-def test_forwarded_ip_is_used_only_when_the_proxy_is_trusted() -> None:
-    trusted = _settings(trust_proxy=True, per_minute=1, daily_cap=10)
-    with _running(trusted, _ok) as port:
+def test_spoofed_forwarded_for_without_a_secret_is_ignored() -> None:
+    settings = _settings(public=True, per_minute=1, daily_cap=10)
+    with _running(settings, _ok) as port:
+        first = _post(port, {"question": "a"}, headers={"X-Forwarded-For": "8.8.8.8"})
+        assert first.status == 200
+        first.read()
+        blocked = _post(port, {"question": "b"}, headers={"X-Forwarded-For": "8.8.8.8"})
+        assert blocked.status == 429
+        blocked.read()
+        other = _post(port, {"question": "c"}, headers={"X-Forwarded-For": "1.1.1.1"})
+        assert other.status == 429
+
+
+def test_valid_proxy_secret_uses_the_forwarded_address() -> None:
+    settings = _settings(proxy_secret="test-secret", per_minute=1, daily_cap=10)
+    secret = {"X-Proxy-Secret": "test-secret"}
+    with _running(settings, _ok) as port:
         first = _post(
             port,
             {"question": "a"},
-            headers={"X-Forwarded-For": "203.0.113.10, 10.0.0.1"},
+            headers={**secret, "X-Forwarded-For": "203.0.113.10"},
         )
         assert first.status == 200
         first.read()
         other = _post(
             port,
             {"question": "b"},
-            headers={"CF-Connecting-IP": "203.0.113.20", "X-Forwarded-For": "203.0.113.10"},
+            headers={**secret, "X-Forwarded-For": "203.0.113.11"},
         )
         assert other.status == 200
         other.read()
-        again = _post(port, {"question": "c"}, headers={"X-Forwarded-For": "203.0.113.10"})
+        again = _post(
+            port,
+            {"question": "c"},
+            headers={**secret, "X-Forwarded-For": "203.0.113.10"},
+        )
         assert again.status == 429
 
-    blind = _settings(trust_proxy=False, per_minute=1, daily_cap=10)
-    with _running(blind, _ok) as port:
-        one = _post(
+
+def test_last_forwarded_for_entry_wins() -> None:
+    chain = {"X-Forwarded-For": "8.8.8.8, 203.0.113.50"}
+    assert client_ip("127.0.0.1", chain, trust_proxy=True) == "203.0.113.50"
+    both = {
+        "CF-Connecting-IP": " 203.0.113.5 ",
+        "X-Forwarded-For": "8.8.8.8, 198.51.100.1",
+    }
+    assert client_ip("127.0.0.1", both, trust_proxy=True) == "203.0.113.5"
+    assert client_ip("127.0.0.1", chain, trust_proxy=False) == "127.0.0.1"
+
+    settings = _settings(proxy_secret="test-secret", per_minute=1, daily_cap=10)
+    secret = {"X-Proxy-Secret": "test-secret"}
+    with _running(settings, _ok) as port:
+        first = _post(
             port,
             {"question": "a"},
-            headers={"CF-Connecting-IP": "203.0.113.20", "X-Forwarded-For": "203.0.113.10"},
+            headers={**secret, "X-Forwarded-For": "8.8.8.8, 203.0.113.50"},
         )
-        assert one.status == 200
-        one.read()
-        two = _post(port, {"question": "b"}, headers={"X-Forwarded-For": "198.51.100.8"})
-        assert two.status == 429
-
-
-def test_client_ip_order() -> None:
-    class Headers(dict[str, str]):
-        pass
-
-    both = Headers(
-        {
-            "CF-Connecting-IP": " 203.0.113.5 ",
-            "X-Forwarded-For": "198.51.100.1, 10.0.0.2",
-        }
-    )
-    assert client_ip("127.0.0.1", both, trust_proxy=True) == "203.0.113.5"
-    forwarded = Headers({"X-Forwarded-For": " 198.51.100.9 , 10.0.0.2"})
-    assert client_ip("127.0.0.1", forwarded, trust_proxy=True) == "198.51.100.9"
-    assert client_ip("127.0.0.1", both, trust_proxy=False) == "127.0.0.1"
-    assert client_ip("10.1.1.1", Headers(), trust_proxy=True) == "10.1.1.1"
+        assert first.status == 200
+        first.read()
+        same_hop = _post(
+            port,
+            {"question": "b"},
+            headers={**secret, "X-Forwarded-For": "1.1.1.1, 203.0.113.50"},
+        )
+        assert same_hop.status == 429
+        same_hop.read()
+        other_hop = _post(
+            port,
+            {"question": "c"},
+            headers={**secret, "CF-Connecting-IP": "203.0.113.70", "X-Forwarded-For": "8.8.8.8"},
+        )
+        assert other_hop.status == 200
 
 
 def test_requests_do_not_log_the_visitor_address(capsys: pytest.CaptureFixture[str]) -> None:
-    settings = _settings(trust_proxy=True, per_minute=5, daily_cap=10)
+    settings = _settings(per_minute=5, daily_cap=10)
     with _running(settings, _ok) as port:
         response = _post(port, {"question": "a"}, headers={"CF-Connecting-IP": "203.0.113.77"})
         assert response.status == 200
