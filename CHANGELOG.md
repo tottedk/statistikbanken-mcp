@@ -27,7 +27,7 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ### Changed
 
-- **Check a prose figure against the period or place named with it.** A number put next to a fetched period or row label, in the same clause, has to be that row's value. `94.486` beside `2013K1` is dropped when that figure belongs to `2014K1`, the same way as any other unverified number. Friendly names (`2014 1. kvt.`, `marts 2015`) and codes (`2014K1`) are that period. A figure with no period or place, and a total or difference the guard already allowed, still pass.
+- **Check a prose figure against the period or place named with it.** Pairing flags a number only when that number is itself a fetched row value and the same clause ties it to a different period or row. `94.486` beside `2013K1` is dropped when that figure belongs to `2014K1`. A figure that comes from the question or a label, such as `80` in `(80+)` or `10` in `10 år`, or that is not in the rows, keeps the ordinary check. Friendly names (`2014 1. kvt.`, `marts 2015`) and codes (`2014K1`) are that period.
 
 - **Find ordinary subjects, and state the period range when a code is outside it.** `find_tabel` maps togpassagerer, vareeksport, dødsårsager, kræft, gini, nye virksomheder, iværksættere, månedsfortjeneste, AKU, påbegyndte boliger, and unemployed or jobless onto the words the catalogue uses. Danmark, Denmark, and Danish no longer count when the query also names a subject. An unknown place such as Lyngby suggests the hyphenated name (Lyngby-Taarbæk) and is not accepted on its own. An unknown period states the available range instead of a near-miss code, and a bare year on a quarterly or monthly table suggests that year's sub-periods.
 

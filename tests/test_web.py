@@ -1071,6 +1071,45 @@ def test_friendly_period_label_must_match_that_row() -> None:
     assert guard_answer(question, "100 i marts 2015.", months) == "100 i marts 2015."
 
 
+def test_question_and_label_numbers_are_not_paired_with_a_place() -> None:
+    """80 from over 80 / (80+) and 10 from 10 år are not wrong-row values."""
+    age = "Hvordan har antallet af personer over 80 i Rudersdal og Hørsholm udviklet sig?"
+    series = [
+        _population_fact(1719, "2015K1", "Hørsholm"),
+        _population_fact(2790, "2026K3", "Hørsholm"),
+        _population_fact(3524, "2015K1", "Rudersdal"),
+        _population_fact(5045, "2026K3", "Rudersdal"),
+        # 80 is also a real row, so the label alone must keep "(80+)" from pairing.
+        _population_fact(80, "2015K1", "Esbjerg"),
+    ]
+    kept = [
+        (
+            "Hørsholm (80+): første værdi 2015K1 er 1.719, "
+            "sidste værdi 2026K3 er 2.790. "
+            "Rudersdal (80+): første værdi 2015K1 er 3.524, "
+            "sidste værdi 2026K3 er 5.045."
+        ),
+        "Rudersdal 80+: 3.524 (2015K1) → 5.045 (2026K3)",
+        "I 2026K3 boede der 5.045 personer over 80 i Rudersdal",
+    ]
+    for text in kept:
+        assert guard_answer(age, text, series) == text
+    decade = "Hvordan har befolkningen i Viborg udviklet sig de seneste 10 år?"
+    viborg = [
+        _population_fact(95776, "2016K1", "Viborg"),
+        _population_fact(96166, "2016K3", "Viborg"),
+        _population_fact(98104, "2026K3", "Viborg"),
+        # 10 is also a real row, so the question's "10 år" must not be paired.
+        _population_fact(10, "2015K1", "Esbjerg"),
+    ]
+    for text in (
+        "Viborg: 10 år siden (2016K1) var tallet 95.776.",
+        "I Viborg Kommune boede der 98.104 i 2026K3, mod 96.166 i 2016K3 for 10 år siden.",
+        "Viborg (10 år): 95.776 → 98.104.",
+    ):
+        assert guard_answer(decade, text, viborg) == text
+
+
 def test_swapped_place_names_are_suppressed() -> None:
     question = "Hvordan har antallet udviklet sig?"
     facts = [

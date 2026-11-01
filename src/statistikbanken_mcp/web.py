@@ -1209,8 +1209,9 @@ def _turn(
 ) -> TurnResult:
     # A figure in the prose is kept when it is in the question, a hent_data
     # value, a period or row label from those rows, the fetched table title,
-    # or a variable value on this turn's hent_data arguments. A figure tied
-    # to one of those periods or row labels has to be that row's value.
+    # or a variable value on this turn's hent_data arguments. A fetched value
+    # tied to one of those periods or row labels has to be that row's value.
+    # A figure from the question or a label is not paired.
     refusal = _relevance_refusal(question, facts)
     if refusal:
         # The rows are real, but they are not the question. Do not chart them.
@@ -1343,8 +1344,9 @@ def guard_answer(
 
     Allowed figures are the question, a hent_data value, a period or row label
     from those rows, the fetched table title, and a variable value on this
-    turn's hent_data arguments. A figure tied in the same clause to one fetched
-    period or row label has to be that row's value. A question that asks for one
+    turn's hent_data arguments. A fetched value tied in the same clause to one
+    period or row label has to be that row's value. A figure that only comes
+    from the question or a label is left to that check. A question that asks for one
     figure is answered with the page's own line for the latest period. The
     model's sentence is not used, so a long series or an invented total cannot
     become the answer.
@@ -1627,17 +1629,21 @@ def _unverified_numbers(
     for token in _period_tokens(answer):
         if token not in known_periods:
             flagged.append(float(token[:4]))
-    flagged.extend(_mispaired_figures(answer, facts))
+    flagged.extend(_mispaired_figures(answer, facts, question))
     return flagged
 
 
-def _mispaired_figures(answer: str, facts: list[dict[str, Any]]) -> list[float]:
-    """Figures the clause assigns to a fetched period or row they do not belong to.
+def _mispaired_figures(
+    answer: str,
+    facts: list[dict[str, Any]],
+    question: str = "",
+) -> list[float]:
+    """Fetched values the clause assigns to a period or row they do not belong to.
 
     A tie is either adjacency (parentheses, a colon, or i/in/for/på) or the only
-    figure in the clause beside the only period or row label. A list of several
-    figures is not paired off by order. Fra/siden/til introduce a range, and a
-    difference or total is not a claim that the row equals that figure.
+    figure in the clause beside the only period or row label. Only a number that
+    is itself a fetched row value can be flagged here. A figure from the question,
+    a period or age label, or nowhere in the rows keeps the ordinary check.
     """
     periods = _period_mentions(answer, facts)
     labels = _label_mentions(answer, facts, [(start, end) for start, end, _code in periods])
@@ -1699,14 +1705,31 @@ def _mispaired_figures(answer: str, facts: list[dict[str, Any]]) -> list[float]:
             bind_period(claimed[0], clause_periods[0])
         if len(claimed) == 1 and len(clause_labels) == 1:
             bind_label(claimed[0], clause_labels[0])
+    row_values = _row_values(facts)
+    exempt = _label_figures(question)
+    for fact in facts:
+        exempt.update(_label_figures(str(fact.get("detail") or "")))
+        exempt.update(_period_years(str(fact.get("period") or "")))
     flagged: list[float] = []
     for index in set(period_for) | set(label_for):
+        value = numbers[index][2]
+        if not _near(value, row_values) or _near(value, exempt):
+            continue
         codes = period_for.get(index, set())
         bound_labels = label_for.get(index, set())
-        value = numbers[index][2]
         if not any(_row_has(fact, value, codes, bound_labels) for fact in facts):
             flagged.append(value)
     return flagged
+
+
+def _row_values(facts: list[dict[str, Any]]) -> set[float]:
+    found: set[float] = set()
+    for fact in facts:
+        value = fact.get("value")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        found.add(float(value))
+    return found
 
 
 def _row_has(fact: dict[str, Any], number: float, codes: set[str], labels: set[str]) -> bool:
