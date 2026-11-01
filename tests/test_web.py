@@ -35,6 +35,7 @@ from statistikbanken_mcp.web import (
     _handler,
     _turn,
     apply_age_intent,
+    chart_axis,
     chart_series,
     display_label,
     facts_to_csv,
@@ -43,6 +44,7 @@ from statistikbanken_mcp.web import (
     facts_to_xlsx,
     guard_answer,
     list_server_tools,
+    nice_axis,
     period_label,
     run_turn,
     server_command,
@@ -706,7 +708,8 @@ def test_fact_cards_and_the_axis_use_danish_dots() -> None:
     assert "daDigits(Math.round(value))" in PAGE
     chart = PAGE.split("function drawChart", 1)[1].split("function daDigits", 1)[0]
     assert "toLocaleString" not in chart
-    assert "i < 5" in chart
+    assert "for (const value of axis.ticks)" in chart
+    assert "daTick(value)" in chart
 
 
 def test_csv_button_is_hidden_without_facts() -> None:
@@ -761,6 +764,10 @@ def test_chart_labels_sit_on_the_points() -> None:
     png = PAGE.split("function pngButton", 1)[1].split("function drawGrid", 1)[0]
     assert ".legend" in png
     assert "system-ui, sans-serif" in png
+    assert "getBBox" in png
+    assert "plotWidth" in png
+    assert "canvas.width = width * scale" in png
+    assert "640 * scale" not in png
 
 
 def test_turn_stops_at_the_tool_cap() -> None:
@@ -891,6 +898,49 @@ def test_chart_series_groups_periods_and_skips_a_single_point() -> None:
     assert series[1]["unit"] == "Antal"
 
 
+def test_axis_ticks_are_nice_numbers_covering_min_and_max() -> None:
+    low, high, ticks = nice_axis(1719, 5045)
+    assert ticks == [1500, 2500, 3500, 4500, 5500]
+    assert low == 1500 and high == 5500
+    assert low <= 1719 and high >= 5045
+    flat_low, flat_high, flat = nice_axis(5045, 5045)
+    assert flat_low < 5045 < flat_high
+    assert flat[0] == flat_low and flat[-1] == flat_high
+    zero, hundred, even = nice_axis(0, 100)
+    assert even == [0, 20, 40, 60, 80, 100]
+    assert zero == 0 and hundred == 100
+    series = chart_series(
+        [
+            _population_fact(3524, "2015K1"),
+            _population_fact(5045, "2026K3"),
+            _population_fact(1719, "2015K1", "Hørsholm"),
+            _population_fact(2790, "2026K3", "Hørsholm"),
+        ]
+    )
+    axis = chart_axis(series)
+    assert axis == {"min": 1500, "max": 5500, "ticks": [1500, 2500, 3500, 4500, 5500]}
+    assert "drawChart(data.chart, data.axis)" in PAGE
+
+
+def test_exports_use_the_same_dimension_label_as_the_table() -> None:
+    facts = [
+        _population_fact(3524, "2015K1"),
+        _population_fact(1719, "2015K1", "Hørsholm"),
+    ]
+    text = facts_to_csv(facts).lstrip("\ufeff")
+    rows = list(csv.reader(io.StringIO(text), delimiter=";"))
+    assert rows[1][2] == "Rudersdal, 80+"
+    assert rows[2][2] == "Hørsholm, 80+"
+    assert "OMRÅDE:" not in text
+    assert "ALDER:" not in text
+    sheet = _xlsx_rows(facts_to_xlsx(facts))
+    assert [row[2] for row in sheet] == ["dimensioner", "Rudersdal, 80+", "Hørsholm, 80+"]
+    exported = json.loads(facts_to_json(facts))
+    assert exported[0]["dimensioner"] == "Rudersdal, 80+"
+    assert exported[0]["dimensioner_rå"] == "OMRÅDE: Rudersdal, ALDER: 80+"
+    assert exported[1]["dimensioner"] == "Hørsholm, 80+"
+
+
 def test_display_label_drops_variable_names_and_totals() -> None:
     detail = "OMRÅDE: Rudersdal, KØN: I alt, ALDER: 80+, CIVILSTAND: I alt"
     assert display_label(detail, "FOLK1A") == "Rudersdal, 80+"
@@ -971,6 +1021,8 @@ def test_json_keeps_the_period_code_and_csv_uses_the_label() -> None:
     exported = json.loads(facts_to_json(facts))
     assert exported[0]["periode"] == "2015K1"
     assert exported[0]["periode_label"] == "2015 1. kvt."
+    assert exported[0]["dimensioner"] == "Rudersdal"
+    assert exported[0]["dimensioner_rå"] == "OMRÅDE: Rudersdal"
     assert exported[0]["værdi"] == "5045"
     assert exported[1]["periode"] == "2015K2"
     assert exported[1]["værdi"] == "12,5"
@@ -1044,8 +1096,8 @@ def test_csv_uses_bom_semicolon_and_decimal_comma() -> None:
     assert text.startswith("\ufeff")
     header = text.splitlines()[0].lstrip("\ufeff")
     assert header == "tabel;periode;dimensioner;værdi;enhed"
-    assert "FOLK1A;2015 1. kvt.;OMRÅDE: Rudersdal;5045;Antal" in text
-    assert "FOLK1A;2015 2. kvt.;OMRÅDE: Rudersdal;12,5;Antal" in text
+    assert "FOLK1A;2015 1. kvt.;Rudersdal;5045;Antal" in text
+    assert "FOLK1A;2015 2. kvt.;Rudersdal;12,5;Antal" in text
 
 
 @pytest.mark.live
