@@ -1,33 +1,53 @@
 # statistikbanken-mcp
 
-An MCP server for [Danmarks Statistik](https://www.dst.dk)'s public [Statistikbanken API](https://www.dst.dk/en/Statistik/hjaelp-til-statistikbanken/api). No API key. The API has no free-text search, so the server searches the published table list.
+An MCP server for [Danmarks Statistik](https://www.dst.dk)'s public Statistikbanken API. No API key.
+
+Statistikbanken has more than 2,000 tables and no free-text search. This server gives an assistant three small tools, so a question such as "How many people over 80 live in Rudersdal?" comes back as a number from a named table and period, with Danmarks Statistik as the source.
+
+## Example
+
+**How many people over 80 live in Rudersdal?**
+
+`find_tabel("befolkning")` returns `FOLK1A`, "Befolkningen den 1. i kvartalet", latest period `2026K3`.
+
+```text
+hent_data(
+  table="FOLK1A",
+  values={"OMRÅDE": ["Rudersdal"], "KØN": ["TOT"], "CIVILSTAND": ["TOT"], "Tid": ["(1)"]},
+  sum_from={"ALDER": "80"}
+)
+```
+
+Ages in FOLK1A are single years. `sum_from` asks the API to add 80 through 125. The result is one row:
+
+| Table | Period | Place | Age | Value |
+|---|---|---|---|---|
+| FOLK1A | 2026K3 | Rudersdal | 80+ | 5,045 |
+
+Unit is people (`Antal`). Source: Danmarks Statistik.
+
+**Children aged 0–17 in Rudersdal and Hørsholm**, same table and quarter, with `sum_range={"ALDER": ["0", "17"]}`:
+
+| Place | Value |
+|---|---|
+| Rudersdal | 12,770 |
+| Hørsholm | 4,916 |
+
+**A misspelled name.** `hent_data` with `OMRÅDE: ["Kobenhavn"]` resolves to København. Total population in FOLK1A, 2026K3: 670,389.
+
+These three calls were run against `https://api.statbank.dk` on 31 October 2026.
 
 ## Tools
 
 Names are Danish. Arguments and descriptions are English.
 
-| Tool | Purpose | Main inputs |
-|---|---|---|
-| `find_tabel` | Find a table | `query`, `limit` (integer 1–25, default 10) |
-| `tabelinfo` | Read variables and value codes | `table`, optional `variable`, `values_filter` |
-| `hent_data` | Fetch rows | `table`, optional `values`, `sum_from`, `sum_range` |
+| Tool | Purpose | Main inputs | Behaviour worth knowing |
+|---|---|---|---|
+| `find_tabel` | Find a table | `query`, `limit` (1–25, default 10) | Matches id, title, and variable names. Some words are enough. A few synonyms are built in (`population`, `bruttoledighed`, `huspriser`, `husdyr`, `indbrud`). Municipality names are matched against FOLK1A and returned with their codes. A miss is an error, not an empty list. |
+| `tabelinfo` | Read codes | `table`, optional `variable`, `values_filter` | Time is first, last, and count. Long value lists are capped; `values_filter` looks up the rest, and several words match any of them. |
+| `hent_data` | Fetch rows | `table`, `values`, `sum_from`, `sum_range` | Values may be codes or labels (`Rudersdal`, `Kobenhavn`). A required variable with one total is filled in. One with no total returns its codes. `sum_from` and `sum_range` use the API's own sum. `>=80` on its own is one row per code. A time sum that would hide rows, including two periods passed where a range was meant, is an error. A trailing 0 marked `unpublished` is a period the API has not published yet. |
 
-`find_tabel` matches id, title, and variable names. Some of the words are enough. A few synonyms are built in, for example `population`, `bruttoledighed`, `huspriser`, `husdyr`, and `indbrud`. A place name from FOLK1A's area list is returned on that table with its code. A miss is an error, not an empty list. Equal scores keep catalogue order. `befolkning` returns FOLK1A near the top.
-
-`tabelinfo` reports time as first, last, and count. Long value lists are capped. `values_filter` looks up the rest, and several words match any of them.
-
-`hent_data` accepts codes or labels (`Rudersdal`, `Kobenhavn`). A required variable with one total is filled in and listed in `defaults`. One with no total returns its codes. `sum_from={"ALDER": "80"}` asks the API to add ages 80 and older, labelled `80+`. `sum_range={"ALDER": ["0", "17"]}` totals a closed numeric range. `>=80` on its own is one row per code. Omit `Tid`, or pass `"(1)"`, for the latest period. A range such as `>=2015K1` returns each period as its own row. Two periods in `sum_range` on a time variable are not the periods between them. A time sum combined with several values, or with a range such as `>=80`, is refused because it would hide rows. A trailing 0 marked `unpublished` is a period the API has not published yet.
-
-Read `title`, `description`, `unit`, and `periods` on the result. They say what the number measures.
-
-```text
-find_tabel(query="befolkning")
-hent_data(
-  table="FOLK1A",
-  values={"OMRÅDE": ["Rudersdal"], "Tid": ["(1)"]},
-  sum_from={"ALDER": "80"}
-)
-```
+Read `title`, `description`, `unit`, and `periods` on the result. They say what the number measures. A search hit can be narrower than the question.
 
 ## Quick start
 
@@ -66,6 +86,8 @@ MCP Inspector. `mcp dev` starts the inspector with `npx`, so Node.js is required
 uv run mcp dev src/statistikbanken_mcp/server.py
 ```
 
+That starts a local page where you can list the tools and call them.
+
 ## Web page
 
 `statistikbanken-web` is a local page. It asks an OpenAI-compatible chat-completions client, Ollama or xAI, to call the same three tools over stdio.
@@ -101,17 +123,36 @@ A number in the answer must come from the question, the fetched data, a period o
 
 ## Tests
 
-Recorded responses live in `tests/fixtures/`. Live tests call `https://api.statbank.dk`.
+Unit tests replay responses recorded from the live API (`tests/fixtures/`). A smaller set calls the API directly, including one session over stdio.
 
 ```bash
 uv sync --group dev
-uv run pytest -m "not live"
-uv run pytest -m live
+uv run pytest -m "not live"   # fixtures only
+uv run pytest -m live         # the real API
+uv run pytest                 # both
 uv run ruff check .
 uv run ruff format --check .
 ```
 
 GitHub Actions runs those Ruff commands and `uv run pytest` with no marker, so the live tests run there, on every push and pull request.
+
+On 31 October 2026 a real MCP client answered 50 Danish questions through this server. 37 were fine, 5 were near matches (the table was narrower than the question), and none of the numbers were wrong. Five invalid inputs were rejected clearly. Three were not: `Kobenhavn` without ø, an English question, and the name Silkeborg. Search was also too strict, and a missing required variable came back as a raw Danish API error.
+
+Those cases were fixed afterwards: partial search, a small synonym list, label lookup with suggestions, English errors that list the valid codes, a shorter `tabelinfo`, and sums of explicit codes. Unpublished trailing zeros are flagged.
+
+Limits that remain:
+
+- When several tables score the same, catalogue order wins, so the best table is often on the first page rather than always first.
+- Place names in search come from FOLK1A's area list only.
+- There is no table of all association membership by municipality. The nearest table, `IDRFOR01`, counts sports-club memberships, and its title says so.
+
+## Design
+
+- Three tools, not one. Search, then codes, then data.
+- Totals such as ages 80+ and 0–17 use Statistikbanken's own `sum()`.
+- Labels map to codes. A near miss suggests the closest code and label.
+- `tabelinfo` stays short enough to read: time is a span, long lists are capped.
+- No API key. The repository contains no secrets.
 
 ## Data and licence
 
