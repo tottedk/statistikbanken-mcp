@@ -702,6 +702,33 @@ def test_csv_button_is_hidden_without_facts() -> None:
     assert _turn("Hvor mange bor i Narnia?", "Ingen tal.", [], []).csv == ""
 
 
+def test_page_has_basis_and_avanceret_modes() -> None:
+    assert '<fieldset class="modes">' in PAGE
+    assert "<legend>Visning</legend>" in PAGE
+    assert '<input type="radio" name="mode" value="basic" checked>' in PAGE
+    assert '<input type="radio" name="mode" value="advanced">' in PAGE
+    assert "> Basis</label>" in PAGE
+    assert "> Avanceret</label>" in PAGE
+    assert 'const MODE_KEY = "statistikbanken-mode"' in PAGE
+    assert "localStorage.getItem(MODE_KEY)" in PAGE
+    assert "localStorage.setItem(MODE_KEY, mode)" in PAGE
+    change = PAGE.split('input.addEventListener("change"', 1)[1].split("function advancedOnly", 1)[
+        0
+    ]
+    assert "fetch(" not in change
+    assert "if (last) render(last)" in change
+    assert 'node.dataset.mode = "advanced"' in PAGE
+    assert "advancedOnly(csvButton(data.csv))" in PAGE
+    assert "advancedOnly(chart)" in PAGE
+    assert "advancedOnly(link)" in PAGE
+    assert 'return mode === "advanced" && data.show_numbers !== false;' in PAGE
+    assert "advancedView(data) && data.facts && data.facts.length && data.csv" in PAGE
+    assert "advancedView(data) && data.chart && data.chart.length" in PAGE
+    assert '!data.facts || !data.facts.length || mode === "advanced"' in PAGE
+    assert "if (data.show_numbers === false) return;" in PAGE
+    assert "if (data.error)" in PAGE
+
+
 def test_chart_keeps_the_last_period_inside_the_frame() -> None:
     assert "right = 56" in PAGE
     assert 'text-anchor": last ? "end"' in PAGE

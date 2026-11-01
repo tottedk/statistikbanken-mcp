@@ -115,12 +115,24 @@ PAGE = """<!DOCTYPE html>
   .row { display: flex; gap: 0.75rem; align-items: center; }
   a { color: #1d4e89; }
   footer { margin-top: 2rem; color: #4a453e; font-size: 0.9rem; }
+  fieldset.modes { border: 0; margin: 0 0 1.25rem; padding: 0;
+    display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  fieldset.modes legend { padding: 0; font-size: 0.95rem; color: #4a453e; }
+  fieldset.modes label { display: inline-flex; gap: 0.35rem; align-items: center; cursor: pointer; }
+  fieldset.modes label:has(:checked) { font-weight: 650; }
+  fieldset.modes input { width: 1rem; height: 1rem; accent-color: #1c1915; }
+  fieldset.modes input:focus-visible { outline: 2px solid #1d4e89; outline-offset: 2px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Statistikbanken</h1>
   <p class="lead">Stil et spørgsmål. Svaret bygger på tal fra Danmarks Statistik.</p>
+  <fieldset class="modes">
+    <legend>Visning</legend>
+    <label><input type="radio" name="mode" value="basic" checked> Basis</label>
+    <label><input type="radio" name="mode" value="advanced"> Avanceret</label>
+  </fieldset>
   <form>
     <label for="question">Dit spørgsmål</label>
     <textarea id="question" name="question" maxlength="__MAX__" required
@@ -134,6 +146,30 @@ PAGE = """<!DOCTYPE html>
 const form = document.querySelector("form");
 const out = document.querySelector("#out");
 const button = form.querySelector("button");
+const MODE_KEY = "statistikbanken-mode";
+let mode = "basic";
+let last = null;
+try {
+  if (localStorage.getItem(MODE_KEY) === "advanced") mode = "advanced";
+} catch (error) {}
+for (const input of document.querySelectorAll('input[name="mode"]')) {
+  input.checked = input.value === mode;
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    mode = input.value;
+    try { localStorage.setItem(MODE_KEY, mode); } catch (error) {}
+    if (last) render(last);
+  });
+}
+
+function advancedOnly(node) {
+  node.dataset.mode = "advanced";
+  return node;
+}
+
+function advancedView(data) {
+  return mode === "advanced" && data.show_numbers !== false;
+}
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -254,31 +290,33 @@ function render(data) {
   const answer = el("section");
   const heading = el("div", null, "row");
   heading.append(el("h2", "Svar"));
-  if (data.show_numbers !== false && data.facts && data.facts.length && data.csv) {
-    heading.append(csvButton(data.csv));
+  if (advancedView(data) && data.facts && data.facts.length && data.csv) {
+    heading.append(advancedOnly(csvButton(data.csv)));
   }
   answer.append(heading, el("p", data.answer || "", "answer"));
   out.append(answer);
 
-  if (data.show_numbers !== false && data.chart && data.chart.length) {
+  if (advancedView(data) && data.chart && data.chart.length) {
     const chart = el("section");
     chart.append(el("h2", "Udvikling"), drawChart(data.chart), legend(data.chart));
-    out.append(chart);
+    out.append(advancedOnly(chart));
   }
 
   if (data.show_numbers === false) return;
   const facts = el("section");
   facts.append(el("h2", "Tal"));
-  const linked = new Set();
-  for (const fact of data.facts || []) {
-    if (fact.url && fact.table && !linked.has(fact.table)) {
-      linked.add(fact.table);
-      const link = document.createElement("a");
-      link.href = fact.url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = "Tabel " + fact.table + " på Statistikbanken";
-      facts.append(link);
+  if (advancedView(data)) {
+    const linked = new Set();
+    for (const fact of data.facts || []) {
+      if (fact.url && fact.table && !linked.has(fact.table)) {
+        linked.add(fact.table);
+        const link = document.createElement("a");
+        link.href = fact.url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "Tabel " + fact.table + " på Statistikbanken";
+        facts.append(advancedOnly(link));
+      }
     }
   }
   const list = el("div", null, "facts");
@@ -303,21 +341,23 @@ function render(data) {
   facts.append(list);
   out.append(facts);
 
-  const trace = el("section");
-  trace.append(el("h2", "Værktøjskald"));
-  if (!data.calls || data.calls.length === 0) {
-    trace.append(el("p", "Ingen kald.", "meta"));
+  if (!data.facts || !data.facts.length || mode === "advanced") {
+    const trace = el("section");
+    trace.append(el("h2", "Værktøjskald"));
+    if (!data.calls || data.calls.length === 0) {
+      trace.append(el("p", "Ingen kald.", "meta"));
+    }
+    for (const call of data.calls || []) {
+      const item = document.createElement("details");
+      item.append(el("summary", call.name || "kald"));
+      item.append(el("div", "Argumenter", "meta"));
+      item.append(el("pre", call.arguments || ""));
+      item.append(el("div", "Resultat", "meta"));
+      item.append(el("pre", call.result || ""));
+      trace.append(item);
+    }
+    out.append(trace);
   }
-  for (const call of data.calls || []) {
-    const item = document.createElement("details");
-    item.append(el("summary", call.name || "kald"));
-    item.append(el("div", "Argumenter", "meta"));
-    item.append(el("pre", call.arguments || ""));
-    item.append(el("div", "Resultat", "meta"));
-    item.append(el("pre", call.result || ""));
-    trace.append(item);
-  }
-  out.append(trace);
 }
 
 form.addEventListener("submit", async (event) => {
@@ -332,9 +372,11 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify({ question }),
     });
     const data = await response.json();
+    last = data;
     render(data);
   } catch (error) {
-    render({ error: "Kunne ikke hente et svar." });
+    last = { error: "Kunne ikke hente et svar." };
+    render(last);
   } finally {
     button.disabled = false;
   }
