@@ -96,7 +96,7 @@ That starts a local page where you can list the tools and call them.
 uv run statistikbanken-web
 ```
 
-Then open http://127.0.0.1:8080. The default bind is `127.0.0.1` port `8080`. `--host`, `--port`, `STATBANK_HOST`, and `STATBANK_PORT` change it. Copy `.env.example` to `.env` to change the model, the daily question cap, or the per-address limit. `.env` is gitignored. The API key is not printed.
+Then open http://127.0.0.1:8080. The default bind is `127.0.0.1` port `8080`. `--host`, `--port`, `STATBANK_HOST`, and `STATBANK_PORT` change it. `PORT`, when set, is used instead of `STATBANK_PORT`. Copy `.env.example` to `.env` to change the model, the daily question cap, or the per-address limit. `.env` is gitignored. The API key is not printed.
 
 Ollama is the default (`--llm ollama`). The model is `qwen2.5` and the base URL is `http://127.0.0.1:11434/v1`. Pull a model that can call tools, then start the page:
 
@@ -105,7 +105,7 @@ ollama pull qwen2.5
 uv run statistikbanken-web
 ```
 
-xAI uses `https://api.x.ai/v1` and the model `grok-4`. Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
+xAI uses `https://api.x.ai/v1`. The model is `STATBANK_XAI_MODEL`, or `grok-4` when that is unset. `grok-4` may be retired, so set the model when you deploy. Each xAI request sends `max_tokens` (1024). Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
 
 ```bash
 uv run statistikbanken-web --llm xai --model grok-4
@@ -120,6 +120,29 @@ The page opens in Basis. Basis shows the answer and a compact table: one row per
 `2015K1` reads as `2015 1. kvt.` on the table, the chart, the page's own answer line, and in CSV and Excel. A month is `marts 2015`, a half-year is `2015 1. halvår`, and a year stays the year. Unknown codes are left as they are. JSON keeps the code in `periode` and adds `periode_label`. CSV is UTF-8 with a BOM, a semicolon between columns, and a decimal comma.
 
 A number in the answer must come from the question, the fetched data, a period or row label from those rows, the fetched table title, or a variable value in that turn's `hent_data` arguments. A number that appears only in `tabelinfo` or `find_tabel` does not count. Digits that only name a fetched quarter, month, or half-year are not extra figures. Otherwise the prose is hidden. A question that does not ask how the figures change over time is answered with the page's own line for the latest period. If the question names a place or an age and the fetched rows are for a different one, they are not presented as the answer.
+
+## Running as a public demo
+
+```bash
+docker build -t statistikbanken-web .
+docker run --rm -p 8080:8080 -e STATBANK_PUBLIC=1 -e XAI_API_KEY statistikbanken-web
+```
+
+The image is Python 3.12. It listens on `STATBANK_HOST` (the image sets `0.0.0.0`) and on `PORT` when that is set, otherwise `STATBANK_PORT` (8080). `GET /healthz` returns 200 and does not call the model or Statistikbanken.
+
+`STATBANK_PUBLIC=1` uses xAI only. Ollama is ignored, and so are `--llm`, `STATBANK_BASE_URL`, and `STATBANK_MODEL`. The process exits at startup when `XAI_API_KEY` is missing. Pass the key in from the environment (`-e XAI_API_KEY` with no value copies it from the shell). Do not write `XAI_API_KEY` or `STATBANK_PROXY_SECRET` into a file, the image, or the repo.
+
+Set `STATBANK_XAI_MODEL` when you deploy. The default is `grok-4`, and that name may be retired. `--model` overrides it for one run. Every request to xAI includes `max_tokens` (1024).
+
+Public defaults, each still overridable by its `STATBANK_*` variable: 40 questions a day in total (`STATBANK_DAILY_CAP`), 3 per minute per visitor (`STATBANK_RATE_PER_MINUTE`), 6 tool calls (`STATBANK_MAX_TOOL_CALLS`), and 300 characters (`STATBANK_MAX_QUESTION_CHARS`). At most two questions run at once. The page shows a short Danish line with the daily cap.
+
+The daily count and the per-minute window are kept in memory. A free container that sleeps or restarts starts them again at zero. That is not a spending cap. The hard cap is the prepaid xAI credit. Turn auto top-up off.
+
+`STATBANK_STATE_FILE`, if set to a path, stores the date and the daily count so a restart on the same day can continue the count. The file does not store addresses. It only helps when the disk outlives the process. An ephemeral disk is wiped when the container sleeps or restarts, and the count is forgotten there too.
+
+Emergency stop: set `STATBANK_DAILY_CAP=0` and restart. Questions then get a closed message until the cap is raised.
+
+The per-minute limit uses `CF-Connecting-IP`, or else the first `X-Forwarded-For` entry, only when `STATBANK_TRUST_PROXY` is on (the default in public mode). Addresses are not logged. When `STATBANK_PROXY_SECRET` is set, every route except `/healthz` requires the header `X-Proxy-Secret`. `STATBANK_FRAME_ANCESTORS` is the CSP `frame-ancestors` source list. The default is `'self'`.
 
 ## Tests
 

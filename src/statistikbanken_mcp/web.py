@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import hmac
 import io
 import json
 import logging
@@ -41,6 +42,8 @@ MAX_BODY_BYTES = 32_768
 EXPORT_MAX_BYTES = 1_048_576
 DEFAULT_LLM_TIMEOUT = 45.0
 DEFAULT_TOOL_TIMEOUT = 30.0
+PUBLIC_MAX_TOKENS = 1024
+PUBLIC_MAX_CONCURRENT = 2
 NO_FETCHED_NUMBERS = "Jeg fik ikke hentet tal, så jeg viser ingen."
 NO_DATA_ANSWER = "Jeg fandt ingen tal i Statistikbanken for det, du spørger om."
 LLM_TIMEOUT_TEXT = "Modellen svarede ikke i tide. Prøv igen."
@@ -92,6 +95,7 @@ PAGE = """<!DOCTYPE html>
   main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
   h1 { font-size: 1.6rem; font-weight: 650; margin: 0 0 0.25rem; }
   p.lead { margin: 0 0 1.5rem; color: #4a453e; }
+  p.demo { margin: -0.75rem 0 1.5rem; color: #4a453e; font-size: 0.95rem; }
   form { display: grid; gap: 0.75rem; }
   textarea { width: 100%; min-height: 6rem; box-sizing: border-box; font: inherit;
     padding: 0.75rem; border: 1px solid #c9c2b6; border-radius: 8px; background: #fff; }
@@ -135,6 +139,7 @@ PAGE = """<!DOCTYPE html>
 <main>
   <h1>Statistikbanken</h1>
   <p class="lead">Stil et spørgsmål. Svaret bygger på tal fra Danmarks Statistik.</p>
+  __DEMO__
   <fieldset class="modes">
     <legend>Visning</legend>
     <label><input type="radio" name="mode" value="basic" checked> Basis</label>
@@ -552,10 +557,13 @@ class ChatClient:
         model: str,
         timeout: float,
         http: httpx.Client | None = None,
+        *,
+        max_tokens: int | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.max_tokens = max_tokens
         self._owns_http = http is None
         self._http = http or httpx.Client(timeout=timeout)
 
@@ -569,6 +577,8 @@ class ChatClient:
         tools: list[dict[str, Any]] | None,
     ) -> ChatReply:
         body: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": 0}
+        if self.max_tokens is not None:
+            body["max_tokens"] = self.max_tokens
         if tools is not None:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -1768,15 +1778,21 @@ def _short(text: str, limit: int) -> str:
 
 
 class Limiter:
-    def __init__(self, daily_cap: int, per_minute: int) -> None:
+    def __init__(self, daily_cap: int, per_minute: int, state_file: str = "") -> None:
         self.daily_cap = daily_cap
         self.per_minute = per_minute
+        self.state_file = state_file
         self._lock = threading.Lock()
         self._day = date.today()
         self._count = 0
         self._hits: dict[str, deque[float]] = {}
+        loaded = _load_daily_count(state_file)
+        if loaded is not None and loaded[0] == self._day:
+            self._count = loaded[1]
 
     def allow(self, ip: str) -> str | None:
+        if self.daily_cap <= 0:
+            return "stopped"
         now = time.monotonic()
         with self._lock:
             today = date.today()
@@ -1793,13 +1809,45 @@ class Limiter:
                 return "daily"
             hits.append(now)
             self._count += 1
+            _save_daily_count(self.state_file, self._day, self._count)
             return None
+
+
+def _load_daily_count(path: str) -> tuple[date, int] | None:
+    """Date and count from STATBANK_STATE_FILE. Addresses are not stored."""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        day = date.fromisoformat(str(payload["day"]))
+        count = payload["count"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        return None
+    return day, count
+
+
+def _save_daily_count(path: str, day: date, count: int) -> None:
+    if not path:
+        return
+    temporary = f"{path}.tmp"
+    body = json.dumps({"day": day.isoformat(), "count": count})
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(body)
+        os.replace(temporary, path)
+    except OSError:
+        logger.warning("Could not save the daily counter to %s", path)
 
 
 _LIMIT_TEXT = {
     "rate": "For mange spørgsmål fra denne adresse. Prøv igen om et minut.",
     "daily": "Dagens grænse for spørgsmål er nået.",
+    "stopped": "Demoen er midlertidigt lukket. Prøv igen senere.",
 }
+_BUSY_TEXT = "Der er travlt lige nu. Prøv igen."
 
 
 @dataclass
@@ -1816,11 +1864,18 @@ class Settings:
     max_tool_calls: int
     llm_timeout: float
     tool_timeout: float
+    public: bool = False
+    trust_proxy: bool = False
+    proxy_secret: str = ""
+    frame_ancestors: str = "'self'"
+    max_tokens: int | None = None
+    max_concurrent: int | None = None
+    state_file: str = ""
 
     def __repr__(self) -> str:
         return (
             f"Settings(llm={self.llm!r}, model={self.model!r}, base_url={self.base_url!r}, "
-            f"host={self.host!r}, port={self.port})"
+            f"host={self.host!r}, port={self.port}, public={self.public})"
         )
 
 
@@ -1840,6 +1895,57 @@ def load_dotenv(path: str = ".env") -> None:
                 os.environ[key] = value
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return int(raw)
+
+
+def _listen_port(cli_port: int | None) -> int:
+    """Platform PORT wins over STATBANK_PORT. A --port flag wins over both."""
+    if cli_port is not None:
+        return cli_port
+    platform = os.environ.get("PORT", "").strip()
+    if platform:
+        return int(platform)
+    return int(os.environ.get("STATBANK_PORT", "8080"))
+
+
+def _frame_ancestors() -> str:
+    raw = os.environ.get("STATBANK_FRAME_ANCESTORS", "'self'")
+    cleaned = raw.replace("\r", "").replace("\n", "").strip()
+    return cleaned or "'self'"
+
+
+def _proxy_secret() -> str:
+    raw = os.environ.get("STATBANK_PROXY_SECRET", "")
+    return raw.replace("\r", "").replace("\n", "").strip()
+
+
+def _state_file() -> str:
+    raw = os.environ.get("STATBANK_STATE_FILE", "")
+    return raw.replace("\r", "").replace("\n", "").strip()
+
+
+def _xai_model(cli_model: str | None, *, public: bool) -> str:
+    """Model sent to xAI. STATBANK_XAI_MODEL is the deploy-time choice."""
+    if cli_model:
+        return cli_model
+    chosen = os.environ.get("STATBANK_XAI_MODEL", "").strip()
+    if chosen:
+        return chosen
+    if not public:
+        legacy = os.environ.get("STATBANK_MODEL", "").strip()
+        if legacy:
+            return legacy
+    return DEFAULT_XAI_MODEL
+
+
 def settings_from_env(argv: list[str] | None = None) -> Settings:
     load_dotenv()
     parser = argparse.ArgumentParser(description="Local Statistikbanken web demo")
@@ -1849,40 +1955,74 @@ def settings_from_env(argv: list[str] | None = None) -> Settings:
     parser.add_argument("--host")
     parser.add_argument("--port", type=int)
     args = parser.parse_args(argv)
-    llm = args.llm or os.environ.get("STATBANK_LLM", "ollama")
-    if llm == "xai":
-        base_url = args.base_url or os.environ.get("STATBANK_BASE_URL", XAI_BASE_URL)
-        model = args.model or os.environ.get("STATBANK_MODEL", DEFAULT_XAI_MODEL)
-        api_key = os.environ.get("XAI_API_KEY", "")
+    public = _env_flag("STATBANK_PUBLIC")
+    if public:
+        # Ollama is not available on the public demo. A copied local .env is ignored.
+        llm = "xai"
+        base_url = XAI_BASE_URL
+        model = _xai_model(args.model, public=True)
+        api_key = os.environ.get("XAI_API_KEY", "").strip()
+        daily_default, rate_default, chars_default, tools_default = 40, 3, 300, 6
     else:
-        llm = "ollama"
-        base_url = args.base_url or os.environ.get("STATBANK_BASE_URL", OLLAMA_BASE_URL)
-        model = args.model or os.environ.get("STATBANK_MODEL", DEFAULT_OLLAMA_MODEL)
-        api_key = os.environ.get("STATBANK_API_KEY", "ollama")
+        llm = args.llm or os.environ.get("STATBANK_LLM", "ollama")
+        if llm == "xai":
+            base_url = args.base_url or os.environ.get("STATBANK_BASE_URL", XAI_BASE_URL)
+            model = _xai_model(args.model, public=False)
+            api_key = os.environ.get("XAI_API_KEY", "")
+        else:
+            llm = "ollama"
+            base_url = args.base_url or os.environ.get("STATBANK_BASE_URL", OLLAMA_BASE_URL)
+            model = args.model or os.environ.get("STATBANK_MODEL", DEFAULT_OLLAMA_MODEL)
+            api_key = os.environ.get("STATBANK_API_KEY", "ollama")
+        daily_default, rate_default, chars_default, tools_default = 200, 30, 1000, 8
+    trust_raw = os.environ.get("STATBANK_TRUST_PROXY")
+    if trust_raw is None or trust_raw.strip() == "":
+        trust_proxy = public
+    else:
+        trust_proxy = _env_flag("STATBANK_TRUST_PROXY")
     return Settings(
         llm=llm,
         base_url=base_url,
         model=model,
         api_key=api_key,
         host=args.host or os.environ.get("STATBANK_HOST", "127.0.0.1"),
-        port=args.port or int(os.environ.get("STATBANK_PORT", "8080")),
-        daily_cap=int(os.environ.get("STATBANK_DAILY_CAP", "200")),
-        per_minute=int(os.environ.get("STATBANK_RATE_PER_MINUTE", "30")),
-        max_question_chars=int(os.environ.get("STATBANK_MAX_QUESTION_CHARS", "1000")),
-        max_tool_calls=int(os.environ.get("STATBANK_MAX_TOOL_CALLS", "8")),
+        port=_listen_port(args.port),
+        daily_cap=_env_int("STATBANK_DAILY_CAP", daily_default),
+        per_minute=_env_int("STATBANK_RATE_PER_MINUTE", rate_default),
+        max_question_chars=_env_int("STATBANK_MAX_QUESTION_CHARS", chars_default),
+        max_tool_calls=_env_int("STATBANK_MAX_TOOL_CALLS", tools_default),
         llm_timeout=float(os.environ.get("STATBANK_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT))),
         tool_timeout=float(os.environ.get("STATBANK_TOOL_TIMEOUT", str(DEFAULT_TOOL_TIMEOUT))),
+        public=public,
+        trust_proxy=trust_proxy,
+        proxy_secret=_proxy_secret(),
+        frame_ancestors=_frame_ancestors(),
+        max_tokens=PUBLIC_MAX_TOKENS if llm == "xai" else None,
+        max_concurrent=PUBLIC_MAX_CONCURRENT if public else None,
+        state_file=_state_file(),
     )
 
 
-def server_command(tool_timeout: float | None = None) -> StdioServerParameters:
-    env = dict(os.environ)
+def _is_secret_env(name: str) -> bool:
+    upper = name.upper()
+    if upper in {"XAI_API_KEY", "STATBANK_API_KEY", "STATBANK_PROXY_SECRET"}:
+        return True
+    return upper.endswith(("_API_KEY", "_SECRET", "_TOKEN", "_PASSWORD"))
+
+
+def _child_env(tool_timeout: float | None) -> dict[str, str]:
+    """Environment for the MCP subprocess. Secrets stay in the parent process."""
+    env = {key: value for key, value in os.environ.items() if not _is_secret_env(key)}
     if tool_timeout is not None:
         env["STATBANK_HTTP_TIMEOUT"] = str(tool_timeout)
+    return env
+
+
+def server_command(tool_timeout: float | None = None) -> StdioServerParameters:
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "statistikbanken_mcp"],
-        env=env,
+        env=_child_env(tool_timeout),
     )
 
 
@@ -1930,6 +2070,7 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
             settings.api_key,
             settings.model,
             settings.llm_timeout,
+            max_tokens=settings.max_tokens,
         )
         try:
             async with Client(
@@ -1950,11 +2091,21 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
     return asyncio.run(_run())
 
 
+def check_settings(settings: Settings) -> None:
+    """Refuse a public demo that would start without an xAI key."""
+    if settings.public and not settings.api_key:
+        raise SystemExit(
+            "XAI_API_KEY is missing. Set it in the environment before starting. "
+            "Do not write it into a file."
+        )
+
+
 def serve(settings: Settings, answer: Any | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    limited = Limiter(settings.daily_cap, settings.per_minute)
+    check_settings(settings)
+    limited = Limiter(settings.daily_cap, settings.per_minute, settings.state_file)
     handler = _handler(settings, limited, answer or _default_answer(settings))
     server = ThreadingHTTPServer((settings.host, settings.port), handler)
     url = f"http://{settings.host}:{settings.port}"
@@ -1974,16 +2125,88 @@ def _default_answer(settings: Settings):
     return answer
 
 
+def client_ip(peer: str, headers: Any, *, trust_proxy: bool) -> str:
+    """Visitor address for the per-minute limit. Callers must not log it."""
+    if trust_proxy:
+        forwarded = _forwarded_ip(headers)
+        if forwarded:
+            return forwarded
+    return peer
+
+
+def _forwarded_ip(headers: Any) -> str:
+    cf = headers.get("CF-Connecting-IP")
+    if isinstance(cf, str) and cf.strip():
+        return cf.strip()
+    raw = headers.get("X-Forwarded-For")
+    if not isinstance(raw, str):
+        return ""
+    return raw.split(",", 1)[0].strip()
+
+
+def _page_bytes(settings: Settings) -> bytes:
+    if not settings.public:
+        demo = ""
+    elif settings.daily_cap <= 0:
+        demo = '<p class="demo">Demoen er midlertidigt lukket.</p>'
+    else:
+        demo = (
+            '<p class="demo">Demo: maks. '
+            f"{settings.daily_cap} spørgsmål om dagen i alt. "
+            "Tal fra Danmarks Statistik.</p>"
+        )
+    html = PAGE.replace("__MAX__", str(settings.max_question_chars)).replace("__DEMO__", demo)
+    return html.encode("utf-8")
+
+
+def _security_headers(settings: Settings) -> list[tuple[str, str]]:
+    ancestors = settings.frame_ancestors or "'self'"
+    return [
+        ("Content-Security-Policy", f"frame-ancestors {ancestors}"),
+        ("X-Content-Type-Options", "nosniff"),
+        ("Referrer-Policy", "no-referrer"),
+    ]
+
+
+class _Gate:
+    """How many questions may run at once. A full gate does not queue."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._active = 0
+        self._lock = threading.Lock()
+
+    def try_enter(self) -> bool:
+        with self._lock:
+            if self._active >= self._limit:
+                return False
+            self._active += 1
+            return True
+
+    def leave(self) -> None:
+        with self._lock:
+            self._active -= 1
+
+
 def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTPRequestHandler]:
+    gate = _Gate(settings.max_concurrent) if settings.max_concurrent else None
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] != "/":
-                self._send(404, b"Not found", "text/plain; charset=utf-8")
+            path = self.path.split("?", 1)[0]
+            if path == "/healthz":
+                self._send(200, b"ok\n", "text/plain; charset=utf-8")
                 return
-            page = PAGE.replace("__MAX__", str(settings.max_question_chars))
-            self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            if not self._proxy_ok():
+                return
+            if path != "/":
+                self._send(404, b"Not found\n", "text/plain; charset=utf-8")
+                return
+            self._send(200, _page_bytes(settings), "text/html; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
+            if not self._proxy_ok():
+                return
             path = self.path.split("?", 1)[0]
             length = int(self.headers.get("Content-Length", "0") or 0)
             limit = EXPORT_MAX_BYTES if path == "/api/export" else MAX_BODY_BYTES
@@ -2009,10 +2232,31 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             if len(question) > settings.max_question_chars:
                 self._json(400, {"error": "Spørgsmålet er for langt."})
                 return
-            ip = self.client_address[0]
+            if settings.daily_cap <= 0:
+                self._json(503, {"error": _LIMIT_TEXT["stopped"]})
+                return
+            held = False
+            if gate is not None:
+                if not gate.try_enter():
+                    self._json(503, {"error": _BUSY_TEXT})
+                    return
+                held = True
+            try:
+                self._answer(question)
+            finally:
+                if held and gate is not None:
+                    gate.leave()
+
+        def _answer(self, question: str) -> None:
+            ip = client_ip(
+                self.client_address[0],
+                self.headers,
+                trust_proxy=settings.trust_proxy,
+            )
             limited = limiter.allow(ip)
             if limited:
-                self._json(429, {"error": _LIMIT_TEXT[limited]})
+                status = 503 if limited == "stopped" else 429
+                self._json(status, {"error": _LIMIT_TEXT[limited]})
                 return
             try:
                 result = answer(question)
@@ -2037,6 +2281,16 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                     "show_numbers": result.show_numbers,
                 },
             )
+
+        def _proxy_ok(self) -> bool:
+            secret = settings.proxy_secret
+            if not secret:
+                return True
+            provided = self.headers.get("X-Proxy-Secret", "")
+            if hmac.compare_digest(provided.encode(), secret.encode()):
+                return True
+            self._send(403, b"Forbidden\n", "text/plain; charset=utf-8")
+            return False
 
         def _export(self, raw: bytes) -> None:
             """Turn already-fetched facts into a file. No model call, no new data call."""
@@ -2071,12 +2325,16 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            for name, value in _security_headers(settings):
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
+        def address_string(self) -> str:  # noqa: N802
+            return "-"
+
         def log_message(self, fmt: str, *args: Any) -> None:
-            message = fmt % args  # noqa: UP031
-            sys.stderr.write(f"{self.address_string()} - {message}\n")
+            sys.stderr.write(f"{fmt % args}\n")  # noqa: UP031
 
     return Handler
 
