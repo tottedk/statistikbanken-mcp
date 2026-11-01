@@ -98,6 +98,19 @@ def test_api_rejects_a_bad_sum_expression(calls: list[dict[str, object]]) -> Non
     assert data_calls
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "gennemsnitlig indkomst før skat",
+        "indkomst i alt før skat",
+        "gennemsnitsindkomst før skat",
+    ],
+)
+def test_pre_tax_income_search_ranks_indkp105(query: str) -> None:
+    ids = [hit["id"] for hit in find_tabel(query, limit=3)]
+    assert "INDKP105" in ids
+
+
 def test_search_partial_synonym_and_place_names() -> None:
     befolkning = [hit["id"] for hit in find_tabel("befolkning kommune", limit=5)]
     assert "FOLK1A" in befolkning
