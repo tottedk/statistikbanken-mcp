@@ -125,7 +125,11 @@ A number in the answer must come from the question, the fetched data, a period o
 
 ```bash
 docker build -t statistikbanken-web .
-docker run --rm -p 8080:8080 -e STATBANK_PUBLIC=1 -e XAI_API_KEY statistikbanken-web
+docker run --rm -p 8080:8080 \
+  -e STATBANK_PUBLIC=1 \
+  -e STATBANK_XAI_MODEL=grok-4 \
+  -e XAI_API_KEY \
+  statistikbanken-web
 ```
 
 The image is Python 3.12. It listens on `STATBANK_HOST` (the image sets `0.0.0.0`) and on `PORT` when that is set, otherwise `STATBANK_PORT` (8080). `GET /healthz` returns 200 and does not call the model or Statistikbanken.
