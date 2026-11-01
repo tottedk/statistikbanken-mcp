@@ -1,8 +1,8 @@
 """Offline tests replay recorded Statistikbanken responses.
 
 The files in tests/fixtures/ are unmodified JSON bodies from
-https://api.statbank.dk/v1, captured on 2026-10-31. They are pretty-printed
-only so they can be read; the objects are the API's.
+https://api.statbank.dk/v1, captured on 2026-10-31 and 2026-11-01. They are
+pretty-printed only so they can be read; the objects are the API's.
 """
 
 from __future__ import annotations
@@ -82,19 +82,19 @@ def _data_response(body: dict[str, object]) -> httpx.Response:
     alder = (variables.get("ALDER") or [""])[0]
     areas = variables.get("OMRÅDE") or []
     tid = variables.get("Tid") or []
-    if isinstance(alder, str) and alder.startswith("sum(0-17") and areas == ["230", "223"]:
+    if isinstance(alder, str) and alder.startswith("sum(0-17") and areas == ["561", "791"]:
         return _response(200, "data_children_0_17.json")
     if isinstance(alder, str) and "99999" in alder:
         return _response(400, "data_bad_sum.json")
     if isinstance(alder, str) and alder.startswith("sum(80+"):
-        if areas == ["230", "223", "157"]:
+        if areas == ["561", "791", "157"]:
             return _response(200, "data_three_municipalities_80plus.json")
-        if areas == ["230"]:
-            return _response(200, "data_rudersdal_80plus.json")
+        if areas == ["561"]:
+            return _response(200, "data_esbjerg_80plus.json")
     if tid and str(tid[0]).startswith(">="):
-        return _response(200, "data_rudersdal_10y.json")
-    if areas == ["230"] and alder == "IALT" and "Tid" not in variables:
-        return _response(200, "data_rudersdal_total_latest.json")
+        return _response(200, "data_viborg_10y.json")
+    if areas == ["561"] and alder == "IALT" and "Tid" not in variables:
+        return _response(200, "data_esbjerg_total_latest.json")
     if areas == ["740"]:
         return _response(200, "data_silkeborg.json")
     if areas == ["101"]:

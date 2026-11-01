@@ -33,33 +33,37 @@ def test_search_and_metadata(live_client: StatbankClient) -> None:
     assert variables["ALDER"]["numeric_codes"]["from"] == "0"
     assert int(variables["ALDER"]["numeric_codes"]["to"]) >= 100
     areas = {item["id"]: item["text"] for item in variables["OMRÅDE"]["values"]}
-    assert areas["230"] == "Rudersdal"
-    assert areas["223"] == "Hørsholm"
     assert areas["157"] == "Gentofte"
+    filtered = tabelinfo("FOLK1A", values_filter="Esbjerg, Viborg")
+    named = {
+        item["id"]: item["text"]
+        for item in next(item for item in filtered["variables"] if item["id"] == "OMRÅDE")["values"]
+    }
+    assert named == {"561": "Esbjerg", "791": "Viborg"}
 
 
 def test_ambiguous_time_sum_is_rejected_live(live_client: StatbankClient) -> None:
     with pytest.raises(ToolError, match="not every period") as caught:
         hent_data(
             "FOLK1A",
-            values={"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+            values={"ALDER": [">=80"], "OMRÅDE": ["Esbjerg", "Viborg"]},
             sum_range={"Tid": ["2015K1", "2026K3"]},
         )
     message = str(caught.value)
     assert ">=2015K1" in message
-    assert "13078" not in message
+    assert "22780" not in message
     assert "Traceback" not in message
 
 
 def test_equivalent_age_sum_is_one_number_live(live_client: StatbankClient) -> None:
     result = hent_data(
         "FOLK1A",
-        values={"OMRÅDE": ["Rudersdal"], "ALDER": [">=80"], "Tid": ["(1)"]},
+        values={"OMRÅDE": ["Esbjerg"], "ALDER": [">=80"], "Tid": ["(1)"]},
         sum_from={"ALDER": "80"},
     )
     assert len(result["rows"]) == 1
     row = result["rows"][0]
-    assert row["OMRÅDE"] == "Rudersdal"
+    assert row["OMRÅDE"] == "Esbjerg"
     assert row["ALDER"] == "80+"
     assert isinstance(row["value"], int)
     assert 1000 < row["value"] < 20000
@@ -71,7 +75,7 @@ def test_open_ended_age_returns_the_80_plus_series(live_client: StatbankClient) 
         result = hent_data(
             "FOLK1A",
             values={
-                "OMRÅDE": ["Rudersdal", "Hørsholm"],
+                "OMRÅDE": ["Esbjerg", "Viborg"],
                 "ALDER": [phrase],
                 "Tid": [">=2015K1"],
             },
@@ -79,14 +83,14 @@ def test_open_ended_age_returns_the_80_plus_series(live_client: StatbankClient) 
         by_place = {}
         for row in result["rows"]:
             by_place.setdefault(row["OMRÅDE"], []).append(row)
-        assert set(by_place) == {"Rudersdal", "Hørsholm"}, phrase
-        rudersdal = by_place["Rudersdal"]
-        horsholm = by_place["Hørsholm"]
-        assert rudersdal[0]["Tid"] == "2015K1", phrase
-        assert rudersdal[0]["ALDER"] == "80+", phrase
-        assert rudersdal[0]["value"] > 2000, phrase
-        assert rudersdal[-1]["value"] > 2000, phrase
-        assert horsholm[0]["value"] > 1000, phrase
+        assert set(by_place) == {"Esbjerg", "Viborg"}, phrase
+        esbjerg = by_place["Esbjerg"]
+        viborg = by_place["Viborg"]
+        assert esbjerg[0]["Tid"] == "2015K1", phrase
+        assert esbjerg[0]["ALDER"] == "80+", phrase
+        assert esbjerg[0]["value"] > 2000, phrase
+        assert esbjerg[-1]["value"] > 2000, phrase
+        assert viborg[0]["value"] > 1000, phrase
         assert any("sum_from" in note for note in result["notes"]), phrase
 
 
@@ -97,7 +101,7 @@ def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230"],
+            "OMRÅDE": ["561"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": ["(1)"],
@@ -106,7 +110,7 @@ def test_question_over_80_is_one_number(live_client: StatbankClient) -> None:
     )
     assert len(result["rows"]) == 1
     row = result["rows"][0]
-    assert row["OMRÅDE"] == "Rudersdal"
+    assert row["OMRÅDE"] == "Esbjerg"
     assert row["ALDER"] == "80+"
     assert row["Tid"] == latest
     assert isinstance(row["value"], int)
@@ -120,7 +124,7 @@ def test_question_ten_year_series(live_client: StatbankClient) -> None:
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230"],
+            "OMRÅDE": ["791"],
             "KØN": ["TOT"],
             "ALDER": ["IALT"],
             "CIVILSTAND": ["TOT"],
@@ -131,7 +135,7 @@ def test_question_ten_year_series(live_client: StatbankClient) -> None:
     assert rows[0]["Tid"] == "2016K3"
     assert rows[-1]["Tid"] == latest
     assert len(rows) >= 41
-    assert all(row["OMRÅDE"] == "Rudersdal" for row in rows)
+    assert all(row["OMRÅDE"] == "Viborg" for row in rows)
     assert all(row["ALDER"] == "Alder i alt" for row in rows)
     assert all(isinstance(row["value"], int) and row["value"] > 10000 for row in rows)
     years = {row["Tid"][:4] for row in rows if row["Tid"].endswith("K3")}
@@ -143,7 +147,7 @@ def test_question_three_municipalities(live_client: StatbankClient) -> None:
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230", "223", "157"],
+            "OMRÅDE": ["561", "791", "157"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": ["(1)"],
@@ -151,7 +155,7 @@ def test_question_three_municipalities(live_client: StatbankClient) -> None:
         sum_from={"ALDER": "80"},
     )
     by_name = {row["OMRÅDE"]: row["value"] for row in result["rows"]}
-    assert set(by_name) == {"Rudersdal", "Hørsholm", "Gentofte"}
+    assert set(by_name) == {"Esbjerg", "Viborg", "Gentofte"}
     assert all(row["ALDER"] == "80+" for row in result["rows"])
     assert all(isinstance(value, int) and 500 < value < 20000 for value in by_name.values())
     winner = max(by_name, key=by_name.get)
@@ -162,7 +166,7 @@ def test_question_children_0_to_17(live_client: StatbankClient) -> None:
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230", "223"],
+            "OMRÅDE": ["561", "791"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": ["(1)"],
@@ -172,10 +176,10 @@ def test_question_children_0_to_17(live_client: StatbankClient) -> None:
     assert result["periods"]
     assert len(result["rows"]) == 2
     by_name = {row["OMRÅDE"]: row["value"] for row in result["rows"]}
-    assert set(by_name) == {"Rudersdal", "Hørsholm"}
+    assert set(by_name) == {"Esbjerg", "Viborg"}
     assert all(row["ALDER"] == "0-17" for row in result["rows"])
-    assert all(isinstance(value, int) and 1000 < value < 20000 for value in by_name.values())
-    assert by_name["Rudersdal"] > by_name["Hørsholm"]
+    assert all(isinstance(value, int) and 1000 < value < 50000 for value in by_name.values())
+    assert by_name["Esbjerg"] > by_name["Viborg"]
 
 
 def test_question_average_income(live_client: StatbankClient) -> None:
@@ -184,7 +188,7 @@ def test_question_average_income(live_client: StatbankClient) -> None:
     result = hent_data(
         "INDKP105",
         values={
-            "OMRÅDE": ["230", "223"],
+            "OMRÅDE": ["561", "791"],
             "ENHED": ["118"],
             "KOEN": ["MOK"],
             "ALDER1": ["00"],
@@ -196,7 +200,7 @@ def test_question_average_income(live_client: StatbankClient) -> None:
     assert result["unit"] == "-"
     assert result["periods"] == ["2025"]
     by_name = {row["OMRÅDE"]: row for row in result["rows"]}
-    assert set(by_name) == {"Rudersdal", "Hørsholm"}
+    assert set(by_name) == {"Esbjerg", "Viborg"}
     for row in by_name.values():
         assert row["ENHED"] == "Gennemsnit for personer i gruppen (kr.)"
         assert isinstance(row["value"], int)
@@ -214,7 +218,7 @@ def test_question_association_membership_is_sports_clubs(live_client: StatbankCl
     result = hent_data(
         "IDRFOR01",
         values={
-            "BLSTKOM": ["230"],
+            "BLSTKOM": ["561"],
             "ORGANISATION": ["100"],
             "AKTP": ["104", "105"],
             "Tid": ["(1)"],
@@ -228,7 +232,7 @@ def test_question_association_membership_is_sports_clubs(live_client: StatbankCl
     assert set(by_measure) == {"Foreninger", "Medlemmer"}
     assert isinstance(by_measure["Foreninger"], int) and by_measure["Foreninger"] < 500
     assert isinstance(by_measure["Medlemmer"], int) and by_measure["Medlemmer"] > 1000
-    assert all(row["BLSTKOM"] == "Rudersdal" for row in result["rows"])
+    assert all(row["BLSTKOM"] == "Esbjerg" for row in result["rows"])
 
 
 def test_live_invalid_input_is_actionable(live_client: StatbankClient) -> None:
@@ -271,12 +275,12 @@ async def _stdio_session() -> None:
             "hent_data",
             {
                 "table": "FOLK1A",
-                "values": {"OMRÅDE": ["230"], "ALDER": ["IALT"], "Tid": ["(1)"]},
+                "values": {"OMRÅDE": ["561"], "ALDER": ["IALT"], "Tid": ["(1)"]},
             },
         )
         assert data.is_error is False
         text = _text(data)
-        assert "Rudersdal" in text
+        assert "Esbjerg" in text
         assert "Alder i alt" in text
 
         bad = await client.call_tool(

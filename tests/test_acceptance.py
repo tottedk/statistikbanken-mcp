@@ -3,8 +3,8 @@
 Population figures are the FOLK1A release of 2026-08-10 (latest period 2026K3).
 Income is INDKP105 for 2025, updated 2026-10-02. Sports clubs are IDRFOR01 for 2025.
 The same figures were checked against the live API on 2026-11-01, including
-Hørsholm in IDRFOR01 (37 clubs, 15784 memberships), which is not in the
-Rudersdal recording below.
+Viborg in IDRFOR01 (208 clubs, 49821 memberships), which is not in the
+Esbjerg recording below.
 """
 
 from statistikbanken_mcp.server import find_tabel, hent_data, tabelinfo
@@ -13,44 +13,44 @@ from statistikbanken_mcp.server import find_tabel, hent_data, tabelinfo
 # question a person actually asks, with the figure that question should return.
 ACCEPTANCE_QUESTIONS: tuple[tuple[str, str], ...] = (
     (
-        "Hvor mange over 80 bor i Rudersdal?",
-        "FOLK1A 2026K3: 5045",
+        "Hvor mange over 80 bor i Esbjerg?",
+        "FOLK1A 2026K3: 7556",
     ),
     (
-        "Hvordan har befolkningstallet i Rudersdal udviklet sig de seneste 10 år?",
-        "FOLK1A: 55915 i 2016K3, 58381 i 2026K3",
+        "Hvordan har befolkningstallet i Viborg udviklet sig de seneste 10 år?",
+        "FOLK1A: 96166 i 2016K3, 98104 i 2026K3",
     ),
     (
-        "Hvor mange over 80 bor i Gentofte, Rudersdal og Hørsholm?",
-        "FOLK1A 2026K3: Gentofte 5486, Rudersdal 5045, Hørsholm 2790",
+        "Hvor mange over 80 bor i Gentofte, Esbjerg og Viborg?",
+        "FOLK1A 2026K3: Gentofte 5486, Esbjerg 7556, Viborg 6420",
     ),
     (
-        "Hvor mange foreningsmedlemmer er der i Rudersdal?",
-        "IDRFOR01 2025: Rudersdal 83 foreninger og 29632 medlemmer; Hørsholm 37 og 15784",
+        "Hvor mange foreningsmedlemmer er der i Esbjerg?",
+        "IDRFOR01 2025: Esbjerg 212 foreninger og 54205 medlemmer; Viborg 208 og 49821",
     ),
     (
-        "Hvor mange børn mellem 0 og 17 år bor i Rudersdal og Hørsholm?",
-        "FOLK1A 2026K3: Rudersdal 12770, Hørsholm 4916",
+        "Hvor mange børn mellem 0 og 17 år bor i Esbjerg og Viborg?",
+        "FOLK1A 2026K3: Esbjerg 21616, Viborg 19171",
     ),
     (
-        "Hvad er den gennemsnitlige indkomst i alt før skat i Rudersdal og Hørsholm?",
-        "INDKP105 2025: Rudersdal 757969, Hørsholm 679635",
+        "Hvad er den gennemsnitlige indkomst i alt før skat i Esbjerg og Viborg?",
+        "INDKP105 2025: Esbjerg 407775, Viborg 402605",
     ),
 )
 
-# Same quarter, ten years apart, plus the quarters in between. 2023K3 dips.
-RUDERSDAL_K3 = {
-    "2016K3": 55915,
-    "2017K3": 56060,
-    "2018K3": 56134,
-    "2019K3": 56556,
-    "2020K3": 56623,
-    "2021K3": 57195,
-    "2022K3": 57424,
-    "2023K3": 57055,
-    "2024K3": 57308,
-    "2025K3": 57386,
-    "2026K3": 58381,
+# Same quarter, ten years apart, plus the quarters in between. 2020K3 dips.
+VIBORG_K3 = {
+    "2016K3": 96166,
+    "2017K3": 96884,
+    "2018K3": 97061,
+    "2019K3": 97245,
+    "2020K3": 96706,
+    "2021K3": 96696,
+    "2022K3": 97455,
+    "2023K3": 97564,
+    "2024K3": 97659,
+    "2025K3": 97867,
+    "2026K3": 98104,
 }
 
 
@@ -62,12 +62,12 @@ def _folk1a() -> None:
     assert ages["numeric_codes"] == {"from": "0", "to": "125"}
 
 
-def test_over_80_in_rudersdal(calls: list[dict[str, object]]) -> None:
+def test_over_80_in_esbjerg(calls: list[dict[str, object]]) -> None:
     _folk1a()
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230"],
+            "OMRÅDE": ["561"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": ["(1)"],
@@ -77,12 +77,12 @@ def test_over_80_in_rudersdal(calls: list[dict[str, object]]) -> None:
     assert result["unit"] == "Antal"
     assert result["rows"] == [
         {
-            "OMRÅDE": "Rudersdal",
+            "OMRÅDE": "Esbjerg",
             "KØN": "I alt",
             "ALDER": "80+",
             "CIVILSTAND": "I alt",
             "Tid": "2026K3",
-            "value": 5045,
+            "value": 7556,
         }
     ]
     sent = _data_body(calls)
@@ -93,12 +93,12 @@ def test_over_80_in_rudersdal(calls: list[dict[str, object]]) -> None:
     assert ">=" not in alder[0]
 
 
-def test_rudersdal_population_over_ten_years() -> None:
+def test_viborg_population_over_ten_years() -> None:
     _folk1a()
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230"],
+            "OMRÅDE": ["791"],
             "KØN": ["TOT"],
             "ALDER": ["IALT"],
             "CIVILSTAND": ["TOT"],
@@ -109,13 +109,13 @@ def test_rudersdal_population_over_ten_years() -> None:
     assert rows[0]["Tid"] == "2016K3"
     assert rows[-1]["Tid"] == "2026K3"
     assert len(rows) == 41
-    assert all(row["OMRÅDE"] == "Rudersdal" for row in rows)
+    assert all(row["OMRÅDE"] == "Viborg" for row in rows)
     assert all(row["ALDER"] == "Alder i alt" for row in rows)
     by_period = {row["Tid"]: row["value"] for row in rows}
-    for period, value in RUDERSDAL_K3.items():
+    for period, value in VIBORG_K3.items():
         assert by_period[period] == value
-    assert by_period["2026K3"] - by_period["2016K3"] == 2466
-    assert by_period["2023K3"] < by_period["2022K3"]
+    assert by_period["2026K3"] - by_period["2016K3"] == 1938
+    assert by_period["2020K3"] < by_period["2019K3"]
 
 
 def test_which_municipality_has_the_most_people_over_80() -> None:
@@ -123,7 +123,7 @@ def test_which_municipality_has_the_most_people_over_80() -> None:
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230", "223", "157"],
+            "OMRÅDE": ["561", "791", "157"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": ["(1)"],
@@ -133,16 +133,16 @@ def test_which_municipality_has_the_most_people_over_80() -> None:
     assert len(result["rows"]) == 3
     assert all(row["ALDER"] == "80+" and row["Tid"] == "2026K3" for row in result["rows"])
     by_name = {row["OMRÅDE"]: row["value"] for row in result["rows"]}
-    assert by_name == {"Rudersdal": 5045, "Hørsholm": 2790, "Gentofte": 5486}
-    assert max(by_name, key=by_name.get) == "Gentofte"
+    assert by_name == {"Esbjerg": 7556, "Viborg": 6420, "Gentofte": 5486}
+    assert max(by_name, key=by_name.get) == "Esbjerg"
 
 
-def test_children_0_to_17_in_rudersdal_and_horsholm(calls: list[dict[str, object]]) -> None:
+def test_children_0_to_17_in_esbjerg_and_viborg(calls: list[dict[str, object]]) -> None:
     _folk1a()
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["230", "223"],
+            "OMRÅDE": ["561", "791"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": ["2026K3"],
@@ -153,20 +153,20 @@ def test_children_0_to_17_in_rudersdal_and_horsholm(calls: list[dict[str, object
     assert result["periods"] == ["2026K3"]
     assert result["rows"] == [
         {
-            "OMRÅDE": "Rudersdal",
+            "OMRÅDE": "Esbjerg",
             "KØN": "I alt",
             "ALDER": "0-17",
             "CIVILSTAND": "I alt",
             "Tid": "2026K3",
-            "value": 12770,
+            "value": 21616,
         },
         {
-            "OMRÅDE": "Hørsholm",
+            "OMRÅDE": "Viborg",
             "KØN": "I alt",
             "ALDER": "0-17",
             "CIVILSTAND": "I alt",
             "Tid": "2026K3",
-            "value": 4916,
+            "value": 19171,
         },
     ]
     alder = _values(_data_body(calls), "ALDER")
@@ -175,7 +175,7 @@ def test_children_0_to_17_in_rudersdal_and_horsholm(calls: list[dict[str, object
     assert alder[0].endswith(";17)")
 
 
-def test_average_income_in_rudersdal_and_horsholm() -> None:
+def test_average_income_in_esbjerg_and_viborg() -> None:
     question = ACCEPTANCE_QUESTIONS[5][0]
     assert question.startswith("Hvad er den gennemsnitlige indkomst")
     ids = [hit["id"] for hit in find_tabel(question, limit=3)]
@@ -192,7 +192,7 @@ def test_average_income_in_rudersdal_and_horsholm() -> None:
     result = hent_data(
         "INDKP105",
         values={
-            "OMRÅDE": ["230", "223"],
+            "OMRÅDE": ["561", "791"],
             "ENHED": ["118"],
             "KOEN": ["MOK"],
             "ALDER1": ["00"],
@@ -204,12 +204,12 @@ def test_average_income_in_rudersdal_and_horsholm() -> None:
     assert result["unit"] == "-"
     assert result["periods"] == ["2025"]
     by_name = {row["OMRÅDE"]: row for row in result["rows"]}
-    assert set(by_name) == {"Rudersdal", "Hørsholm"}
+    assert set(by_name) == {"Esbjerg", "Viborg"}
     for row in result["rows"]:
         assert row["ENHED"] == "Gennemsnit for personer i gruppen (kr.)"
         assert row["Tid"] == "2025"
-    assert by_name["Rudersdal"]["value"] == 757969
-    assert by_name["Hørsholm"]["value"] == 679635
+    assert by_name["Esbjerg"]["value"] == 407775
+    assert by_name["Viborg"]["value"] == 402605
 
 
 def test_association_membership_nearest_table_is_sports_clubs() -> None:
@@ -228,7 +228,7 @@ def test_association_membership_nearest_table_is_sports_clubs() -> None:
     result = hent_data(
         "IDRFOR01",
         values={
-            "BLSTKOM": ["230"],
+            "BLSTKOM": ["561"],
             "ORGANISATION": ["100"],
             "AKTP": ["104", "105"],
             "Tid": ["2025"],
@@ -239,8 +239,8 @@ def test_association_membership_nearest_table_is_sports_clubs() -> None:
     assert result["unit"] == "Antal"
     assert result["periods"] == ["2025"]
     by_measure = {row["AKTP"]: row["value"] for row in result["rows"]}
-    assert by_measure == {"Foreninger": 83, "Medlemmer": 29632}
-    assert all(row["BLSTKOM"] == "Rudersdal" and row["Tid"] == "2025" for row in result["rows"])
+    assert by_measure == {"Foreninger": 212, "Medlemmer": 54205}
+    assert all(row["BLSTKOM"] == "Esbjerg" and row["Tid"] == "2025" for row in result["rows"])
 
 
 def _data_body(calls: list[dict[str, object]]) -> dict[str, object]:

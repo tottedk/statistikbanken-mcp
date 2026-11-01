@@ -5,10 +5,10 @@
         "label": "område",
         "category": {
           "index": {
-            "230": 0
+            "561": 0
           },
           "label": {
-            "230": "Rudersdal"
+            "561": "Esbjerg"
           }
         }
       },
@@ -79,7 +79,7 @@
     "source": "Danmarks Statistik",
     "updated": "2026-08-10T06:00:00Z",
     "value": [
-      58381
+      114824
     ],
     "extension": {
       "px": {

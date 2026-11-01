@@ -5,13 +5,13 @@
         "label": "område",
         "category": {
           "index": {
-            "230": 0,
-            "223": 1,
+            "561": 0,
+            "791": 1,
             "157": 2
           },
           "label": {
-            "230": "Rudersdal",
-            "223": "Hørsholm",
+            "561": "Esbjerg",
+            "791": "Viborg",
             "157": "Gentofte"
           }
         }
@@ -109,8 +109,8 @@
     "source": "Danmarks Statistik",
     "updated": "2026-08-10T06:00:00Z",
     "value": [
-      5045,
-      2790,
+      7556,
+      6420,
       5486
     ],
     "extension": {

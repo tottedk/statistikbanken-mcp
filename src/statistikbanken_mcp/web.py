@@ -148,7 +148,7 @@ PAGE = """<!DOCTYPE html>
   <form>
     <label for="question">Dit spørgsmål</label>
     <textarea id="question" name="question" maxlength="__MAX__" required
-      placeholder="Hvor mange over 80 bor i Rudersdal?"></textarea>
+      placeholder="Hvor mange over 80 bor i Esbjerg?"></textarea>
     <button type="submit">Spørg</button>
   </form>
   <div id="out"></div>
@@ -850,7 +850,7 @@ def _period_phrases(code: str) -> list[str]:
 
 
 def display_label(detail: str, table: str = "") -> str:
-    """'Rudersdal, 80+' rather than 'OMRÅDE: Rudersdal, KØN: I alt, ALDER: 80+'."""
+    """'Esbjerg, 80+' rather than 'OMRÅDE: Esbjerg, KØN: I alt, ALDER: 80+'."""
     if not detail:
         return table
     values = []
@@ -1032,7 +1032,7 @@ _EXPORT_HEADER = ["tabel", "periode", "dimensioner", "værdi", "enhed"]
 
 
 def _dimension_label(fact: dict[str, Any]) -> str:
-    """Same text as the table column: 'Rudersdal, 80+', not 'OMRÅDE: Rudersdal, ALDER: 80+'."""
+    """Same text as the table column: 'Esbjerg, 80+', not 'OMRÅDE: Esbjerg, ALDER: 80+'."""
     return display_label(str(fact.get("detail") or ""), str(fact.get("table") or ""))
 
 

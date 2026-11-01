@@ -5,12 +5,12 @@
         "label": "område",
         "category": {
           "index": {
-            "230": 0,
-            "223": 1
+            "561": 0,
+            "791": 1
           },
           "label": {
-            "230": "Rudersdal",
-            "223": "Hørsholm"
+            "561": "Esbjerg",
+            "791": "Viborg"
           }
         }
       },
@@ -107,8 +107,8 @@
     "source": "Danmarks Statistik",
     "updated": "2026-08-10T06:00:00Z",
     "value": [
-      12770,
-      4916
+      21616,
+      19171
     ],
     "extension": {
       "px": {

@@ -40,7 +40,7 @@ async def _session() -> None:
             {
                 "table": "FOLK1A",
                 "values": {
-                    "OMRÅDE": ["230"],
+                    "OMRÅDE": ["561"],
                     "KØN": ["TOT"],
                     "CIVILSTAND": ["TOT"],
                     "Tid": ["(1)"],
@@ -51,7 +51,7 @@ async def _session() -> None:
         assert not data.is_error
         payload = _payload(data)
         assert isinstance(payload, dict)
-        assert payload["rows"][0]["value"] == 5045
+        assert payload["rows"][0]["value"] == 7556
         assert payload["rows"][0]["ALDER"] == "80+"
 
         children = await client.call_tool(
@@ -59,7 +59,7 @@ async def _session() -> None:
             {
                 "table": "FOLK1A",
                 "values": {
-                    "OMRÅDE": ["230", "223"],
+                    "OMRÅDE": ["561", "791"],
                     "KØN": ["TOT"],
                     "CIVILSTAND": ["TOT"],
                     "Tid": ["2026K3"],
@@ -70,7 +70,7 @@ async def _session() -> None:
         assert not children.is_error
         child_payload = _payload(children)
         assert isinstance(child_payload, dict)
-        assert [row["value"] for row in child_payload["rows"]] == [12770, 4916]
+        assert [row["value"] for row in child_payload["rows"]] == [21616, 19171]
         assert child_payload["rows"][0]["ALDER"] == "0-17"
         assert child_payload["periods"] == ["2026K3"]
 

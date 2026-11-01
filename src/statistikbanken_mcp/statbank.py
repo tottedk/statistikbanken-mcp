@@ -652,12 +652,12 @@ def _sum_argument_help(kind: str) -> str:
     if kind == "sum_range":
         return (
             "sum_range is an argument beside values, not a key inside values. "
-            'Call hent_data with values {"OMRÅDE": ["230"]} and '
+            'Call hent_data with values {"OMRÅDE": ["561"]} and '
             'sum_range {"ALDER": ["0", "17"]}.'
         )
     return (
         "sum_from is an argument beside values, not a key inside values. "
-        'Call hent_data with values {"OMRÅDE": ["230"]} and sum_from {"ALDER": "80"}.'
+        'Call hent_data with values {"OMRÅDE": ["561"]} and sum_from {"ALDER": "80"}.'
     )
 
 

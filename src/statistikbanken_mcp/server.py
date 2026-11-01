@@ -107,7 +107,7 @@ def tabelinfo(
     count) rather than every period. Other value lists are capped; value_count
     is the full size and values_truncated means the list was cut. Pass
     values_filter to search codes and labels. Several words, separated by a
-    comma or a space, match any of them (for example "Rudersdal, Hørsholm").
+    comma or a space, match any of them (for example "Esbjerg, Viborg").
     A variable with no match keeps its normal list and says so. `total`, when
     present, is the code used if that required variable is omitted in hent_data.
     eliminable means the variable can be left out. A time variable also accepts
@@ -133,8 +133,8 @@ def hent_data(
 
     `values` maps a variable id to codes or labels, matched without case
     sensitivity ("Silkeborg", "København", "kobenhavn"). Each entry may be a
-    list, one code ("230"), or several codes separated by a comma
-    ("Rudersdal, Hørsholm"). On an age variable, "80+", ">=80", "80-" and
+    list, one code ("561"), or several codes separated by a comma
+    ("Esbjerg, Viborg"). On an age variable, "80+", ">=80", "80-" and
     "80 og derover" are the sum from that age upward, and "0-17" is the
     closed range. The result notes the substitution. An unknown value names
     the closest labels and,

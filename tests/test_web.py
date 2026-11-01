@@ -98,7 +98,7 @@ def test_turn_cites_table_period_and_records_calls() -> None:
         "periods": ["2026K3"],
         "rows": [
             {
-                "OMRÅDE": "Rudersdal",
+                "OMRÅDE": "Esbjerg",
                 "ALDER": "80+",
                 "Tid": "2026K3",
                 "value": 5045,
@@ -115,11 +115,11 @@ def test_turn_cites_table_period_and_records_calls() -> None:
         [
             ChatReply("", [_call("find_tabel", {"query": "befolkning"}, "c1")]),
             ChatReply("", [_call("hent_data", {"table": "FOLK1A"}, "c2")]),
-            ChatReply("Der bor 5.045 personer på 80 år eller derover i Rudersdal i 2026K3.", []),
+            ChatReply("Der bor 5.045 personer på 80 år eller derover i Esbjerg i 2026K3.", []),
         ]
     )
     result = asyncio.run(
-        run_turn(model, tools, "Hvor mange over 80 bor i Rudersdal?", max_tool_calls=8)
+        run_turn(model, tools, "Hvor mange over 80 bor i Esbjerg?", max_tool_calls=8)
     )
     assert "5.045" in result.answer
     assert [call["name"] for call in result.calls] == ["find_tabel", "hent_data"]
@@ -129,7 +129,7 @@ def test_turn_cites_table_period_and_records_calls() -> None:
             "period": "2026K3",
             "unit": "Antal",
             "value": 5045,
-            "detail": "OMRÅDE: Rudersdal, ALDER: 80+",
+            "detail": "OMRÅDE: Esbjerg, ALDER: 80+",
             "title": "",
             "unpublished": False,
             "url": "https://www.statistikbanken.dk/FOLK1A",
@@ -177,14 +177,14 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "Do not compute a difference" in SYSTEM_PROMPT
     assert "Refer to areas and categories by name, not by code." in SYSTEM_PROMPT
     assert "Do not open with the table id or the table title." in SYSTEM_PROMPT
-    single = _closing_instruction("Hvor mange over 80 bor i Rudersdal?")
+    single = _closing_instruction("Hvor mange over 80 bor i Esbjerg?")
     assert "Do not open with the table id or the table title." in single
     assert "2015 1. kvt." in single
     assert "Danish" in single
     assert "latest period" in single
     assert "do not invent" in single.casefold()
     trend = _closing_instruction(
-        "Hvordan har antallet af 80+ i Rudersdal og Hørsholm udviklet sig siden 2015?"
+        "Hvordan har antallet af 80+ i Esbjerg og Viborg udviklet sig siden 2015?"
     )
     assert "change over time" in trend
     assert "Danish" in trend
@@ -194,26 +194,26 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
 # after hent_data failed and the page showed them with an empty fact list.
 _HALLUCINATED = {
     "a1": (
-        "Data for Rudersdal og Hørsholm er summen af alle personer 80 år og over.\n"
-        '{"Tid": "2026K3", "OMRÅDE": "230", "ALDER": "80+", "value": 1234},\n'
-        '{"Tid": "2026K3", "OMRÅDE": "223", "ALDER": "80+", "value": 567}'
+        "Data for Esbjerg og Viborg er summen af alle personer 80 år og over.\n"
+        '{"Tid": "2026K3", "OMRÅDE": "561", "ALDER": "80+", "value": 1234},\n'
+        '{"Tid": "2026K3", "OMRÅDE": "791", "ALDER": "80+", "value": 567}'
     ),
     "a2": (
         "Jeg har hentet data for alle kvartaler siden 2015. "
-        "For Rudersdal starter antallet på 120 i 2015 og stiger til 345 i 2026, "
-        "mens for Hørsholm starter på 125 i 2015 og stiger til 340 i 2026."
+        "For Esbjerg starter antallet på 120 i 2015 og stiger til 345 i 2026, "
+        "mens for Viborg starter på 125 i 2015 og stiger til 340 i 2026."
     ),
     "a3": (
-        "antallet af 80+ i Rudersdal har øget fra 1234 i kvartal 1 2015 til 1300 i kvartal 4 2015"
+        "antallet af 80+ i Esbjerg har øget fra 1234 i kvartal 1 2015 til 1300 i kvartal 4 2015"
     ),
     "a6": (
-        "For Rudersdal (område 230):\n- 2015K1: 1.125\n- 2026K3: 1.805\n"
-        "For Hørsholm (område 223):\n- 2015K1: 1.120\n- 2026K3: 1.810"
+        "For Esbjerg (område 561):\n- 2015K1: 1.125\n- 2026K3: 1.805\n"
+        "For Viborg (område 791):\n- 2015K1: 1.120\n- 2026K3: 1.810"
     ),
 }
-_QUESTION_A = "Hvordan har antallet af 80+ i Rudersdal og Hørsholm udviklet sig siden 2015?"
+_QUESTION_A = "Hvordan har antallet af 80+ i Esbjerg og Viborg udviklet sig siden 2015?"
 _ENGLISH_WITH_FACTS = (
-    "The population of people aged 80+ in Hørsholm has steadily increased "
+    "The population of people aged 80+ in Viborg has steadily increased "
     "from 1,813 in 2016 to 2,697 in 2026. This represents a growth of "
     "approximately 49.1% over the 10-year period. The population in 2025 "
     "(2,629) is the highest. Average annual increase of about 5.2%. "
@@ -221,7 +221,7 @@ _ENGLISH_WITH_FACTS = (
 )
 
 
-def _population_fact(value: int, period: str = "2026K3", place: str = "Rudersdal") -> dict:
+def _population_fact(value: int, period: str = "2026K3", place: str = "Esbjerg") -> dict:
     return {
         "table": "FOLK1A",
         "period": period,
@@ -259,7 +259,7 @@ def test_hallucinated_turn_keeps_the_tool_trace_and_hides_the_numbers() -> None:
 
 
 def test_a_number_in_the_tool_result_may_be_quoted() -> None:
-    text = "Befolkningen den 1. i kvartalet: Rudersdal fra 3.524 (2015K1) til 5.045 (2026K3)"
+    text = "Befolkningen den 1. i kvartalet: Esbjerg fra 3.524 (2015K1) til 5.045 (2026K3)"
     facts = [
         _population_fact(3524, "2015K1"),
         _population_fact(5045, "2026K3"),
@@ -274,7 +274,7 @@ def test_a_number_in_the_tool_result_may_be_quoted() -> None:
             ),
         }
     ]
-    question = "Hvordan har udviklingen i Rudersdal været siden 2015?"
+    question = "Hvordan har udviklingen i Esbjerg været siden 2015?"
     kept = guard_answer(question, text, facts, calls)
     assert kept == text
     invented = guard_answer(question, text + ", i alt 9.999", facts, calls)
@@ -284,7 +284,7 @@ def test_a_number_in_the_tool_result_may_be_quoted() -> None:
 
 def test_suppressed_prose_logs_the_flagged_numbers(caplog: pytest.LogCaptureFixture[str]) -> None:
     text = (
-        "Befolkningen den 1. i kvartalet: Rudersdal fra 3.524 (2015K1) "
+        "Befolkningen den 1. i kvartalet: Esbjerg fra 3.524 (2015K1) "
         "til 5.045 (2026K3), i alt 9.999"
     )
     facts = [
@@ -298,7 +298,7 @@ def test_suppressed_prose_logs_the_flagged_numbers(caplog: pytest.LogCaptureFixt
             "result": '{"table": "FOLK1A", "title": "Befolkningen den 1. i kvartalet"}',
         }
     ]
-    question = "Hvordan har udviklingen i Rudersdal været siden 2015?"
+    question = "Hvordan har udviklingen i Esbjerg været siden 2015?"
     with caplog.at_level("INFO", logger="statistikbanken_mcp.web"):
         guarded = guard_answer(question, text, facts, calls)
     assert guarded == UNVERIFIED_NUMBERS
@@ -329,7 +329,7 @@ def _fetched_series() -> tuple[str, list[dict], list[dict[str, str]]]:
             "arguments": "{}",
             "result": (
                 '{"numeric_codes": {"from": "0", "to": "125"}, '
-                '"values": [{"id": "79", "text": "79 år"}, {"id": "230", "text": "Rudersdal"}], '
+                '"values": [{"id": "79", "text": "79 år"}, {"id": "561", "text": "Esbjerg"}], '
                 '"time_span": {"first": "2008K1", "count": 75}}'
             ),
         },
@@ -370,7 +370,7 @@ def test_prose_numbers_only_in_metadata_are_suppressed(
     blocked = {
         125: "Der er 125 alderskoder, og tallet er 3.524.",
         79: "Gruppen 79 år havde 3.524.",
-        230: "Område 230 havde 3.524.",
+        561: "Område 561 havde 3.524.",
         1800: "Omkring 1.800 i 2024, mens det hentede tal er 3.524.",
         1521: "Fra 3.524 til 5.045, en forskel på 1.521.",
         2008: "Siden 2008 er tallet 3.524.",
@@ -396,13 +396,13 @@ def test_area_code_from_hent_data_arguments_may_be_quoted(
         _population_fact(3524, "2015K1"),
         _population_fact(5045, "2026K3"),
     ]
-    text = "Område 230 og 223 havde 3.524 og 5.045."
-    metadata = '{"values": [{"id": "230", "text": "Rudersdal"}, {"id": "223", "text": "Hørsholm"}]}'
+    text = "Område 561 og 791 havde 3.524 og 5.045."
+    metadata = '{"values": [{"id": "561", "text": "Esbjerg"}, {"id": "791", "text": "Viborg"}]}'
     with_codes = [
         {"name": "tabelinfo", "arguments": "{}", "result": metadata},
         {
             "name": "hent_data",
-            "arguments": json.dumps({"table": "FOLK1A", "values": {"OMRÅDE": ["230", "223"]}}),
+            "arguments": json.dumps({"table": "FOLK1A", "values": {"OMRÅDE": ["561", "791"]}}),
             "result": "{}",
         },
     ]
@@ -411,13 +411,13 @@ def test_area_code_from_hent_data_arguments_may_be_quoted(
         {"name": "tabelinfo", "arguments": "{}", "result": metadata},
         {
             "name": "find_tabel",
-            "arguments": json.dumps({"query": "230 223"}),
+            "arguments": json.dumps({"query": "561 791"}),
             "result": metadata,
         },
         {
             "name": "hent_data",
             "arguments": json.dumps(
-                {"table": "FOLK1A", "values": {"OMRÅDE": ["Rudersdal", "Hørsholm"]}}
+                {"table": "FOLK1A", "values": {"OMRÅDE": ["Esbjerg", "Viborg"]}}
             ),
             "result": "{}",
         },
@@ -426,15 +426,15 @@ def test_area_code_from_hent_data_arguments_may_be_quoted(
     with caplog.at_level("INFO", logger="statistikbanken_mcp.web"):
         guarded = guard_answer(question, text, facts, names_only)
     assert guarded == UNVERIFIED_NUMBERS
-    assert caplog.messages == ["Suppressed prose; flagged numbers: 223, 230"]
+    assert caplog.messages == ["Suppressed prose; flagged numbers: 561, 791"]
 
 
 def test_unverified_numbers_are_removed_when_facts_exist() -> None:
     facts = [
         _population_fact(3524, "2015K1"),
         _population_fact(5045, "2026K3"),
-        _population_fact(1719, "2015K1", "Hørsholm"),
-        _population_fact(2790, "2026K3", "Hørsholm"),
+        _population_fact(1719, "2015K1", "Viborg"),
+        _population_fact(2790, "2026K3", "Viborg"),
     ]
     guarded = guard_answer(_QUESTION_A, _ENGLISH_WITH_FACTS, facts)
     assert guarded == UNVERIFIED_NUMBERS
@@ -444,11 +444,11 @@ def test_unverified_numbers_are_removed_when_facts_exist() -> None:
 
 def test_single_fact_summary_does_not_depend_on_the_prose() -> None:
     fact = _population_fact(5045)
-    question = "Hvor mange over 80 bor i Rudersdal?"
-    line = "5.045 (FOLK1A, 2026 3. kvt., Antal, Rudersdal, 80+)"
+    question = "Hvor mange over 80 bor i Esbjerg?"
+    line = "5.045 (FOLK1A, 2026 3. kvt., Antal, Esbjerg, 80+)"
     honest = guard_answer(
         question,
-        "Der bor 5.045 personer på 80 år eller derover i Rudersdal i 2026K3.",
+        "Der bor 5.045 personer på 80 år eller derover i Esbjerg i 2026K3.",
         [fact],
     )
     invented = guard_answer(question, "There are 9,999 people.", [fact])
@@ -460,17 +460,17 @@ def test_a_count_question_uses_only_the_latest_period() -> None:
     facts = [
         _population_fact(4200, "2016K3"),
         _population_fact(5045, "2026K3"),
-        _population_fact(2100, "2016K3", "Hørsholm"),
-        _population_fact(2790, "2026K3", "Hørsholm"),
+        _population_fact(2100, "2016K3", "Viborg"),
+        _population_fact(2790, "2026K3", "Viborg"),
     ]
     answer = guard_answer(
-        "Hvor mange over 80 bor i Rudersdal?",
+        "Hvor mange over 80 bor i Esbjerg?",
         "In 2016K3 there were 4,200 and in 2026K3 there were 5,045.",
         facts,
     )
     assert answer == (
-        "5.045 (FOLK1A, 2026 3. kvt., Antal, Rudersdal, 80+)\n"
-        "2.790 (FOLK1A, 2026 3. kvt., Antal, Hørsholm, 80+)"
+        "5.045 (FOLK1A, 2026 3. kvt., Antal, Esbjerg, 80+)\n"
+        "2.790 (FOLK1A, 2026 3. kvt., Antal, Viborg, 80+)"
     )
     assert "2016" not in answer
     assert "4.200" not in answer
@@ -493,10 +493,10 @@ def test_no_data_answers_use_a_fixed_danish_sentence() -> None:
 def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
     fact = _population_fact(18114)
     fact["detail"] = "OMRÅDE: København, ALDER: 80+"
-    answer = guard_answer("Hvor mange over 80 bor i Rudersdal?", "18.114", [fact])
-    assert answer == "Jeg fik hentet tal for København, ikke for Rudersdal."
+    answer = guard_answer("Hvor mange over 80 bor i Esbjerg?", "18.114", [fact])
+    assert answer == "Jeg fik hentet tal for København, ikke for Esbjerg."
     assert "18.114" not in answer
-    hidden = _turn("Hvor mange over 80 bor i Rudersdal?", "18.114", [fact], [])
+    hidden = _turn("Hvor mange over 80 bor i Esbjerg?", "18.114", [fact], [])
     assert hidden.answer == answer
     assert hidden.facts == []
     assert hidden.chart == []
@@ -505,36 +505,36 @@ def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
 
 
 def test_question_age_replaces_the_codes_the_model_sent() -> None:
-    question_a = "Hvordan har udviklingen for 80+ i Rudersdal og Hørsholm været siden 2015?"
+    question_a = "Hvordan har udviklingen for 80+ i Esbjerg og Viborg været siden 2015?"
     rewritten_a = apply_age_intent(
         question_a,
         {
             "table": "FOLK1A",
-            "values": {"KOM": ["Rudersdal", "Hørsholm"], "ALDER": "80", "Tid": [">=2015K1"]},
+            "values": {"KOM": ["Esbjerg", "Viborg"], "ALDER": "80", "Tid": [">=2015K1"]},
         },
     )
     assert rewritten_a["values"] == {
-        "KOM": ["Rudersdal", "Hørsholm"],
+        "KOM": ["Esbjerg", "Viborg"],
         "Tid": [">=2015K1"],
     }
     assert rewritten_a["sum_from"] == {"ALDER": "80"}
     assert "sum_range" not in rewritten_a
 
-    question_c = "Hvor mange børn (0-17 år) bor i Hørsholm?"
+    question_c = "Hvor mange børn (0-17 år) bor i Viborg?"
     first = apply_age_intent(
         question_c,
         {
             "table": "FOLK1A",
-            "values": {"OMRÅDE": "Hørsholm", "ALDER": "0-17"},
+            "values": {"OMRÅDE": "Viborg", "ALDER": "0-17"},
             "sum_from": {"ALDER": "0"},
         },
     )
-    assert first["values"] == {"OMRÅDE": "Hørsholm"}
+    assert first["values"] == {"OMRÅDE": "Viborg"}
     assert "sum_from" not in first
     assert first["sum_range"] == {"ALDER": ["0", "17"]}
     second = apply_age_intent(
         question_c,
-        {"table": "FOLK1A", "values": {"OMRÅDE": ["223"]}, "sum_from": {"ALDER": 0}},
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["791"]}, "sum_from": {"ALDER": 0}},
     )
     assert second["sum_range"] == {"ALDER": ["0", "17"]}
     assert "sum_from" not in second
@@ -542,8 +542,8 @@ def test_question_age_replaces_the_codes_the_model_sent() -> None:
 
 def test_wrong_age_is_not_presented_as_the_answer() -> None:
     fact = _population_fact(395, "2015K1")
-    fact["detail"] = "OMRÅDE: Rudersdal, ALDER: 80 år"
-    question = "Hvordan har udviklingen for 80+ i Rudersdal været siden 2015?"
+    fact["detail"] = "OMRÅDE: Esbjerg, ALDER: 80 år"
+    question = "Hvordan har udviklingen for 80+ i Esbjerg været siden 2015?"
     hidden = _turn(question, "Se grafen.", [fact], [])
     assert hidden.answer == "Jeg fik hentet tal for alder 80 år, ikke for 80+."
     assert hidden.show_numbers is False
@@ -605,10 +605,10 @@ def test_each_question_starts_a_fresh_conversation() -> None:
     tools = FakeTools({})
     model = RecordingModel()
     first = asyncio.run(run_turn(model, tools, "Hvor mange bor i Silkeborg?", max_tool_calls=4))
-    second = asyncio.run(run_turn(model, tools, "Hvor mange bor i Rudersdal?", max_tool_calls=4))
+    second = asyncio.run(run_turn(model, tools, "Hvor mange bor i Esbjerg?", max_tool_calls=4))
     assert "Silkeborg" in model.seen[0]
     assert "Silkeborg" not in model.seen[1]
-    assert "Rudersdal" in model.seen[1]
+    assert "Esbjerg" in model.seen[1]
     assert "latest period" in model.seen[1]
     assert "Danish" in model.seen[1]
     assert first.answer == NO_DATA_ANSWER
@@ -879,17 +879,17 @@ def _post(port: int, payload: dict, path: str = "/api/ask") -> HTTPConnection:
 
 def test_chart_series_groups_periods_and_skips_a_single_point() -> None:
     facts = [
-        _fact("Rudersdal", "2015K1", 4200),
-        _fact("Rudersdal", "2026K3", 5045),
-        _fact("Hørsholm", "2015K1", 2100),
-        _fact("Hørsholm", "2026K3", 2790),
-        _fact("Rudersdal", "2026K4", 0, unpublished=True),
+        _fact("Esbjerg", "2015K1", 4200),
+        _fact("Esbjerg", "2026K3", 5045),
+        _fact("Viborg", "2015K1", 2100),
+        _fact("Viborg", "2026K3", 2790),
+        _fact("Esbjerg", "2026K4", 0, unpublished=True),
         {"table": "FOLK1A", "period": "2020", "unit": "Antal", "value": 1, "detail": "Kun ét"},
     ]
     series = chart_series(facts)
     assert [item["label"] for item in series] == [
-        "Rudersdal",
-        "Hørsholm",
+        "Esbjerg",
+        "Viborg",
     ]
     assert [point["period"] for point in series[0]["points"]] == ["2015K1", "2026K3"]
     assert series[0]["points"][1]["value"] == 5045
@@ -913,8 +913,8 @@ def test_axis_ticks_are_nice_numbers_covering_min_and_max() -> None:
         [
             _population_fact(3524, "2015K1"),
             _population_fact(5045, "2026K3"),
-            _population_fact(1719, "2015K1", "Hørsholm"),
-            _population_fact(2790, "2026K3", "Hørsholm"),
+            _population_fact(1719, "2015K1", "Viborg"),
+            _population_fact(2790, "2026K3", "Viborg"),
         ]
     )
     axis = chart_axis(series)
@@ -925,40 +925,40 @@ def test_axis_ticks_are_nice_numbers_covering_min_and_max() -> None:
 def test_exports_use_the_same_dimension_label_as_the_table() -> None:
     facts = [
         _population_fact(3524, "2015K1"),
-        _population_fact(1719, "2015K1", "Hørsholm"),
+        _population_fact(1719, "2015K1", "Viborg"),
     ]
     text = facts_to_csv(facts).lstrip("\ufeff")
     rows = list(csv.reader(io.StringIO(text), delimiter=";"))
-    assert rows[1][2] == "Rudersdal, 80+"
-    assert rows[2][2] == "Hørsholm, 80+"
+    assert rows[1][2] == "Esbjerg, 80+"
+    assert rows[2][2] == "Viborg, 80+"
     assert "OMRÅDE:" not in text
     assert "ALDER:" not in text
     sheet = _xlsx_rows(facts_to_xlsx(facts))
-    assert [row[2] for row in sheet] == ["dimensioner", "Rudersdal, 80+", "Hørsholm, 80+"]
+    assert [row[2] for row in sheet] == ["dimensioner", "Esbjerg, 80+", "Viborg, 80+"]
     exported = json.loads(facts_to_json(facts))
-    assert exported[0]["dimensioner"] == "Rudersdal, 80+"
-    assert exported[0]["dimensioner_rå"] == "OMRÅDE: Rudersdal, ALDER: 80+"
-    assert exported[1]["dimensioner"] == "Hørsholm, 80+"
+    assert exported[0]["dimensioner"] == "Esbjerg, 80+"
+    assert exported[0]["dimensioner_rå"] == "OMRÅDE: Esbjerg, ALDER: 80+"
+    assert exported[1]["dimensioner"] == "Viborg, 80+"
 
 
 def test_display_label_drops_variable_names_and_totals() -> None:
-    detail = "OMRÅDE: Rudersdal, KØN: I alt, ALDER: 80+, CIVILSTAND: I alt"
-    assert display_label(detail, "FOLK1A") == "Rudersdal, 80+"
+    detail = "OMRÅDE: Esbjerg, KØN: I alt, ALDER: 80+, CIVILSTAND: I alt"
+    assert display_label(detail, "FOLK1A") == "Esbjerg, 80+"
 
 
 def test_grid_is_periods_by_series_with_plain_labels() -> None:
     one = facts_to_grid([_population_fact(5045)])
-    assert one["columns"] == ["Periode", "Rudersdal, 80+"]
+    assert one["columns"] == ["Periode", "Esbjerg, 80+"]
     assert one["rows"] == [["2026 3. kvt.", "5.045"]]
     two = facts_to_grid(
         [
             _population_fact(3524, "2015K1"),
             _population_fact(5045, "2026K3"),
-            _population_fact(1719, "2015K1", "Hørsholm"),
-            _population_fact(2790, "2026K3", "Hørsholm"),
+            _population_fact(1719, "2015K1", "Viborg"),
+            _population_fact(2790, "2026K3", "Viborg"),
         ]
     )
-    assert two["columns"] == ["Periode", "Rudersdal, 80+", "Hørsholm, 80+"]
+    assert two["columns"] == ["Periode", "Esbjerg, 80+", "Viborg, 80+"]
     assert two["rows"] == [
         ["2015 1. kvt.", "3.524", "1.719"],
         ["2026 3. kvt.", "5.045", "2.790"],
@@ -1008,8 +1008,8 @@ def test_friendly_period_forms_are_not_extra_figures() -> None:
 
 def test_json_keeps_the_period_code_and_csv_uses_the_label() -> None:
     facts = [
-        _fact("Rudersdal", "2015K1", 5045),
-        _fact("Rudersdal", "2015K2", 12.5),
+        _fact("Esbjerg", "2015K1", 5045),
+        _fact("Esbjerg", "2015K2", 12.5),
     ]
     text = facts_to_csv(facts).lstrip("\ufeff")
     reader = csv.reader(io.StringIO(text), delimiter=";")
@@ -1021,8 +1021,8 @@ def test_json_keeps_the_period_code_and_csv_uses_the_label() -> None:
     exported = json.loads(facts_to_json(facts))
     assert exported[0]["periode"] == "2015K1"
     assert exported[0]["periode_label"] == "2015 1. kvt."
-    assert exported[0]["dimensioner"] == "Rudersdal"
-    assert exported[0]["dimensioner_rå"] == "OMRÅDE: Rudersdal"
+    assert exported[0]["dimensioner"] == "Esbjerg"
+    assert exported[0]["dimensioner_rå"] == "OMRÅDE: Esbjerg"
     assert exported[0]["værdi"] == "5045"
     assert exported[1]["periode"] == "2015K2"
     assert exported[1]["værdi"] == "12,5"
@@ -1052,7 +1052,7 @@ def test_export_endpoint_writes_a_file_and_does_not_ask_again() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     port = server.server_address[1]
-    facts = [_fact("Rudersdal", "2015K1", 5045)]
+    facts = [_fact("Esbjerg", "2015K1", 5045)]
     try:
         workbook = _post(port, {"format": "xlsx", "facts": facts}, "/api/export")
         assert workbook.status == 200
@@ -1089,15 +1089,15 @@ def _xlsx_rows(blob: bytes) -> list[list[str]]:
 
 def test_csv_uses_bom_semicolon_and_decimal_comma() -> None:
     facts = [
-        _fact("Rudersdal", "2015K1", 5045),
-        _fact("Rudersdal", "2015K2", 12.5),
+        _fact("Esbjerg", "2015K1", 5045),
+        _fact("Esbjerg", "2015K2", 12.5),
     ]
     text = facts_to_csv(facts)
     assert text.startswith("\ufeff")
     header = text.splitlines()[0].lstrip("\ufeff")
     assert header == "tabel;periode;dimensioner;værdi;enhed"
-    assert "FOLK1A;2015 1. kvt.;Rudersdal;5045;Antal" in text
-    assert "FOLK1A;2015 2. kvt.;Rudersdal;12,5;Antal" in text
+    assert "FOLK1A;2015 1. kvt.;Esbjerg;5045;Antal" in text
+    assert "FOLK1A;2015 2. kvt.;Esbjerg;12,5;Antal" in text
 
 
 @pytest.mark.live
@@ -1107,7 +1107,7 @@ def test_multi_period_call_returns_several_facts() -> None:
     result = hent_data(
         "FOLK1A",
         values={
-            "OMRÅDE": ["Rudersdal", "Hørsholm"],
+            "OMRÅDE": ["Esbjerg", "Viborg"],
             "KØN": ["TOT"],
             "CIVILSTAND": ["TOT"],
             "Tid": [">=2015K1"],
@@ -1119,8 +1119,8 @@ def test_multi_period_call_returns_several_facts() -> None:
     assert facts[0]["url"] == "https://www.statistikbanken.dk/FOLK1A"
     series = chart_series(facts)
     labels = {item["label"] for item in series}
-    assert any("Rudersdal" in label for label in labels)
-    assert any("Hørsholm" in label for label in labels)
+    assert any("Esbjerg" in label for label in labels)
+    assert any("Viborg" in label for label in labels)
     assert all(len(item["points"]) >= 4 for item in series)
 
 
@@ -1157,11 +1157,11 @@ def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
 
     series = asyncio.run(
         _run(
-            "Hvordan har udviklingen for 80+ i Rudersdal og Hørsholm været siden 2015?",
+            "Hvordan har udviklingen for 80+ i Esbjerg og Viborg været siden 2015?",
             {
                 "table": "FOLK1A",
                 "values": {
-                    "KOM": ["Rudersdal", "Hørsholm"],
+                    "KOM": ["Esbjerg", "Viborg"],
                     "ALDER": "80",
                     "Tid": [">=2015K1"],
                 },
@@ -1171,34 +1171,34 @@ def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
     )
     by_place = {}
     for fact in series.facts:
-        if "Rudersdal" in fact["detail"]:
-            by_place.setdefault("Rudersdal", {})[fact["period"]] = fact["value"]
-        if "Hørsholm" in fact["detail"]:
-            by_place.setdefault("Hørsholm", {})[fact["period"]] = fact["value"]
-    assert by_place["Rudersdal"]["2015K1"] == 3524
-    assert by_place["Rudersdal"]["2026K3"] == 5045
-    assert by_place["Hørsholm"]["2015K1"] == 1719
-    assert by_place["Hørsholm"]["2026K3"] == 2790
+        if "Esbjerg" in fact["detail"]:
+            by_place.setdefault("Esbjerg", {})[fact["period"]] = fact["value"]
+        if "Viborg" in fact["detail"]:
+            by_place.setdefault("Viborg", {})[fact["period"]] = fact["value"]
+    assert by_place["Esbjerg"]["2015K1"] == 4678
+    assert by_place["Esbjerg"]["2026K3"] == 7556
+    assert by_place["Viborg"]["2015K1"] == 4126
+    assert by_place["Viborg"]["2026K3"] == 6420
     assert all("80+" in fact["detail"] for fact in series.facts)
     assert len(series.chart) == 2
     assert all(len(item["points"]) > 2 for item in series.chart)
 
     children = asyncio.run(
         _run(
-            "Hvor mange børn (0-17 år) bor i Hørsholm?",
+            "Hvor mange børn (0-17 år) bor i Viborg?",
             {
                 "table": "FOLK1A",
-                "values": {"OMRÅDE": "Hørsholm", "ALDER": "0-17"},
+                "values": {"OMRÅDE": "Viborg", "ALDER": "0-17"},
                 "sum_from": {"ALDER": "0"},
             },
             "c_c",
         )
     )
     assert len(children.facts) == 1
-    assert children.facts[0]["value"] == 4916
-    assert "Hørsholm" in children.facts[0]["detail"]
+    assert children.facts[0]["value"] == 19171
+    assert "Viborg" in children.facts[0]["detail"]
     assert "0-17" in children.facts[0]["detail"]
-    assert children.answer.startswith("4.916")
+    assert children.answer.startswith("19.171")
     assert children.show_numbers is True
 
 
@@ -1208,17 +1208,17 @@ def test_scripted_model_recovers_from_the_bad_time_sum() -> None:
 
     bad = {
         "table": "FOLK1A",
-        "values": {"ALDER": [">=80"], "OMRÅDE": ["Rudersdal", "Hørsholm"]},
+        "values": {"ALDER": [">=80"], "OMRÅDE": ["Esbjerg", "Viborg"]},
         "sum_range": {"Tid": ["2015K1", "2026K3"]},
     }
     as_strings = {
         "table": "FOLK1A",
-        "values": {"OMRÅDE": "230", "Tid": "(1)"},
+        "values": {"OMRÅDE": "561", "Tid": "(1)"},
         "sum_from": {"ALDER": "80"},
     }
     good = {
         "table": "FOLK1A",
-        "values": {"OMRÅDE": ["Rudersdal", "Hørsholm"], "Tid": [">=2015K1"]},
+        "values": {"OMRÅDE": ["Esbjerg", "Viborg"], "Tid": [">=2015K1"]},
         "sum_from": {"ALDER": "80"},
     }
 
@@ -1231,7 +1231,7 @@ def test_scripted_model_recovers_from_the_bad_time_sum() -> None:
                 ChatReply("", [_call("hent_data", bad, "c2")]),
                 ChatReply("", [_call("hent_data", good, "c3")]),
                 ChatReply(
-                    "I Rudersdal og Hørsholm er der flere på 80 år i 2026K3 end i 2015K1.",
+                    "I Esbjerg og Viborg er der flere på 80 år i 2026K3 end i 2015K1.",
                     [],
                 ),
             ]
@@ -1243,22 +1243,22 @@ def test_scripted_model_recovers_from_the_bad_time_sum() -> None:
                 model,
                 runner,
                 "Hvordan har antallet af personer på 80 år og derover udviklet sig "
-                "i Rudersdal og Hørsholm siden 2015?",
+                "i Esbjerg og Viborg siden 2015?",
                 max_tool_calls=8,
             )
 
     result = asyncio.run(_run())
     assert "list_type" not in result.calls[0]["result"]
-    assert "5045" in result.calls[0]["result"]
-    assert "13078" not in result.calls[0]["result"]
+    assert "7556" in result.calls[0]["result"]
+    assert "22780" not in result.calls[0]["result"]
     assert "not every period" in result.calls[1]["result"]
     assert ">=2015K1" in result.calls[1]["result"]
-    assert "13078" not in result.calls[1]["result"]
-    assert all(fact.get("value") != 13078 for fact in result.facts)
+    assert "22780" not in result.calls[1]["result"]
+    assert all(fact.get("value") != 22780 for fact in result.facts)
     assert len(result.facts) >= 8
     assert len(result.chart) == 2
     assert "2026K3" in result.answer
-    assert "5,045" not in result.answer
+    assert "7,556" not in result.answer
 
 
 def test_app_lists_tools_from_the_mcp_server() -> None:
