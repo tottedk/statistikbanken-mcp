@@ -12,6 +12,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -192,7 +193,7 @@ function svgEl(name, attrs) {
   return node;
 }
 
-function drawChart(series) {
+function drawChart(series, axis) {
   const width = 640, height = 280, left = 64, right = 56, top = 16, bottom = 36;
   const periods = [];
   const seen = new Set();
@@ -202,11 +203,7 @@ function drawChart(series) {
     if (point.label) labelOf.set(point.period, point.label);
   }
   periods.sort();
-  let min = Infinity, max = -Infinity;
-  for (const item of series) for (const point of item.points) {
-    min = Math.min(min, point.value);
-    max = Math.max(max, point.value);
-  }
+  let min = axis.min, max = axis.max;
   if (min === max) { min -= 1; max += 1; }
   const span = Math.max(periods.length - 1, 1);
   const xOf = (period) => left + (periods.indexOf(period) / span) * (width - left - right);
@@ -223,12 +220,11 @@ function drawChart(series) {
   svg.append(svgEl("line", {
     x1: left, y1: height - bottom, x2: width - right, y2: height - bottom, stroke: "#c9c2b6"
   }));
-  for (let i = 0; i < 5; i++) {
-    const value = max - (i / 4) * (max - min);
+  for (const value of axis.ticks) {
     const label = svgEl("text", {
       x: left - 6, y: yOf(value) + 4, "text-anchor": "end", fill: "#4a453e", "font-size": "11"
     });
-    label.textContent = daDigits(Math.round(value));
+    label.textContent = daTick(value);
     svg.append(label);
   }
   const step = Math.ceil(periods.length / 4);
@@ -269,6 +265,15 @@ function drawChart(series) {
   const wrap = el("div", null, "chart");
   wrap.append(svg);
   return wrap;
+}
+
+function daTick(value) {
+  if (Math.abs(value - Math.round(value)) < 1e-6) return daDigits(Math.round(value));
+  const negative = value < 0;
+  const scaled = Math.round(Math.abs(value) * 100) / 100;
+  const parts = String(scaled).split(".");
+  const text = daDigits(Number(parts[0])) + (parts[1] ? "," + parts[1] : "");
+  return negative ? "-" + text : text;
 }
 
 function daDigits(value) {
@@ -336,10 +341,14 @@ function pngButton(svg) {
   const button = el("button", "Hent graf (PNG)");
   button.type = "button";
   button.addEventListener("click", () => {
+    const box = svg.getBBox();
+    const plotWidth = Math.max(1, Math.ceil(box.x + box.width + 8));
+    const plotHeight = 280;
     const clone = svg.cloneNode(true);
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clone.setAttribute("width", "640");
-    clone.setAttribute("height", "280");
+    clone.setAttribute("viewBox", "0 0 " + plotWidth + " " + plotHeight);
+    clone.setAttribute("width", String(plotWidth));
+    clone.setAttribute("height", String(plotHeight));
     const xml = new XMLSerializer().serializeToString(clone);
     const url = URL.createObjectURL(new Blob([xml], {type: "image/svg+xml;charset=utf-8"}));
     const image = new Image();
@@ -348,17 +357,24 @@ function pngButton(svg) {
       const bits = legend ? [...legend.children] : [];
       const extra = bits.length ? 40 : 0;
       const scale = 2;
+      const measure = document.createElement("canvas").getContext("2d");
+      measure.font = "15px system-ui, sans-serif";
+      let legendRight = 8;
+      for (const bit of bits) {
+        legendRight += 18 + measure.measureText(bit.textContent || "").width + 16;
+      }
+      const width = Math.max(plotWidth, Math.ceil(legendRight));
       const canvas = document.createElement("canvas");
-      canvas.width = 640 * scale;
-      canvas.height = (280 + extra) * scale;
+      canvas.width = width * scale;
+      canvas.height = (plotHeight + extra) * scale;
       const ctx = canvas.getContext("2d");
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(image, 0, 0, 640 * scale, 280 * scale);
+      ctx.drawImage(image, 0, 0, plotWidth * scale, plotHeight * scale);
       ctx.font = (15 * scale) + "px system-ui, sans-serif";
       ctx.textBaseline = "middle";
       let x = 8 * scale;
-      const y = (280 + extra / 2) * scale;
+      const y = (plotHeight + extra / 2) * scale;
       bits.forEach((bit, index) => {
         ctx.fillStyle = COLORS[index % COLORS.length];
         ctx.fillRect(x, y - 6 * scale, 12 * scale, 12 * scale);
@@ -430,7 +446,7 @@ function render(data) {
   let chartSvg = null;
   if (advancedView(data) && data.chart && data.chart.length) {
     const chart = el("section");
-    const drawn = drawChart(data.chart);
+    const drawn = drawChart(data.chart, data.axis);
     chartSvg = drawn.querySelector("svg");
     chart.append(el("h2", "Udvikling"), drawn, legend(data.chart));
     out.append(advancedOnly(chart));
@@ -628,6 +644,7 @@ class TurnResult:
     facts: list[dict[str, Any]]
     calls: list[dict[str, str]]
     chart: list[dict[str, Any]] = field(default_factory=list)
+    axis: dict[str, Any] = field(default_factory=dict)
     csv: str = ""
     grid: dict[str, Any] = field(default_factory=dict)
     show_numbers: bool = True
@@ -923,7 +940,90 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return series
 
 
+def chart_axis(series: list[dict[str, Any]]) -> dict[str, Any]:
+    """Nice y-axis covering every charted value, with about five ticks."""
+    values: list[float] = []
+    for item in series:
+        for point in item.get("points") or []:
+            value = point.get("value")
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                continue
+            values.append(float(value))
+    if not values:
+        return {}
+    low, high, ticks = nice_axis(min(values), max(values))
+    return {"min": low, "max": high, "ticks": ticks}
+
+
+def nice_axis(
+    low: float, high: float, count: int = 5
+) -> tuple[int | float, int | float, list[int | float]]:
+    """Min, max, and about `count` ticks on a 1-2-5 grid. The range covers both ends."""
+    low = float(low)
+    high = float(high)
+    if low > high:
+        low, high = high, low
+    if math.isclose(low, high):
+        low -= 1
+        high += 1
+    span = _nice_num(high - low, round_=False)
+    step = _nice_num(span / (count - 1), round_=True)
+    axis_min = math.floor(low / step + 1e-10) * step
+    axis_max = math.ceil(high / step - 1e-10) * step
+    half = step / 2
+    tightened_min = axis_min + half
+    tightened_max = axis_max - half
+    if tightened_min <= low and tightened_max >= high and tightened_max - tightened_min >= step:
+        axis_min, axis_max = tightened_min, tightened_max
+    ticks: list[int | float] = []
+    value = axis_min
+    for _ in range(24):
+        if value > axis_max + step * 1e-6:
+            break
+        ticks.append(_plain_number(value))
+        value += step
+    return _plain_number(axis_min), _plain_number(axis_max), ticks
+
+
+def _nice_num(value: float, *, round_: bool) -> float:
+    """Heckbert's nice number: 1, 2, or 5 times a power of ten."""
+    if value <= 0:
+        return 1
+    exp = math.floor(math.log10(value))
+    frac = value / 10**exp
+    if round_:
+        if frac < 1.5:
+            nice = 1
+        elif frac < 3:
+            nice = 2
+        elif frac < 7:
+            nice = 5
+        else:
+            nice = 10
+    elif frac <= 1:
+        nice = 1
+    elif frac <= 2:
+        nice = 2
+    elif frac <= 5:
+        nice = 5
+    else:
+        nice = 10
+    return nice * 10**exp
+
+
+def _plain_number(value: float) -> int | float:
+    nearest = round(value)
+    if math.isclose(value, nearest, abs_tol=1e-8):
+        return int(nearest)
+    return round(value, 10)
+
+
 _EXPORT_HEADER = ["tabel", "periode", "dimensioner", "værdi", "enhed"]
+
+
+def _dimension_label(fact: dict[str, Any]) -> str:
+    """Same text as the table column: 'Rudersdal, 80+', not 'OMRÅDE: Rudersdal, ALDER: 80+'."""
+    return display_label(str(fact.get("detail") or ""), str(fact.get("table") or ""))
 
 
 def _export_rows(facts: list[dict[str, Any]]) -> tuple[list[str], list[list[str]]]:
@@ -935,7 +1035,7 @@ def _export_rows(facts: list[dict[str, Any]]) -> tuple[list[str], list[list[str]
             [
                 str(fact.get("table") or ""),
                 period_label(str(fact.get("period") or "")),
-                str(fact.get("detail") or ""),
+                _dimension_label(fact),
                 _csv_number(fact.get("value")),
                 str(fact.get("unit") or ""),
             ]
@@ -954,18 +1054,20 @@ def facts_to_csv(facts: list[dict[str, Any]]) -> str:
 
 
 def facts_to_json(facts: list[dict[str, Any]]) -> str:
-    """CSV columns, but periode stays the raw code and periode_label is friendly."""
+    """CSV columns. periode stays the raw code; dimensioner is the table label."""
     rows = []
     for fact in facts:
         if not isinstance(fact, dict):
             continue
         raw = str(fact.get("period") or "")
+        detail = str(fact.get("detail") or "")
         rows.append(
             {
                 "tabel": str(fact.get("table") or ""),
                 "periode": raw,
                 "periode_label": period_label(raw),
-                "dimensioner": str(fact.get("detail") or ""),
+                "dimensioner": _dimension_label(fact),
+                "dimensioner_rå": detail,
                 "værdi": _csv_number(fact.get("value")),
                 "enhed": str(fact.get("unit") or ""),
             }
@@ -1105,11 +1207,13 @@ def _turn(
             answer=refusal, facts=[], calls=calls, chart=[], csv="", show_numbers=False
         )
     kept = facts
+    chart = chart_series(kept)
     return TurnResult(
         answer=guard_answer(question, answer, kept, calls),
         facts=kept,
         calls=calls,
-        chart=chart_series(kept),
+        chart=chart,
+        axis=chart_axis(chart),
         csv=facts_to_csv(kept) if kept else "",
         grid=facts_to_grid(kept),
     )
@@ -1927,6 +2031,7 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                     "facts": result.facts,
                     "calls": result.calls,
                     "chart": result.chart,
+                    "axis": result.axis,
                     "csv": result.csv,
                     "grid": result.grid,
                     "show_numbers": result.show_numbers,
