@@ -27,6 +27,8 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ### Changed
 
+- **Find ordinary subjects, and state the period range when a code is outside it.** `find_tabel` maps togpassagerer, vareeksport, dødsårsager, kræft, gini, nye virksomheder, iværksættere, månedsfortjeneste, AKU, påbegyndte boliger, and unemployed or jobless onto the words the catalogue uses. Danmark, Denmark, and Danish no longer count when the query also names a subject. An unknown place such as Lyngby suggests the hyphenated name (Lyngby-Taarbæk) and is not accepted on its own. An unknown period states the available range instead of a near-miss code, and a bare year on a quarterly or monthly table suggests that year's sub-periods.
+
 - Examples use Esbjerg and Viborg.
 
 - **Simplify the Statistikbanken client and rank income before tax** ([#14](https://github.com/tottedk/statistikbanken-mcp/pull/14), 2026-11-01). `statbank.py` drops the separate alias, sum-string, and time-sum helpers that repeated the same work. `find_tabel` strips punctuation stuck to a word, drops a trailing e on a long Danish word, and splits a compound on the linking s (`gennemsnitsindkomst` into gennemsnit and indkomst) only as a weaker fallback, so a whole-word hit outranks a piece. When the query says "før skat", a title of "Indkomst i alt" is preferred to "Disponibel indkomst"; if the query also names a breakdown such as køn, that preference is only a tie-breaker. INDKP105 is in the top three for "gennemsnitlig indkomst før skat", "indkomst i alt før skat", and "gennemsnitsindkomst før skat".

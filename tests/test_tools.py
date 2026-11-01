@@ -146,6 +146,79 @@ def test_search_partial_synonym_and_place_names() -> None:
         find_tabel("enhjørninger")
 
 
+@pytest.mark.parametrize(
+    ("query", "table_id"),
+    [
+        ("togpassagerer", "BANE21"),
+        ("vareeksport", "KN8MEST"),
+        ("dødsårsager", "DODA1"),
+        ("gini", "IFOR41"),
+        ("nye virksomheder", "DEMO11"),
+        ("iværksættere", "DEMO11"),
+        ("månedsfortjeneste", "LONS20"),
+        ("AKU", "AKU100K"),
+        ("påbegyndte boliger", "BYGV33"),
+        ("unemployed", "AUS09"),
+        ("jobless", "AUS09"),
+    ],
+)
+def test_everyday_words_find_the_subject(query: str, table_id: str) -> None:
+    ids = [hit["id"] for hit in find_tabel(query, limit=3)]
+    assert table_id in ids
+
+
+def test_denmark_does_not_outrank_the_subject() -> None:
+    unemployment = [hit["id"] for hit in find_tabel("unemployment Denmark", limit=3)]
+    assert "AUS09" in unemployment
+    assert "BEF5F" not in unemployment
+
+    cancer = [hit["id"] for hit in find_tabel("Hvor mange døde af kræft i Danmark", limit=3)]
+    assert cancer[0] == "DODA1"
+    assert "BEF5F" not in cancer
+
+    assert find_tabel("befolkning i Danmark", limit=1)[0]["id"] == "FOLK1A"
+    assert find_tabel("Danmark", limit=1)[0]["id"] == "BEF5F"
+    assert find_tabel("Denmark", limit=1)[0]["id"] == "BEF5F"
+
+
+def test_lyngby_suggests_lyngby_taarbaek_and_is_not_accepted(
+    calls: list[dict[str, object]],
+) -> None:
+    with pytest.raises(ToolError, match=r"Lyngby-Taarbæk \(173\)") as caught:
+        hent_data("FOLK1A", {"OMRÅDE": ["Lyngby"]})
+    message = str(caught.value)
+    assert "Did you mean" in message
+    assert "Unknown value 'Lyngby'" in message
+    with pytest.raises(ToolError, match=r"Høje-Taastrup \(169\)"):
+        hent_data("FOLK1A", {"OMRÅDE": ["Taastrup"]})
+    assert not any(str(call["path"]).endswith("/data") for call in calls)
+
+
+def test_out_of_range_period_states_the_available_range() -> None:
+    with pytest.raises(ToolError, match="Available: 2008K1") as caught:
+        hent_data("FOLK1A", {"Tid": ["2030K1"]})
+    message = str(caught.value)
+    assert "2026K3" in message
+    assert "Did you mean" not in message
+    assert "2023K1" not in message
+
+    with pytest.raises(ToolError, match="Available: 2008K1") as caught:
+        hent_data("FOLK1A", {"Tid": ["1850"]})
+    assert "Did you mean" not in str(caught.value)
+    assert "2023K1" not in str(caught.value)
+
+
+def test_bare_year_on_a_quarterly_table_suggests_the_quarters() -> None:
+    with pytest.raises(ToolError, match=r">=2025K1<=2025K4") as caught:
+        hent_data("STRAF10", {"Tid": ["2025"]})
+    message = str(caught.value)
+    assert "Available: 1995K1" in message
+    assert "2026K3" in message
+
+    with pytest.raises(ToolError, match=r">=2026K1<=2026K3"):
+        hent_data("FOLK1A", {"Tid": ["2026"]})
+
+
 def test_values_accept_labels_and_suggest_near_misses(calls: list[dict[str, object]]) -> None:
     result = hent_data("FOLK1A", {"OMRÅDE": ["Silkeborg"], "ALDER": ["IALT"], "Tid": ["(1)"]})
     assert result["rows"][0]["OMRÅDE"] == "Silkeborg"
@@ -157,7 +230,7 @@ def test_values_accept_labels_and_suggest_near_misses(calls: list[dict[str, obje
 
     copenhagen = hent_data("FOLK1A", {"område": ["Kobenhavn"], "alder": ["ialt"], "Tid": ["(1)"]})
     assert copenhagen["rows"][0]["OMRÅDE"] == "København"
-    with pytest.raises(ToolError, match="Latest period is 2026K3"):
+    with pytest.raises(ToolError, match="Available: 2008K1"):
         hent_data("FOLK1A", {"Tid": ["2035K1"]})
     with pytest.raises(ToolError, match="Narnia"):
         hent_data("FOLK1A", {"OMRÅDE": ["Narnia"]})
