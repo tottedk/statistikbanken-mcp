@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import traceback
+import zipfile
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date
@@ -36,6 +37,7 @@ DEFAULT_XAI_MODEL = "grok-4"
 TRACE_LIMIT = 2_000
 MODEL_RESULT_LIMIT = 12_000
 MAX_BODY_BYTES = 32_768
+EXPORT_MAX_BYTES = 1_048_576
 DEFAULT_LLM_TIMEOUT = 45.0
 DEFAULT_TOOL_TIMEOUT = 30.0
 NO_FETCHED_NUMBERS = "Jeg fik ikke hentet tal, så jeg viser ingen."
@@ -51,7 +53,7 @@ Use only the Statistikbanken tools. Do not invent numbers.
 Never write a number that is not in a hent_data row from this question.
 If a tool call failed, say so. Do not fill in example figures.
 Call find_tabel, then tabelinfo when you need codes, then hent_data.
-Always name the table id and the period in the answer.
+Name the period in the answer. Do not open with the table id or the table title.
 If the table title, unit, or description only partly matches the question, say so.
 If the tools have no data, say so.
 Prefer sum_from or sum_range when a total is needed.
@@ -74,7 +76,8 @@ Answer in the same language as the question.
 A Danish question gets a Danish answer, even if the tool text is English.
 Do not answer in English when the question is Danish.
 Write Danish numbers with a dot as the thousands separator: 5.045, never 5,045.
-Write periods as Statistikbanken does: 2026K3, never 2026Q3."""
+Write periods like 1. kvartal 2015 or 2015 1. kvt., marts 2015, or 2015 1. halvår.
+A year stays 2015. Do not write 2015K1 or 2026Q3."""
 
 PAGE = """<!DOCTYPE html>
 <html lang="da">
@@ -97,30 +100,45 @@ PAGE = """<!DOCTYPE html>
   section { margin-top: 1.75rem; }
   h2 { font-size: 1rem; margin: 0 0 0.5rem; }
   .answer { white-space: pre-wrap; }
-  .fact { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px;
-    padding: 0.75rem 1rem; margin: 0 0 0.5rem; }
-  .fact strong { font-size: 1.25rem; }
   .meta { color: #4a453e; font-size: 0.95rem; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { padding: 0.35rem 0.6rem; border-bottom: 1px solid #e2dcd2; text-align: left; }
+  th { font-size: 0.9rem; color: #4a453e; position: sticky; top: 0; background: #fff; }
+  th:not(:first-child), td:not(:first-child) { text-align: right; }
+  .exports { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
   details { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px;
     padding: 0.5rem 0.75rem; margin: 0 0 0.5rem; }
   summary { cursor: pointer; }
   pre { white-space: pre-wrap; word-break: break-word;
     font: 0.85rem/1.4 ui-monospace, monospace; margin: 0.5rem 0 0; }
   .error { color: #8a1f1f; }
-  .facts { max-height: 16rem; overflow: auto; }
+  .facts { max-height: 16rem; overflow: auto; scrollbar-width: thin; }
+  .facts::-webkit-scrollbar { width: 10px; height: 10px; }
+  .facts::-webkit-scrollbar-thumb { background: #c9c2b6; border-radius: 8px; }
   .chart { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px; padding: 0.75rem; }
   .chart svg { width: 100%; height: auto; display: block; }
   .legend { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; font-size: 0.95rem; }
   .swatch { display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.3rem; }
-  .row { display: flex; gap: 0.75rem; align-items: center; }
   a { color: #1d4e89; }
   footer { margin-top: 2rem; color: #4a453e; font-size: 0.9rem; }
+  fieldset.modes { border: 0; margin: 0 0 1.25rem; padding: 0;
+    display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+  fieldset.modes legend { padding: 0; font-size: 0.95rem; color: #4a453e; }
+  fieldset.modes label { display: inline-flex; gap: 0.35rem; align-items: center; cursor: pointer; }
+  fieldset.modes label:has(:checked) { font-weight: 650; }
+  fieldset.modes input { width: 1rem; height: 1rem; accent-color: #1c1915; }
+  fieldset.modes input:focus-visible { outline: 2px solid #1d4e89; outline-offset: 2px; }
 </style>
 </head>
 <body>
 <main>
   <h1>Statistikbanken</h1>
   <p class="lead">Stil et spørgsmål. Svaret bygger på tal fra Danmarks Statistik.</p>
+  <fieldset class="modes">
+    <legend>Visning</legend>
+    <label><input type="radio" name="mode" value="basic" checked> Basis</label>
+    <label><input type="radio" name="mode" value="advanced"> Avanceret</label>
+  </fieldset>
   <form>
     <label for="question">Dit spørgsmål</label>
     <textarea id="question" name="question" maxlength="__MAX__" required
@@ -134,6 +152,30 @@ PAGE = """<!DOCTYPE html>
 const form = document.querySelector("form");
 const out = document.querySelector("#out");
 const button = form.querySelector("button");
+const MODE_KEY = "statistikbanken-mode";
+let mode = "basic";
+let last = null;
+try {
+  if (localStorage.getItem(MODE_KEY) === "advanced") mode = "advanced";
+} catch (error) {}
+for (const input of document.querySelectorAll('input[name="mode"]')) {
+  input.checked = input.value === mode;
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    mode = input.value;
+    try { localStorage.setItem(MODE_KEY, mode); } catch (error) {}
+    if (last) render(last);
+  });
+}
+
+function advancedOnly(node) {
+  node.dataset.mode = "advanced";
+  return node;
+}
+
+function advancedView(data) {
+  return mode === "advanced" && data.show_numbers !== false;
+}
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -154,8 +196,10 @@ function drawChart(series) {
   const width = 640, height = 280, left = 64, right = 56, top = 16, bottom = 36;
   const periods = [];
   const seen = new Set();
+  const labelOf = new Map();
   for (const item of series) for (const point of item.points) {
     if (!seen.has(point.period)) { seen.add(point.period); periods.push(point.period); }
+    if (point.label) labelOf.set(point.period, point.label);
   }
   periods.sort();
   let min = Infinity, max = -Infinity;
@@ -167,7 +211,11 @@ function drawChart(series) {
   const span = Math.max(periods.length - 1, 1);
   const xOf = (period) => left + (periods.indexOf(period) / span) * (width - left - right);
   const yOf = (value) => top + (1 - (value - min) / (max - min)) * (height - top - bottom);
-  const svg = svgEl("svg", {viewBox: "0 0 " + width + " " + height, role: "img"});
+  const svg = svgEl("svg", {
+    viewBox: "0 0 " + width + " " + height,
+    role: "img",
+    "font-family": "system-ui, sans-serif"
+  });
   const title = svgEl("title", {});
   title.textContent = "Udvikling over tid";
   svg.append(title);
@@ -175,33 +223,48 @@ function drawChart(series) {
   svg.append(svgEl("line", {
     x1: left, y1: height - bottom, x2: width - right, y2: height - bottom, stroke: "#c9c2b6"
   }));
-  for (const value of [max, (min + max) / 2, min]) {
+  for (let i = 0; i < 5; i++) {
+    const value = max - (i / 4) * (max - min);
     const label = svgEl("text", {
       x: left - 6, y: yOf(value) + 4, "text-anchor": "end", fill: "#4a453e", "font-size": "11"
     });
     label.textContent = daDigits(Math.round(value));
     svg.append(label);
   }
-  const step = Math.ceil(periods.length / 6);
+  const step = Math.ceil(periods.length / 4);
   periods.forEach((period, index) => {
     if (index % step && index !== periods.length - 1) return;
     const last = index === periods.length - 1;
     const first = index === 0;
     const label = svgEl("text", {
-      x: last ? width - 4 : (first ? left : xOf(period)),
+      x: xOf(period),
       y: height - 12,
       "text-anchor": last ? "end" : (first ? "start" : "middle"),
       fill: "#4a453e",
-      "font-size": "11"
+      "font-size": "10"
     });
-    label.textContent = period;
+    const shown = labelOf.get(period) || period;
+    label.textContent = shown;
+    const tip = svgEl("title", {});
+    tip.textContent = shown;
+    label.append(tip);
     svg.append(label);
   });
   series.forEach((item, index) => {
+    const color = COLORS[index % COLORS.length];
     const points = item.points.map((point) => xOf(point.period) + "," + yOf(point.value)).join(" ");
     svg.append(svgEl("polyline", {
-      points, fill: "none", stroke: COLORS[index % COLORS.length], "stroke-width": "2"
+      points, fill: "none", stroke: color, "stroke-width": "2"
     }));
+    for (const point of item.points) {
+      const dot = svgEl("circle", {
+        cx: xOf(point.period), cy: yOf(point.value), r: "3.5", fill: color
+      });
+      const tip = svgEl("title", {});
+      tip.textContent = (point.label || point.period) + ": " + daDigits(point.value);
+      dot.append(tip);
+      svg.append(dot);
+    }
   });
   const wrap = el("div", null, "chart");
   wrap.append(svg);
@@ -231,78 +294,112 @@ function legend(series) {
   return row;
 }
 
+function download(blob, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function csvButton(csv) {
   const button = el("button", "Hent CSV");
   button.type = "button";
   button.addEventListener("click", () => {
-    const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "statistikbanken.csv";
-    link.click();
-    URL.revokeObjectURL(link.href);
+    download(new Blob([csv], {type: "text/csv;charset=utf-8"}), "statistikbanken.csv");
   });
   return button;
 }
 
-function render(data) {
-  out.replaceChildren();
-  if (data.error) {
-    out.append(el("p", data.error, "error"));
-    return;
-  }
-  const answer = el("section");
-  const heading = el("div", null, "row");
-  heading.append(el("h2", "Svar"));
-  if (data.show_numbers !== false && data.facts && data.facts.length && data.csv) {
-    heading.append(csvButton(data.csv));
-  }
-  answer.append(heading, el("p", data.answer || "", "answer"));
-  out.append(answer);
-
-  if (data.show_numbers !== false && data.chart && data.chart.length) {
-    const chart = el("section");
-    chart.append(el("h2", "Udvikling"), drawChart(data.chart), legend(data.chart));
-    out.append(chart);
-  }
-
-  if (data.show_numbers === false) return;
-  const facts = el("section");
-  facts.append(el("h2", "Tal"));
-  const linked = new Set();
-  for (const fact of data.facts || []) {
-    if (fact.url && fact.table && !linked.has(fact.table)) {
-      linked.add(fact.table);
-      const link = document.createElement("a");
-      link.href = fact.url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = "Tabel " + fact.table + " på Statistikbanken";
-      facts.append(link);
+function fileButton(label, format, facts) {
+  const button = el("button", label);
+  button.type = "button";
+  const filename = format === "xlsx" ? "statistikbanken.xlsx" : "statistikbanken.json";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/export", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({format, facts}),
+      });
+      if (!response.ok) return;
+      download(await response.blob(), filename);
+    } finally {
+      button.disabled = false;
     }
-  }
-  const list = el("div", null, "facts");
-  if (!data.facts || data.facts.length === 0) {
-    list.append(el("p", "Ingen tal hentet.", "meta"));
-  }
-  for (const fact of data.facts || []) {
-    const card = el("div", null, "fact");
-    const value = typeof fact.value === "number" ? daDigits(fact.value)
-      : (fact.value == null ? "–" : String(fact.value));
-    card.append(el("strong", value));
-    const bits = [
-      "Tabel " + (fact.table || ""),
-      "Periode " + (fact.period || ""),
-      "Enhed " + (fact.unit || ""),
-    ];
-    if (fact.detail) bits.push(fact.detail);
-    if (fact.unpublished) bits.push("Ikke offentliggjort endnu");
-    card.append(el("div", bits.filter(Boolean).join(" · "), "meta"));
-    list.append(card);
-  }
-  facts.append(list);
-  out.append(facts);
+  });
+  return button;
+}
 
+function pngButton(svg) {
+  const button = el("button", "Hent graf (PNG)");
+  button.type = "button";
+  button.addEventListener("click", () => {
+    const clone = svg.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", "640");
+    clone.setAttribute("height", "280");
+    const xml = new XMLSerializer().serializeToString(clone);
+    const url = URL.createObjectURL(new Blob([xml], {type: "image/svg+xml;charset=utf-8"}));
+    const image = new Image();
+    image.onload = () => {
+      const legend = svg.closest("section").querySelector(".legend");
+      const bits = legend ? [...legend.children] : [];
+      const extra = bits.length ? 40 : 0;
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = 640 * scale;
+      canvas.height = (280 + extra) * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, 640 * scale, 280 * scale);
+      ctx.font = (15 * scale) + "px system-ui, sans-serif";
+      ctx.textBaseline = "middle";
+      let x = 8 * scale;
+      const y = (280 + extra / 2) * scale;
+      bits.forEach((bit, index) => {
+        ctx.fillStyle = COLORS[index % COLORS.length];
+        ctx.fillRect(x, y - 6 * scale, 12 * scale, 12 * scale);
+        x += 18 * scale;
+        ctx.fillStyle = "#1c1915";
+        const text = bit.textContent || "";
+        ctx.fillText(text, x, y);
+        x += ctx.measureText(text).width + 16 * scale;
+      });
+      URL.revokeObjectURL(url);
+      canvas.toBlob((png) => download(png, "statistikbanken.png"));
+    };
+    image.src = url;
+  });
+  return button;
+}
+
+function drawGrid(grid) {
+  const wrap = el("div", null, "facts");
+  const rows = (grid && grid.rows) || [];
+  if (!rows.length) {
+    wrap.append(el("p", "Ingen tal hentet.", "meta"));
+    return wrap;
+  }
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const name of grid.columns) head.append(el("th", name));
+  const thead = document.createElement("thead");
+  thead.append(head);
+  const body = document.createElement("tbody");
+  for (const row of rows) {
+    const line = document.createElement("tr");
+    for (const cell of row) line.append(el("td", cell));
+    body.append(line);
+  }
+  table.append(thead, body);
+  wrap.append(table);
+  return wrap;
+}
+
+function toolCalls(data) {
   const trace = el("section");
   trace.append(el("h2", "Værktøjskald"));
   if (!data.calls || data.calls.length === 0) {
@@ -317,7 +414,58 @@ function render(data) {
     item.append(el("pre", call.result || ""));
     trace.append(item);
   }
-  out.append(trace);
+  return trace;
+}
+
+function render(data) {
+  out.replaceChildren();
+  if (data.error) {
+    out.append(el("p", data.error, "error"));
+    return;
+  }
+  const answer = el("section");
+  answer.append(el("h2", "Svar"), el("p", data.answer || "", "answer"));
+  out.append(answer);
+
+  let chartSvg = null;
+  if (advancedView(data) && data.chart && data.chart.length) {
+    const chart = el("section");
+    const drawn = drawChart(data.chart);
+    chartSvg = drawn.querySelector("svg");
+    chart.append(el("h2", "Udvikling"), drawn, legend(data.chart));
+    out.append(advancedOnly(chart));
+  }
+
+  if (data.show_numbers !== false) {
+    const facts = el("section");
+    facts.append(el("h2", "Tal"));
+    if (advancedView(data)) {
+      const linked = new Set();
+      for (const fact of data.facts || []) {
+        if (fact.url && fact.table && !linked.has(fact.table)) {
+          linked.add(fact.table);
+          const link = document.createElement("a");
+          link.href = fact.url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          const title = fact.title ? ", " + fact.title : "";
+          link.textContent = "Tabel " + fact.table + title + " på Statistikbanken";
+          facts.append(advancedOnly(link));
+        }
+      }
+    }
+    facts.append(drawGrid(data.grid));
+    if (advancedView(data) && data.facts && data.facts.length && data.csv) {
+      const row = el("div", null, "exports");
+      row.append(advancedOnly(csvButton(data.csv)));
+      row.append(advancedOnly(fileButton("Hent Excel", "xlsx", data.facts)));
+      row.append(advancedOnly(fileButton("Hent JSON", "json", data.facts)));
+      if (chartSvg) row.append(advancedOnly(pngButton(chartSvg)));
+      facts.append(row);
+    }
+    out.append(facts);
+  }
+  if (mode === "advanced") out.append(advancedOnly(toolCalls(data)));
 }
 
 form.addEventListener("submit", async (event) => {
@@ -332,9 +480,11 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify({ question }),
     });
     const data = await response.json();
+    last = data;
     render(data);
   } catch (error) {
-    render({ error: "Kunne ikke hente et svar." });
+    last = { error: "Kunne ikke hente et svar." };
+    render(last);
   } finally {
     button.disabled = false;
   }
@@ -479,6 +629,7 @@ class TurnResult:
     calls: list[dict[str, str]]
     chart: list[dict[str, Any]] = field(default_factory=list)
     csv: str = ""
+    grid: dict[str, Any] = field(default_factory=dict)
     show_numbers: bool = True
 
 
@@ -603,6 +754,7 @@ def _facts_from(name: str, result: str) -> list[dict[str, Any]]:
                 "unit": payload.get("unit") or "",
                 "value": row.get("value"),
                 "detail": detail,
+                "title": payload.get("title") if isinstance(payload.get("title"), str) else "",
                 "unpublished": row.get("unpublished") is True,
                 "url": _table_url(str(payload.get("table") or "")),
             }
@@ -614,6 +766,117 @@ def _table_url(table: str) -> str:
     if table.isalnum():
         return f"https://www.statistikbanken.dk/{table}"
     return ""
+
+
+_TOTAL_LABELS = frozenset({"i alt", "total", "tot", "alle"})
+_MONTHS = (
+    "januar",
+    "februar",
+    "marts",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "august",
+    "september",
+    "oktober",
+    "november",
+    "december",
+)
+_QUARTER_RE = re.compile(r"((?:19|20)\d{2})K([1-4])\Z", re.IGNORECASE)
+_MONTH_RE = re.compile(r"((?:19|20)\d{2})M(0[1-9]|1[0-2])\Z", re.IGNORECASE)
+_HALF_RE = re.compile(r"((?:19|20)\d{2})H([12])\Z", re.IGNORECASE)
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}\Z")
+
+
+def period_label(code: str) -> str:
+    """Friendly Danish period. Unknown codes are returned unchanged."""
+    text = str(code).strip()
+    quarter = _QUARTER_RE.fullmatch(text)
+    if quarter:
+        return f"{quarter.group(1)} {quarter.group(2)}. kvt."
+    month = _MONTH_RE.fullmatch(text)
+    if month:
+        return f"{_MONTHS[int(month.group(2)) - 1]} {month.group(1)}"
+    half = _HALF_RE.fullmatch(text)
+    if half:
+        return f"{half.group(1)} {half.group(2)}. halvår"
+    if _YEAR_RE.fullmatch(text):
+        return text
+    return text
+
+
+def _period_phrases(code: str) -> list[str]:
+    """Writings of one fetched period whose digits are not separate figures."""
+    text = str(code).strip()
+    label = period_label(text)
+    phrases = [label] if label != text else []
+    if label.endswith("."):
+        phrases.append(label[:-1])
+    quarter = _QUARTER_RE.fullmatch(text)
+    if quarter:
+        phrases.append(f"{quarter.group(2)}. kvartal {quarter.group(1)}")
+    half = _HALF_RE.fullmatch(text)
+    if half:
+        phrases.append(f"{half.group(2)}. halvår {half.group(1)}")
+    return phrases
+
+
+def display_label(detail: str, table: str = "") -> str:
+    """'Rudersdal, 80+' rather than 'OMRÅDE: Rudersdal, KØN: I alt, ALDER: 80+'."""
+    if not detail:
+        return table
+    values = []
+    for part in detail.split(", "):
+        _name, sep, value = part.partition(": ")
+        text = value if sep else part
+        if text and text.casefold() not in _TOTAL_LABELS:
+            values.append(text)
+    return ", ".join(values) or table
+
+
+def facts_to_grid(facts: list[dict[str, Any]]) -> dict[str, list[Any]]:
+    """One row per period, one column per series. Every period is kept."""
+    keys: list[tuple[str, str, str]] = []
+    by_period: dict[str, dict[tuple[str, str, str], str]] = {}
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        period = str(fact.get("period") or "")
+        if not period:
+            continue
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("detail") or ""),
+            str(fact.get("unit") or ""),
+        )
+        if key not in keys:
+            keys.append(key)
+        by_period.setdefault(period, {})[key] = _grid_cell(fact)
+    if not keys:
+        return {"columns": [], "rows": []}
+    labels = [display_label(detail, table) for table, detail, _unit in keys]
+    if len(set(labels)) != len(labels):
+        labels = [
+            f"{label} ({table})" if table else label
+            for label, (table, _detail, _unit) in zip(labels, keys, strict=True)
+        ]
+    return {
+        "columns": ["Periode", *labels],
+        "rows": [
+            [period_label(period), *[by_period[period].get(key, "–") for key in keys]]
+            for period in sorted(by_period)
+        ],
+    }
+
+
+def _grid_cell(fact: dict[str, Any]) -> str:
+    if fact.get("unpublished"):
+        return "–"
+    value = fact.get("value")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "–" if value is None else str(value)
+    return _da_number(value)
 
 
 def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -644,33 +907,175 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         table, detail, unit = key
         series.append(
             {
-                "label": detail or table,
+                "label": display_label(detail, table),
                 "table": table,
                 "unit": unit,
                 "points": [
-                    {"period": period, "value": points[period]} for period in sorted(points)
+                    {
+                        "period": period,
+                        "label": period_label(period),
+                        "value": points[period],
+                    }
+                    for period in sorted(points)
                 ],
             }
         )
     return series
 
 
-def facts_to_csv(facts: list[dict[str, Any]]) -> str:
-    """UTF-8 CSV with BOM, semicolon separator, and a decimal comma."""
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
-    writer.writerow(["tabel", "periode", "dimensioner", "værdi", "enhed"])
+_EXPORT_HEADER = ["tabel", "periode", "dimensioner", "værdi", "enhed"]
+
+
+def _export_rows(facts: list[dict[str, Any]]) -> tuple[list[str], list[list[str]]]:
+    rows = []
     for fact in facts:
-        writer.writerow(
+        if not isinstance(fact, dict):
+            continue
+        rows.append(
             [
-                fact.get("table") or "",
-                fact.get("period") or "",
-                fact.get("detail") or "",
+                str(fact.get("table") or ""),
+                period_label(str(fact.get("period") or "")),
+                str(fact.get("detail") or ""),
                 _csv_number(fact.get("value")),
-                fact.get("unit") or "",
+                str(fact.get("unit") or ""),
             ]
         )
+    return list(_EXPORT_HEADER), rows
+
+
+def facts_to_csv(facts: list[dict[str, Any]]) -> str:
+    """UTF-8 CSV with BOM, semicolon separator, and a decimal comma."""
+    header, rows = _export_rows(facts)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(header)
+    writer.writerows(rows)
     return "\ufeff" + buffer.getvalue()
+
+
+def facts_to_json(facts: list[dict[str, Any]]) -> str:
+    """CSV columns, but periode stays the raw code and periode_label is friendly."""
+    rows = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        raw = str(fact.get("period") or "")
+        rows.append(
+            {
+                "tabel": str(fact.get("table") or ""),
+                "periode": raw,
+                "periode_label": period_label(raw),
+                "dimensioner": str(fact.get("detail") or ""),
+                "værdi": _csv_number(fact.get("value")),
+                "enhed": str(fact.get("unit") or ""),
+            }
+        )
+    return json.dumps(rows, ensure_ascii=False)
+
+
+def facts_to_xlsx(facts: list[dict[str, Any]]) -> bytes:
+    """The same columns and cell text as the CSV, as a workbook Excel can open."""
+    header, rows = _export_rows(facts)
+    sheet_rows = []
+    for index, row in enumerate([header, *rows], start=1):
+        cells = []
+        for col, value in enumerate(row):
+            ref = f"{_xlsx_col(col)}{index}"
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{_xml_text(value)}</t></is></c>')
+        sheet_rows.append(f'<row r="{index}">{"".join(cells)}</row>')
+    sheet = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+    )
+    parts = {
+        "[Content_Types].xml": _XLSX_CONTENT_TYPES,
+        "_rels/.rels": _XLSX_ROOT_RELS,
+        "xl/workbook.xml": _XLSX_WORKBOOK,
+        "xl/_rels/workbook.xml.rels": _XLSX_WORKBOOK_RELS,
+        "xl/styles.xml": _XLSX_STYLES,
+        "xl/worksheets/sheet1.xml": sheet,
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, body in parts.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+def _xlsx_col(index: int) -> str:
+    letters = ""
+    number = index + 1
+    while number:
+        number, rem = divmod(number - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def _xml_text(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _xlsx_xml(*lines: str) -> str:
+    return "".join(lines)
+
+
+_XLSX_CONTENT_TYPES = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '<Default Extension="rels" ContentType=',
+    '"application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType=',
+    '"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType=',
+    '"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+    '<Override PartName="/xl/styles.xml" ContentType=',
+    '"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
+    "</Types>",
+)
+
+_XLSX_ROOT_RELS = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type=',
+    '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"',
+    ' Target="xl/workbook.xml"/>',
+    "</Relationships>",
+)
+
+_XLSX_WORKBOOK = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    '<sheets><sheet name="Tal" sheetId="1" r:id="rId1"/></sheets>',
+    "</workbook>",
+)
+
+_XLSX_WORKBOOK_RELS = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type=',
+    '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="worksheets/sheet1.xml"/>',
+    '<Relationship Id="rId2" Type=',
+    '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"',
+    ' Target="styles.xml"/>',
+    "</Relationships>",
+)
+
+_XLSX_STYLES = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>',
+    '<fills count="2"><fill><patternFill patternType="none"/></fill>',
+    '<fill><patternFill patternType="gray125"/></fill></fills>',
+    '<borders count="1"><border>',
+    "<left/><right/><top/><bottom/><diagonal/></border></borders>",
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>',
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>',
+    "</styleSheet>",
+)
 
 
 def _csv_number(value: Any) -> str:
@@ -706,6 +1111,7 @@ def _turn(
         calls=calls,
         chart=chart_series(kept),
         csv=facts_to_csv(kept) if kept else "",
+        grid=facts_to_grid(kept),
     )
 
 
@@ -731,9 +1137,9 @@ _TREND_MARKERS = (
     "history",
 )
 _PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
-# The year in 2015K1 or in a bare period such as 2024. The quarter digit is not a figure.
+# The year in 2015K1, 2015H1, or a bare period such as 2024. The quarter digit is not a figure.
 _PERIOD_YEAR_RE = re.compile(
-    r"\b((?:19|20)\d{2})(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))?\b",
+    r"\b((?:19|20)\d{2})(?:K[1-4]|Q[1-4]|H[12]|M(?:0[1-9]|1[0-2]))?\b",
     re.IGNORECASE,
 )
 _TITLE_RE = re.compile(r'"title"\s*:\s*"((?:\\.|[^"\\])*)"')
@@ -766,7 +1172,7 @@ def _closing_instruction(question: str) -> str:
     if _looks_danish(question):
         language = (
             "The question is Danish. Answer in Danish. Do not answer in English. "
-            "Write 5.045 and 2026K3."
+            "Write 5.045 and 2015 1. kvt."
         )
     else:
         language = "Answer in the same language as the question."
@@ -782,6 +1188,7 @@ def _closing_instruction(question: str) -> str:
         )
     return (
         f"{language} {scope} "
+        "Do not open with the table id or the table title. "
         "Use only numbers that appear in hent_data rows from this question. "
         "If a tool call failed, say so and do not invent figures."
     )
@@ -855,8 +1262,12 @@ def _is_page_message(answer: str) -> bool:
 
 def _summary_line(fact: dict[str, Any]) -> str:
     value = _da_number(fact["value"])
-    bits = [str(fact.get(key) or "") for key in ("table", "period", "unit")]
-    detail = str(fact.get("detail") or "")
+    bits = [
+        str(fact.get("table") or ""),
+        period_label(str(fact.get("period") or "")),
+        str(fact.get("unit") or ""),
+    ]
+    detail = display_label(str(fact.get("detail") or ""))
     if detail:
         bits.append(detail)
     label = ", ".join(bit for bit in bits if bit)
@@ -1065,7 +1476,9 @@ def _unverified_numbers(
     titles = _fetched_titles(calls)
     allowed = _numbers_in_context(question, facts, titles)
     allowed.update(_argument_figures(calls))
-    flagged = [number for number in _numbers_in(answer) if not _near(number, allowed)]
+    fetched = {str(fact.get("period") or "") for fact in facts}
+    scanned = _mask_friendly_periods(answer, fetched)
+    flagged = [number for number in _numbers_in(scanned) if not _near(number, allowed)]
     known_periods = _period_tokens(question)
     for fact in facts:
         known_periods.update(_period_tokens(str(fact.get("period") or "")))
@@ -1188,6 +1601,16 @@ def _numbers_in(text: str) -> list[float]:
 
 def _mask_periods(text: str) -> str:
     return _PERIOD_RE.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def _mask_friendly_periods(text: str, periods: set[str]) -> str:
+    """Hide digits that only name a fetched quarter, month, or half-year."""
+    phrases: list[str] = []
+    for code in periods:
+        phrases.extend(_period_phrases(code))
+    for phrase in sorted(set(phrases), key=len, reverse=True):
+        text = re.sub(re.escape(phrase), " " * len(phrase), text, flags=re.IGNORECASE)
+    return text
 
 
 def _parse_stat_number(token: str) -> float:
@@ -1457,14 +1880,19 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] != "/api/ask":
-                self._json(404, {"error": "Ukendt adresse."})
-                return
+            path = self.path.split("?", 1)[0]
             length = int(self.headers.get("Content-Length", "0") or 0)
-            if length > MAX_BODY_BYTES:
-                self._json(400, {"error": "Spørgsmålet er for langt."})
+            limit = EXPORT_MAX_BYTES if path == "/api/export" else MAX_BODY_BYTES
+            if length > limit:
+                self._json(400, {"error": "Forespørgslen er for lang."})
                 return
             raw = self.rfile.read(length)
+            if path == "/api/export":
+                self._export(raw)
+                return
+            if path != "/api/ask":
+                self._json(404, {"error": "Ukendt adresse."})
+                return
             try:
                 payload = json.loads(raw.decode("utf-8"))
                 question = str(payload.get("question", "")).strip()
@@ -1500,9 +1928,35 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                     "calls": result.calls,
                     "chart": result.chart,
                     "csv": result.csv,
+                    "grid": result.grid,
                     "show_numbers": result.show_numbers,
                 },
             )
+
+        def _export(self, raw: bytes) -> None:
+            """Turn already-fetched facts into a file. No model call, no new data call."""
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+                fmt = str(payload.get("format", ""))
+                facts = payload.get("facts")
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                self._json(400, {"error": "Kunne ikke læse tallene."})
+                return
+            if not isinstance(facts, list) or any(not isinstance(item, dict) for item in facts):
+                self._json(400, {"error": "Kunne ikke læse tallene."})
+                return
+            if fmt == "json":
+                body = facts_to_json(facts).encode("utf-8")
+                self._send(200, body, "application/json; charset=utf-8")
+                return
+            if fmt == "xlsx":
+                self._send(
+                    200,
+                    facts_to_xlsx(facts),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+                return
+            self._json(400, {"error": "Ukendt format."})
 
         def _json(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
