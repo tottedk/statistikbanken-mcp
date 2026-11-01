@@ -386,21 +386,32 @@ def _with_stem(token: str, found: list[str]) -> None:
         found.append(token[:-1])
 
 
-def _forms(token: str) -> tuple[str, ...]:
-    """Synonyms, a trailing e, and a compound split on the linking s."""
+# Person-dimension words. "før skat" must not outrank a table that actually
+# breaks the figure down by one of these.
+_BREAKDOWNS = frozenset({"kon", "alder", "uddannelse", "civilstand", "herkomst"})
+
+
+def _compound_parts(token: str) -> tuple[str, ...]:
+    """Split gennemsnitsindkomst on the linking s into gennemsnit + indkomst."""
+    if len(token) < 14:
+        return ()
+    parts: list[str] = []
+    for index in range(7, len(token) - 7):
+        if token[index] != "s":
+            continue
+        left, right = token[:index], token[index + 1 :]
+        if len(left) < 7 or len(right) < 7:
+            continue
+        for part in (left, right):
+            parts.append(part)
+            _with_stem(part, parts)
+    return tuple(dict.fromkeys(parts))
+
+
+def _primary_forms(token: str) -> tuple[str, ...]:
+    """The word itself, a trailing e, and synonyms. Not the compound pieces."""
     found = [token]
     _with_stem(token, found)
-    # gennemsnitsindkomst -> gennemsnit + indkomst. Both parts are alternatives.
-    if len(token) >= 14:
-        for index in range(7, len(token) - 7):
-            if token[index] != "s":
-                continue
-            left, right = token[:index], token[index + 1 :]
-            if len(left) < 7 or len(right) < 7:
-                continue
-            for part in (left, right):
-                found.append(part)
-                _with_stem(part, found)
     for item in tuple(found):
         found.extend(_SYNONYMS.get(item, ()))
     return tuple(dict.fromkeys(found))
@@ -410,6 +421,61 @@ def _contains_token(haystack: str, token: str) -> bool:
     if len(token) >= 4:
         return token in haystack
     return re.search(rf"(?<!\w){re.escape(token)}(?!\w)", haystack) is not None
+
+
+def _field_weight(table_id: str, title: str, variables: str, term: str) -> int:
+    if _contains_token(table_id, term):
+        return 80
+    if _contains_token(title, term):
+        return 40
+    if _contains_token(variables, term):
+        return 15
+    return 0
+
+
+def _token_score(table_id: str, title: str, variables: str, token: str) -> int:
+    """Full word first. Compound pieces count only when the word itself misses.
+
+    A piece is worth less than a variable hit (15), so a real word always
+    outranks a table that only matched forening inside foreningsmedlemmer.
+    """
+    primary = max(
+        (_field_weight(table_id, title, variables, term) for term in _primary_forms(token)),
+        default=0,
+    )
+    if primary:
+        return primary
+    # Title 8, id 6, variables 3. Several pieces add up, still under 15.
+    fallback = 0
+    for part in _compound_parts(token):
+        weight = _field_weight(table_id, title, variables, part)
+        if weight == 80:
+            fallback += 6
+        elif weight == 40:
+            fallback += 8
+        elif weight:
+            fallback += 3
+    return min(fallback, 14)
+
+
+def _pre_tax_adjustment(query: str, title: str, tokens: list[str]) -> int:
+    """Prefer "Indkomst i alt" for income before tax, unless a breakdown is named.
+
+    The boost has to clear three ordinary title hits (about 200) or INDKP105
+    never reaches the top three. A query that also says køn, alder, or
+    uddannelse only gets a tie-breaker, so the table that carries that
+    dimension stays first.
+    """
+    if "for skat" not in " ".join(_fold(query).split()):
+        return 0
+    folded = _fold(title)
+    breakdown = any(_fold(token) in _BREAKDOWNS for token in tokens)
+    score = 0
+    if "indkomst i alt" in folded:
+        score += 1 if breakdown else 170
+    if "disponibel" in folded:
+        score -= 1 if breakdown else 40
+    return score
 
 
 def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int | None:
@@ -426,14 +492,7 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
         score += 200
     matched = 0
     for token in tokens:
-        best = 0
-        for alt in _forms(token):
-            if _contains_token(haystack_id, alt):
-                best = max(best, 80)
-            elif _contains_token(haystack_title, alt):
-                best = max(best, 40)
-            elif _contains_token(haystack_variables, alt):
-                best = max(best, 15)
+        best = _token_score(haystack_id, haystack_title, haystack_variables, token)
         if best:
             matched += 1
             score += best
@@ -444,15 +503,7 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
         score += 30
     if table.get("active") is True:
         score += 5
-    # "Indkomst i alt" is income before tax. Three title hits score about 200,
-    # so a single hit needs this boost to reach the top three. "Disponibel" is after tax.
-    if "for skat" in " ".join(_fold(folded).split()):
-        title_fold = _fold(haystack_title)
-        if "indkomst i alt" in title_fold:
-            score += 170
-        if "disponibel" in title_fold:
-            score -= 40
-    return score
+    return score + _pre_tax_adjustment(folded, haystack_title, tokens)
 
 
 def _parse_table(data: Any) -> _Table:
