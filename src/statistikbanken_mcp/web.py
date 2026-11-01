@@ -1209,7 +1209,8 @@ def _turn(
 ) -> TurnResult:
     # A figure in the prose is kept when it is in the question, a hent_data
     # value, a period or row label from those rows, the fetched table title,
-    # or a variable value on this turn's hent_data arguments.
+    # or a variable value on this turn's hent_data arguments. A figure tied
+    # to one of those periods or row labels has to be that row's value.
     refusal = _relevance_refusal(question, facts)
     if refusal:
         # The rows are real, but they are not the question. Do not chart them.
@@ -1267,6 +1268,30 @@ _NUMBER_RE = re.compile(
     r"|\d+(?:[.,]\d+)?"
     r")(?![A-Za-z0-9_])"
 )
+# Next to a period or row label: "94.486 (2013K1)", "2013K1 94.486", "i 2013K1".
+_TIE_GAP_RE = re.compile(
+    r"^[ \t]*(?:[([][ \t]*|[ \t]*[)\]]|:|in|for|på|pa|i)?[ \t]*$",
+    re.IGNORECASE,
+)
+_RANGE_PREFIX_RE = re.compile(
+    r"(?<![0-9A-Za-zÆØÅæøå])"
+    r"(?:indtil|until|siden|since|mellem|between|from|fra|til)"
+    r"[ \t]*[([]?[ \t]*$",
+    re.IGNORECASE,
+)
+# "en forskel på 153" and "i alt 9.999" are not a claim that the row equals that figure.
+_TOTAL_PHRASE_RE = re.compile(
+    r"(?<![0-9A-Za-zÆØÅæøå])"
+    r"(?:i alt|in total|forskellen|forskel|stigningen|stigning|faldet|fald|procent|"
+    r"difference|percentage|percent)"
+    r"(?![0-9A-Za-zÆØÅæøå])"
+    r"(?:[ \t]+\S+){0,2}[ \t]*$",
+    re.IGNORECASE,
+)
+# "." ends a sentence only before a capital or the end. "1. kvt." and "94.333" stay intact.
+_CLAUSE_SPLIT_RE = re.compile(r"[!?;\n]|\s+/\s+|(?<=\.)(?=\s+[A-ZÆØÅ]|\s*$)")
+_BARE_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+_PERIOD_EDGE = "0-9A-Za-zÆØÅæøå"
 
 
 def _looks_danish(question: str) -> bool:
@@ -1318,7 +1343,8 @@ def guard_answer(
 
     Allowed figures are the question, a hent_data value, a period or row label
     from those rows, the fetched table title, and a variable value on this
-    turn's hent_data arguments. A question that asks for one
+    turn's hent_data arguments. A figure tied in the same clause to one fetched
+    period or row label has to be that row's value. A question that asks for one
     figure is answered with the page's own line for the latest period. The
     model's sentence is not used, so a long series or an invented total cannot
     become the answer.
@@ -1601,7 +1627,209 @@ def _unverified_numbers(
     for token in _period_tokens(answer):
         if token not in known_periods:
             flagged.append(float(token[:4]))
+    flagged.extend(_mispaired_figures(answer, facts))
     return flagged
+
+
+def _mispaired_figures(answer: str, facts: list[dict[str, Any]]) -> list[float]:
+    """Figures the clause assigns to a fetched period or row they do not belong to.
+
+    A tie is either adjacency (parentheses, a colon, or i/in/for/på) or the only
+    figure in the clause beside the only period or row label. A list of several
+    figures is not paired off by order. Fra/siden/til introduce a range, and a
+    difference or total is not a claim that the row equals that figure.
+    """
+    periods = _period_mentions(answer, facts)
+    labels = _label_mentions(answer, facts, [(start, end) for start, end, _code in periods])
+    covered = [(start, end) for start, end, _code in periods]
+    covered.extend((start, end) for start, end, _label in labels)
+    numbers = _figure_mentions(answer, covered)
+    if not numbers:
+        return []
+    period_for: dict[int, set[str]] = {}
+    label_for: dict[int, set[str]] = {}
+
+    def bind_period(index: int, code: str) -> None:
+        period_for.setdefault(index, set()).add(code)
+
+    def bind_label(index: int, label: str) -> None:
+        label_for.setdefault(index, set()).add(label)
+
+    anchors: list[tuple[int, int, str, int | str]] = []
+    for start, end, code in periods:
+        anchors.append((start, end, "period", code))
+    for start, end, label in labels:
+        anchors.append((start, end, "label", label))
+    for index, (start, end, _value) in enumerate(numbers):
+        anchors.append((start, end, "number", index))
+    anchors.sort(key=lambda item: item[0])
+    for position, (start, end, kind, payload) in enumerate(anchors):
+        if kind != "number" or not isinstance(payload, int):
+            continue
+        for neighbor in (position - 1, position + 1):
+            if not 0 <= neighbor < len(anchors):
+                continue
+            other_start, other_end, other_kind, other = anchors[neighbor]
+            if other_kind == "number":
+                continue
+            gap = answer[end:other_start] if other_start >= end else answer[other_end:start]
+            if _TIE_GAP_RE.fullmatch(gap) is None:
+                continue
+            if other_kind == "period" and isinstance(other, str):
+                if _range_prefixed(answer, other_start):
+                    continue
+                bind_period(payload, other)
+            elif isinstance(other, str):
+                bind_label(payload, other)
+    for clause_start, clause_end in _clause_ranges(answer):
+        claimed = [
+            index
+            for index, (start, end, _value) in enumerate(numbers)
+            if clause_start <= start and end <= clause_end and not _stated_as_total(answer, start)
+        ]
+        clause_periods = [
+            code
+            for start, end, code in periods
+            if clause_start <= start and end <= clause_end and not _range_prefixed(answer, start)
+        ]
+        clause_labels = [
+            label for start, end, label in labels if clause_start <= start and end <= clause_end
+        ]
+        if len(claimed) == 1 and len(clause_periods) == 1:
+            bind_period(claimed[0], clause_periods[0])
+        if len(claimed) == 1 and len(clause_labels) == 1:
+            bind_label(claimed[0], clause_labels[0])
+    flagged: list[float] = []
+    for index in set(period_for) | set(label_for):
+        codes = period_for.get(index, set())
+        bound_labels = label_for.get(index, set())
+        value = numbers[index][2]
+        if not any(_row_has(fact, value, codes, bound_labels) for fact in facts):
+            flagged.append(value)
+    return flagged
+
+
+def _row_has(fact: dict[str, Any], number: float, codes: set[str], labels: set[str]) -> bool:
+    value = fact.get("value")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    if not _near(float(number), {float(value)}):
+        return False
+    if codes and (len(codes) != 1 or str(fact.get("period") or "").strip().casefold() not in codes):
+        return False
+    return not labels or labels <= _fact_labels(fact)
+
+
+def _fact_labels(fact: dict[str, Any]) -> set[str]:
+    found: set[str] = set()
+    for part in str(fact.get("detail") or "").split(", "):
+        _name, sep, value = part.partition(": ")
+        text = (value if sep else part).strip()
+        folded = _fold_place(text)
+        if not text or text.casefold() in _TOTAL_LABELS or len(folded) < 4:
+            continue
+        if re.search(r"[a-z]", folded):
+            found.add(folded)
+    return found
+
+
+def _period_mentions(text: str, facts: list[dict[str, Any]]) -> list[tuple[int, int, str]]:
+    forms: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for fact in facts:
+        code = str(fact.get("period") or "").strip()
+        if not code:
+            continue
+        canonical = code.casefold()
+        for form in (code, *_period_phrases(code)):
+            key = form.casefold()
+            if form and key not in seen:
+                seen.add(key)
+                forms.append((form, canonical))
+    forms.sort(key=lambda item: len(item[0]), reverse=True)
+    occupied: list[tuple[int, int]] = []
+    found: list[tuple[int, int, str]] = []
+    for form, canonical in forms:
+        pattern = re.compile(
+            rf"(?<![{_PERIOD_EDGE}]){re.escape(form)}(?![{_PERIOD_EDGE}])",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(text):
+            span = (match.start(), match.end())
+            if _span_overlaps(span, occupied):
+                continue
+            occupied.append(span)
+            found.append((span[0], span[1], canonical))
+    return found
+
+
+def _label_mentions(
+    text: str,
+    facts: list[dict[str, Any]],
+    periods: list[tuple[int, int]],
+) -> list[tuple[int, int, str]]:
+    labels = {label for fact in facts for label in _fact_labels(fact)}
+    labels_longest = sorted(labels, key=len, reverse=True)
+    folded, origins = _fold_index(text)
+    occupied = list(periods)
+    found: list[tuple[int, int, str]] = []
+    for label in labels_longest:
+        pattern = re.compile(rf"(?<![0-9a-z]){re.escape(label)}s?(?![0-9a-z])")
+        for match in pattern.finditer(folded):
+            start = origins[match.start()]
+            end = origins[match.end() - 1] + 1
+            if _span_overlaps((start, end), occupied):
+                continue
+            occupied.append((start, end))
+            found.append((start, end, label))
+    return found
+
+
+def _figure_mentions(
+    text: str,
+    covered: list[tuple[int, int]],
+) -> list[tuple[int, int, float]]:
+    found: list[tuple[int, int, float]] = []
+    for match in _NUMBER_RE.finditer(text):
+        span = match.span(1)
+        token = match.group(1)
+        if _span_overlaps(span, covered) or _BARE_YEAR_RE.fullmatch(token):
+            continue
+        found.append((span[0], span[1], _parse_stat_number(token)))
+    return found
+
+
+def _clause_ranges(text: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    for match in _CLAUSE_SPLIT_RE.finditer(text):
+        ranges.append((start, match.start()))
+        start = match.end()
+    ranges.append((start, len(text)))
+    return ranges
+
+
+def _range_prefixed(text: str, start: int) -> bool:
+    return _RANGE_PREFIX_RE.search(text[max(0, start - 32) : start]) is not None
+
+
+def _stated_as_total(text: str, start: int) -> bool:
+    return _TOTAL_PHRASE_RE.search(text[max(0, start - 48) : start]) is not None
+
+
+def _span_overlaps(span: tuple[int, int], occupied: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(start < other_end and other_start < end for other_start, other_end in occupied)
+
+
+def _fold_index(text: str) -> tuple[str, list[int]]:
+    chars: list[str] = []
+    origins: list[int] = []
+    for index, char in enumerate(text):
+        for piece in _fold_place(char):
+            chars.append(piece)
+            origins.append(index)
+    return "".join(chars), origins
 
 
 def _numbers_in_context(

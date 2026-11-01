@@ -1006,6 +1006,95 @@ def test_friendly_period_forms_are_not_extra_figures() -> None:
     assert guard_answer(question, half, halves) == half
 
 
+def _viborg_quarters() -> list[dict]:
+    """94.486 is 2014K1. 2013K1 is 94.333. The acceptance prose swapped them."""
+    return [
+        _population_fact(94333, "2013K1", "Viborg"),
+        _population_fact(94486, "2014K1", "Viborg"),
+    ]
+
+
+def test_value_from_another_period_is_suppressed(
+    caplog: pytest.LogCaptureFixture[str],
+) -> None:
+    question = "Hvordan har befolkningen i Viborg udviklet sig siden 2013?"
+    facts = _viborg_quarters()
+    missed = [
+        "The lowest was 94,486 (2013K1).",
+        "Viborg havde 94.486 i 2013K1.",
+        "Viborg havde 94\u00a0486 i 2013K1.",
+        "94.486 (2013 1. kvt.).",
+    ]
+    for text in missed:
+        caplog.clear()
+        with caplog.at_level("INFO", logger="statistikbanken_mcp.web"):
+            guarded = guard_answer(question, text, facts)
+        assert guarded == UNVERIFIED_NUMBERS
+        assert caplog.messages == ["Suppressed prose; flagged numbers: 94486"]
+
+
+def test_value_next_to_its_period_or_with_no_period_is_kept() -> None:
+    question = "Hvordan har befolkningen i Viborg udviklet sig siden 2013?"
+    facts = _viborg_quarters()
+    kept = [
+        "The lowest was 94.333 (2013K1).",
+        "Viborg havde 94.486 i 2014K1.",
+        "94.486 (2014 1. kvt.) og 94.333 (2013K1).",
+        "Fra 2013K1 til 2014K1 var tallene 94.333 og 94.486.",
+        "Fra 2013 1. kvt. til 2014 1. kvt. var tallene 94.333 og 94.486.",
+        "Viborg havde 94.486.",
+        "Tallene er 94.333 og 94.486.",
+        "Viborg voksede, en forskel på 153.",
+    ]
+    asked = "Hvordan har befolkningen i Viborg udviklet sig? Forskellen er 153."
+    for text in kept:
+        assert guard_answer(asked if "153" in text else question, text, facts) == text
+
+
+def test_friendly_period_label_must_match_that_row() -> None:
+    question = "Hvordan har udviklingen været?"
+    quarters = _viborg_quarters()
+    assert (
+        guard_answer(question, "I 2014 1. kvt. var tallet 94.486.", quarters)
+        == "I 2014 1. kvt. var tallet 94.486."
+    )
+    assert guard_answer(question, "I 2014 1. kvt. var tallet 94.333.", quarters) == (
+        UNVERIFIED_NUMBERS
+    )
+    assert guard_answer(question, "2014K1 94.486.", quarters) == "2014K1 94.486."
+    assert guard_answer(question, "2013K1 94.486.", quarters) == UNVERIFIED_NUMBERS
+    months = [_population_fact(100, "2015M03"), _population_fact(110, "2015M04")]
+    assert guard_answer(question, "I marts 2015 var tallet 100.", months) == (
+        "I marts 2015 var tallet 100."
+    )
+    assert guard_answer(question, "110 i marts 2015.", months) == UNVERIFIED_NUMBERS
+    assert guard_answer(question, "100 i marts 2015.", months) == "100 i marts 2015."
+
+
+def test_swapped_place_names_are_suppressed() -> None:
+    question = "Hvordan har antallet udviklet sig?"
+    facts = [
+        _population_fact(7556, "2026K3", "Esbjerg"),
+        _population_fact(6420, "2026K3", "Viborg"),
+    ]
+    assert guard_answer(question, "Esbjerg 7.556 / Viborg 6.420", facts) == (
+        "Esbjerg 7.556 / Viborg 6.420"
+    )
+    assert guard_answer(question, "Esbjerg 6.420 / Viborg 7.556", facts) == UNVERIFIED_NUMBERS
+    assert guard_answer(question, "Esbjerg 7.556, Viborg 6.420", facts) == (
+        "Esbjerg 7.556, Viborg 6.420"
+    )
+    assert guard_answer(question, "Esbjerg: 6.420 / Viborg: 7.556", facts) == UNVERIFIED_NUMBERS
+    # 6.420 is also an earlier Esbjerg figure, so the place alone is not a mismatch.
+    both = [
+        *facts,
+        _population_fact(6420, "2015K1", "Esbjerg"),
+    ]
+    assert guard_answer(question, "Esbjerg 6.420", both) == "Esbjerg 6.420"
+    assert guard_answer(question, "Esbjerg 6.420 i 2026 3. kvt.", both) == UNVERIFIED_NUMBERS
+    assert guard_answer(question, "Viborg 6.420 i 2026K3.", both) == "Viborg 6.420 i 2026K3."
+
+
 def test_json_keeps_the_period_code_and_csv_uses_the_label() -> None:
     facts = [
         _fact("Esbjerg", "2015K1", 5045),
