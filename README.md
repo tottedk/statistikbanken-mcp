@@ -44,8 +44,8 @@ Names are Danish. Arguments and descriptions are English.
 | Tool | Purpose | Main inputs | Behaviour worth knowing |
 |---|---|---|---|
 | `find_tabel` | Find a table | `query`, `limit` (1–25, default 10) | Matches id, title, and variable names. Some words are enough. A few synonyms are built in (`population`, `bruttoledighed`, `huspriser`, `husdyr`, `indbrud`). Municipality names are matched against FOLK1A and returned with their codes. A miss is an error, not an empty list. |
-| `tabelinfo` | Read codes | `table`, optional `variable`, `values_filter` | Time is first, last, and count. Long value lists are capped; `values_filter` looks up the rest. |
-| `hent_data` | Fetch rows | `table`, `values`, `sum_from`, `sum_range` | Values may be codes or labels (`Rudersdal`, `Kobenhavn`). A required variable with one total is filled in. One with no total returns its codes. `sum_from` and `sum_range` use the API's own sum. A trailing 0 marked `unpublished` is a period the API has not published yet. |
+| `tabelinfo` | Read codes | `table`, optional `variable`, `values_filter` | Time is first, last, and count. Long value lists are capped; `values_filter` looks up the rest, and several words match any of them. |
+| `hent_data` | Fetch rows | `table`, `values`, `sum_from`, `sum_range` | Values may be codes or labels (`Rudersdal`, `Kobenhavn`). A required variable with one total is filled in. One with no total returns its codes. `sum_from` and `sum_range` use the API's own sum. `>=80` on its own is one row per code. A time sum that would hide rows, including two periods passed where a range was meant, is an error. A trailing 0 marked `unpublished` is a period the API has not published yet. |
 
 Read `title`, `description`, `unit`, and `periods` on the result. They say what the number measures. A search hit can be narrower than the question.
 
@@ -80,7 +80,7 @@ Cursor, in `~/.cursor/mcp.json` or the project `.cursor/mcp.json`. Use the absol
 
 Any other host that launches a local command over stdio can use the same `command` and `args`.
 
-MCP Inspector:
+MCP Inspector. `mcp dev` starts the inspector with `npx`, so Node.js is required:
 
 ```bash
 uv run mcp dev src/statistikbanken_mcp/server.py
@@ -88,41 +88,42 @@ uv run mcp dev src/statistikbanken_mcp/server.py
 
 That starts a local page where you can list the tools and call them.
 
-## Web demo
+## Web page
 
-A local page asks a question in Danish or English. The answer sits above the numbers (table, period, unit). The tool calls that produced them can be expanded. The page is a client of the MCP server over stdio. It does not read Statistikbanken itself. A development over time is one `hent_data` call with a period range such as `>=2015K1`, so each quarter is its own row. Several periods in one series draw a line chart on the page. Several places draw several lines. A sum of time that would hide a place or an age, including two periods passed where a range was meant, is an error that says how to ask for the series. The answer follows the language of the question, with Danish grouping (`5.045`) and periods such as `2015 1. kvt.` for a Danish question. A number in the model's prose is kept only when it is in the question, a fetched `hent_data` value (including `5.045`, `5 045`, and a decimal comma), a period or row label from those rows, the fetched table title, or a variable value in that turn's `hent_data` arguments. A figure that appears only in `tabelinfo` or `find_tabel` is dropped. One fetched figure is also written by the page itself, for example `5.045 (FOLK1A, 2026K3, Antal, OMRÅDE: Rudersdal, ALDER: 80+)`. `80+` and `0-17` on an age variable are totals. A fetched place that the question did not ask for is not presented as the answer. A question that does not ask for a change uses the latest period. The model and Statistikbanken have separate time limits (45 seconds and 30 seconds). Hent CSV downloads those rows as UTF-8 with a BOM, a semicolon between columns, and a decimal comma, which is what Danish Excel expects. Each table links to `https://www.statistikbanken.dk/` plus the table id.
-
-### Modes
-
-The page opens in Basis. Basis shows the answer and a compact table (one row per period, one column per series, such as Rudersdal, 80+). It hides the chart, the downloads, the source link, and the tool calls, including when there are no rows and on an error. Avanceret adds the chart, the source line (table id and title), and the tool calls. Under the table it offers CSV, Excel, and JSON, plus a PNG of the chart when a chart is shown. The browser remembers the choice. Switching redraws the last answer and does not ask again.
+`statistikbanken-web` is a local page. It asks an OpenAI-compatible chat-completions client, Ollama or xAI, to call the same three tools over stdio.
 
 ```bash
 uv run statistikbanken-web
 ```
 
-Then open http://127.0.0.1:8080. The process listens on 127.0.0.1 only. Copy `.env.example` to `.env` to change the model, the daily question cap, or the per-address limit. `.env` is gitignored. The API key is never printed.
+Then open http://127.0.0.1:8080. The default bind is `127.0.0.1` port `8080`. `--host`, `--port`, `STATBANK_HOST`, and `STATBANK_PORT` change it. Copy `.env.example` to `.env` to change the model, the daily question cap, or the per-address limit. `.env` is gitignored. The API key is not printed.
 
-Ollama, in PowerShell or any other shell. Pull a model that can call tools, then start the page with the default settings:
+Ollama is the default (`--llm ollama`). The model is `qwen2.5` and the base URL is `http://127.0.0.1:11434/v1`. Pull a model that can call tools, then start the page:
 
 ```bash
 ollama pull qwen2.5
 uv run statistikbanken-web
 ```
 
-Ollama's OpenAI-compatible API is `http://127.0.0.1:11434/v1`. The dummy key is ignored.
+xAI uses `https://api.x.ai/v1` and the model `grok-4`. Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
 
-xAI uses the same chat-completions shape at `https://api.x.ai/v1`. Set the key in the environment, not in the repo:
-
-```powershell
-$env:XAI_API_KEY = "your-key"
+```bash
 uv run statistikbanken-web --llm xai --model grok-4
 ```
 
-`--llm`, `--model`, `--base-url`, `--host`, and `--port` override the environment for one run.
+`--llm` is `ollama` or `xai`. `--model`, `--base-url`, `--host`, and `--port` override the environment for one run. The model and Statistikbanken time out separately (45 seconds and 30 seconds by default).
+
+The page is in Danish. Ask in Danish or English. The model is told to answer in the language of the question.
+
+The page opens in Basis. Basis shows the answer and a compact table: one row per period, one column per series. It hides the chart, the downloads, the source link, and the tool calls. When the numbers are shown, Avanceret adds the chart (a series needs more than one period), the source link (the table id and title on `https://www.statistikbanken.dk/`), and, under the table, CSV, Excel, and JSON. A PNG of the chart is included when a chart is shown. Excel and JSON are built from the rows already on the page. They do not ask the model or Statistikbanken again. Avanceret also lists the tool calls, including when the numbers are hidden. A failed request shows only the error. The browser remembers the choice. Switching redraws the last answer and does not ask again.
+
+`2015K1` reads as `2015 1. kvt.` on the table, the chart, the page's own answer line, and in CSV and Excel. A month is `marts 2015`, a half-year is `2015 1. halvår`, and a year stays the year. Unknown codes are left as they are. JSON keeps the code in `periode` and adds `periode_label`. CSV is UTF-8 with a BOM, a semicolon between columns, and a decimal comma.
+
+A number in the answer must come from the question, the fetched data, a period or row label from those rows, the fetched table title, or a variable value in that turn's `hent_data` arguments. A number that appears only in `tabelinfo` or `find_tabel` does not count. Digits that only name a fetched quarter, month, or half-year are not extra figures. Otherwise the prose is hidden. A question that does not ask how the figures change over time is answered with the page's own line for the latest period. If the question names a place or an age and the fetched rows are for a different one, they are not presented as the answer.
 
 ## Tests
 
-Unit tests replay responses recorded from the live API (`tests/fixtures/`). A smaller set calls the API directly, including one session over stdio. GitHub Actions runs Ruff and pytest on every push and pull request.
+Unit tests replay responses recorded from the live API (`tests/fixtures/`). A smaller set calls the API directly, including one session over stdio.
 
 ```bash
 uv sync --group dev
@@ -132,6 +133,8 @@ uv run pytest                 # both
 uv run ruff check .
 uv run ruff format --check .
 ```
+
+GitHub Actions runs those Ruff commands and `uv run pytest` with no marker, so the live tests run there, on every push and pull request.
 
 On 31 October 2026 a real MCP client answered 50 Danish questions through this server. 37 were fine, 5 were near matches (the table was narrower than the question), and none of the numbers were wrong. Five invalid inputs were rejected clearly. Three were not: `Kobenhavn` without ø, an English question, and the name Silkeborg. Search was also too strict, and a missing required variable came back as a raw Danish API error.
 
