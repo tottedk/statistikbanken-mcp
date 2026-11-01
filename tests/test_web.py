@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import threading
 from http.client import HTTPConnection
@@ -34,7 +36,11 @@ from statistikbanken_mcp.web import (
     _turn,
     apply_age_intent,
     chart_series,
+    display_label,
     facts_to_csv,
+    facts_to_grid,
+    facts_to_json,
+    facts_to_xlsx,
     guard_answer,
     list_server_tools,
     run_turn,
@@ -121,6 +127,7 @@ def test_turn_cites_table_period_and_records_calls() -> None:
             "unit": "Antal",
             "value": 5045,
             "detail": "OMRÅDE: Rudersdal, ALDER: 80+",
+            "title": "",
             "unpublished": False,
             "url": "https://www.statistikbanken.dk/FOLK1A",
         }
@@ -165,7 +172,9 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "first value and the last value" in SYSTEM_PROMPT
     assert "Do not compute a difference" in SYSTEM_PROMPT
     assert "Refer to areas and categories by name, not by code." in SYSTEM_PROMPT
+    assert "Do not open with the table id or the table title." in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Rudersdal?")
+    assert "Do not open with the table id or the table title." in single
     assert "Danish" in single
     assert "latest period" in single
     assert "do not invent" in single.casefold()
@@ -692,9 +701,9 @@ def test_timeout_defaults_are_split(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_fact_cards_and_the_axis_use_danish_dots() -> None:
     assert "function daDigits" in PAGE
     assert "daDigits(Math.round(value))" in PAGE
-    assert "daDigits(fact.value)" in PAGE
     chart = PAGE.split("function drawChart", 1)[1].split("function daDigits", 1)[0]
     assert "toLocaleString" not in chart
+    assert "i < 5" in chart
 
 
 def test_csv_button_is_hidden_without_facts() -> None:
@@ -724,9 +733,18 @@ def test_page_has_basis_and_avanceret_modes() -> None:
     assert 'return mode === "advanced" && data.show_numbers !== false;' in PAGE
     assert "advancedView(data) && data.facts && data.facts.length && data.csv" in PAGE
     assert "advancedView(data) && data.chart && data.chart.length" in PAGE
-    assert '!data.facts || !data.facts.length || mode === "advanced"' in PAGE
     assert "if (data.show_numbers === false) return;" in PAGE
     assert "if (data.error)" in PAGE
+    render = PAGE.split("function render", 1)[1].split("form.addEventListener", 1)[0]
+    assert 'if (mode === "advanced") out.append(advancedOnly(toolCalls(data)));' in render
+    assert "Værktøjskald" not in render
+    assert render.index("if (data.error)") < render.index("toolCalls")
+    assert render.index("drawGrid") < render.index("Hent Excel")
+    assert "Hent Excel" in PAGE
+    assert "Hent JSON" in PAGE
+    assert "Hent graf (PNG)" in PAGE
+    assert "/api/export" in PAGE
+    assert "<script src=" not in PAGE
 
 
 def test_chart_keeps_the_last_period_inside_the_frame() -> None:
@@ -835,10 +853,10 @@ def test_http_rejects_long_questions_and_the_rate_limit() -> None:
         server.shutdown()
 
 
-def _post(port: int, payload: dict) -> HTTPConnection:
+def _post(port: int, payload: dict, path: str = "/api/ask") -> HTTPConnection:
     connection = HTTPConnection("127.0.0.1", port, timeout=5)
     body = json.dumps(payload).encode()
-    connection.request("POST", "/api/ask", body=body, headers={"Content-Type": "application/json"})
+    connection.request("POST", path, body=body, headers={"Content-Type": "application/json"})
     return connection.getresponse()
 
 
@@ -853,12 +871,113 @@ def test_chart_series_groups_periods_and_skips_a_single_point() -> None:
     ]
     series = chart_series(facts)
     assert [item["label"] for item in series] == [
-        "OMRÅDE: Rudersdal",
-        "OMRÅDE: Hørsholm",
+        "Rudersdal",
+        "Hørsholm",
     ]
     assert [point["period"] for point in series[0]["points"]] == ["2015K1", "2026K3"]
     assert series[0]["points"][1]["value"] == 5045
     assert series[1]["unit"] == "Antal"
+
+
+def test_display_label_drops_variable_names_and_totals() -> None:
+    detail = "OMRÅDE: Rudersdal, KØN: I alt, ALDER: 80+, CIVILSTAND: I alt"
+    assert display_label(detail, "FOLK1A") == "Rudersdal, 80+"
+
+
+def test_grid_is_periods_by_series_with_plain_labels() -> None:
+    one = facts_to_grid([_population_fact(5045)])
+    assert one["columns"] == ["Periode", "Rudersdal, 80+"]
+    assert one["rows"] == [["2026K3", "5.045"]]
+    two = facts_to_grid(
+        [
+            _population_fact(3524, "2015K1"),
+            _population_fact(5045, "2026K3"),
+            _population_fact(1719, "2015K1", "Hørsholm"),
+            _population_fact(2790, "2026K3", "Hørsholm"),
+        ]
+    )
+    assert two["columns"] == ["Periode", "Rudersdal, 80+", "Hørsholm, 80+"]
+    assert two["rows"] == [
+        ["2015K1", "3.524", "1.719"],
+        ["2026K3", "5.045", "2.790"],
+    ]
+    long = facts_to_grid(
+        [_population_fact(3000 + index, f"20{index:02d}K1") for index in range(20)]
+    )
+    assert len(long["rows"]) == 20
+    assert long["rows"][0][0] == "2000K1"
+    assert long["rows"][-1][0] == "2019K1"
+
+
+def test_json_and_xlsx_match_the_csv_rows() -> None:
+    facts = [
+        _fact("Rudersdal", "2015K1", 5045),
+        _fact("Rudersdal", "2015K2", 12.5),
+    ]
+    text = facts_to_csv(facts).lstrip("\ufeff")
+    reader = csv.reader(io.StringIO(text), delimiter=";")
+    header = next(reader)
+    expected = [dict(zip(header, row, strict=True)) for row in reader]
+    assert json.loads(facts_to_json(facts)) == expected
+    assert _xlsx_rows(facts_to_xlsx(facts)) == [header, *[list(item.values()) for item in expected]]
+
+
+def test_export_endpoint_writes_a_file_and_does_not_ask_again() -> None:
+    settings = Settings(
+        llm="ollama",
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen2.5",
+        api_key="ollama",
+        host="127.0.0.1",
+        port=0,
+        daily_cap=10,
+        per_minute=10,
+        max_question_chars=100,
+        max_tool_calls=2,
+        llm_timeout=5,
+        tool_timeout=5,
+    )
+
+    def answer(question: str) -> TurnResult:
+        raise AssertionError(question)
+
+    handler = _handler(settings, Limiter(10, 10), answer)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    facts = [_fact("Rudersdal", "2015K1", 5045)]
+    try:
+        workbook = _post(port, {"format": "xlsx", "facts": facts}, "/api/export")
+        assert workbook.status == 200
+        rows = _xlsx_rows(workbook.read())
+        assert rows[0] == ["tabel", "periode", "dimensioner", "værdi", "enhed"]
+        assert rows[1][0] == "FOLK1A"
+        assert rows[1][3] == "5045"
+        exported = _post(port, {"format": "json", "facts": facts}, "/api/export")
+        assert exported.status == 200
+        assert json.loads(exported.read().decode()) == json.loads(facts_to_json(facts))
+    finally:
+        server.shutdown()
+
+
+def _xlsx_rows(blob: bytes) -> list[list[str]]:
+    import xml.etree.ElementTree as ElementTree
+    import zipfile
+
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(io.BytesIO(blob)) as book:
+        assert "[Content_Types].xml" in book.namelist()
+        assert "xl/workbook.xml" in book.namelist()
+        sheet = ElementTree.fromstring(book.read("xl/worksheets/sheet1.xml"))
+    rows = []
+    for row in sheet.findall("m:sheetData/m:row", ns):
+        cells = []
+        for cell in row.findall("m:c", ns):
+            text = cell.find("m:is/m:t", ns)
+            cells.append("" if text is None or text.text is None else text.text)
+        rows.append(cells)
+    return rows
 
 
 def test_csv_uses_bom_semicolon_and_decimal_comma() -> None:

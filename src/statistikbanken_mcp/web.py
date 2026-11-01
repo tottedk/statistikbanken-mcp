@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import traceback
+import zipfile
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import date
@@ -36,6 +37,7 @@ DEFAULT_XAI_MODEL = "grok-4"
 TRACE_LIMIT = 2_000
 MODEL_RESULT_LIMIT = 12_000
 MAX_BODY_BYTES = 32_768
+EXPORT_MAX_BYTES = 1_048_576
 DEFAULT_LLM_TIMEOUT = 45.0
 DEFAULT_TOOL_TIMEOUT = 30.0
 NO_FETCHED_NUMBERS = "Jeg fik ikke hentet tal, så jeg viser ingen."
@@ -51,7 +53,7 @@ Use only the Statistikbanken tools. Do not invent numbers.
 Never write a number that is not in a hent_data row from this question.
 If a tool call failed, say so. Do not fill in example figures.
 Call find_tabel, then tabelinfo when you need codes, then hent_data.
-Always name the table id and the period in the answer.
+Name the period in the answer. Do not open with the table id or the table title.
 If the table title, unit, or description only partly matches the question, say so.
 If the tools have no data, say so.
 Prefer sum_from or sum_range when a total is needed.
@@ -97,22 +99,25 @@ PAGE = """<!DOCTYPE html>
   section { margin-top: 1.75rem; }
   h2 { font-size: 1rem; margin: 0 0 0.5rem; }
   .answer { white-space: pre-wrap; }
-  .fact { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px;
-    padding: 0.75rem 1rem; margin: 0 0 0.5rem; }
-  .fact strong { font-size: 1.25rem; }
   .meta { color: #4a453e; font-size: 0.95rem; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { padding: 0.35rem 0.6rem; border-bottom: 1px solid #e2dcd2; text-align: left; }
+  th { font-size: 0.9rem; color: #4a453e; position: sticky; top: 0; background: #fff; }
+  th:not(:first-child), td:not(:first-child) { text-align: right; }
+  .exports { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
   details { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px;
     padding: 0.5rem 0.75rem; margin: 0 0 0.5rem; }
   summary { cursor: pointer; }
   pre { white-space: pre-wrap; word-break: break-word;
     font: 0.85rem/1.4 ui-monospace, monospace; margin: 0.5rem 0 0; }
   .error { color: #8a1f1f; }
-  .facts { max-height: 16rem; overflow: auto; }
+  .facts { max-height: 16rem; overflow: auto; scrollbar-width: thin; }
+  .facts::-webkit-scrollbar { width: 10px; height: 10px; }
+  .facts::-webkit-scrollbar-thumb { background: #c9c2b6; border-radius: 8px; }
   .chart { background: #fff; border: 1px solid #e2dcd2; border-radius: 8px; padding: 0.75rem; }
   .chart svg { width: 100%; height: auto; display: block; }
   .legend { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; font-size: 0.95rem; }
   .swatch { display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.3rem; }
-  .row { display: flex; gap: 0.75rem; align-items: center; }
   a { color: #1d4e89; }
   footer { margin-top: 2rem; color: #4a453e; font-size: 0.9rem; }
   fieldset.modes { border: 0; margin: 0 0 1.25rem; padding: 0;
@@ -211,7 +216,8 @@ function drawChart(series) {
   svg.append(svgEl("line", {
     x1: left, y1: height - bottom, x2: width - right, y2: height - bottom, stroke: "#c9c2b6"
   }));
-  for (const value of [max, (min + max) / 2, min]) {
+  for (let i = 0; i < 5; i++) {
+    const value = max - (i / 4) * (max - min);
     const label = svgEl("text", {
       x: left - 6, y: yOf(value) + 4, "text-anchor": "end", fill: "#4a453e", "font-size": "11"
     });
@@ -267,18 +273,110 @@ function legend(series) {
   return row;
 }
 
+function download(blob, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function csvButton(csv) {
   const button = el("button", "Hent CSV");
   button.type = "button";
   button.addEventListener("click", () => {
-    const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "statistikbanken.csv";
-    link.click();
-    URL.revokeObjectURL(link.href);
+    download(new Blob([csv], {type: "text/csv;charset=utf-8"}), "statistikbanken.csv");
   });
   return button;
+}
+
+function fileButton(label, format, facts) {
+  const button = el("button", label);
+  button.type = "button";
+  const filename = format === "xlsx" ? "statistikbanken.xlsx" : "statistikbanken.json";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/export", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({format, facts}),
+      });
+      if (!response.ok) return;
+      download(await response.blob(), filename);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
+function pngButton(svg) {
+  const button = el("button", "Hent graf (PNG)");
+  button.type = "button";
+  button.addEventListener("click", () => {
+    const clone = svg.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", "640");
+    clone.setAttribute("height", "280");
+    const xml = new XMLSerializer().serializeToString(clone);
+    const url = URL.createObjectURL(new Blob([xml], {type: "image/svg+xml;charset=utf-8"}));
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 560;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((png) => download(png, "statistikbanken.png"));
+    };
+    image.src = url;
+  });
+  return button;
+}
+
+function drawGrid(grid) {
+  const wrap = el("div", null, "facts");
+  const rows = (grid && grid.rows) || [];
+  if (!rows.length) {
+    wrap.append(el("p", "Ingen tal hentet.", "meta"));
+    return wrap;
+  }
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const name of grid.columns) head.append(el("th", name));
+  const thead = document.createElement("thead");
+  thead.append(head);
+  const body = document.createElement("tbody");
+  for (const row of rows) {
+    const line = document.createElement("tr");
+    for (const cell of row) line.append(el("td", cell));
+    body.append(line);
+  }
+  table.append(thead, body);
+  wrap.append(table);
+  return wrap;
+}
+
+function toolCalls(data) {
+  const trace = el("section");
+  trace.append(el("h2", "Værktøjskald"));
+  if (!data.calls || data.calls.length === 0) {
+    trace.append(el("p", "Ingen kald.", "meta"));
+  }
+  for (const call of data.calls || []) {
+    const item = document.createElement("details");
+    item.append(el("summary", call.name || "kald"));
+    item.append(el("div", "Argumenter", "meta"));
+    item.append(el("pre", call.arguments || ""));
+    item.append(el("div", "Resultat", "meta"));
+    item.append(el("pre", call.result || ""));
+    trace.append(item);
+  }
+  return trace;
 }
 
 function render(data) {
@@ -288,17 +386,15 @@ function render(data) {
     return;
   }
   const answer = el("section");
-  const heading = el("div", null, "row");
-  heading.append(el("h2", "Svar"));
-  if (advancedView(data) && data.facts && data.facts.length && data.csv) {
-    heading.append(advancedOnly(csvButton(data.csv)));
-  }
-  answer.append(heading, el("p", data.answer || "", "answer"));
+  answer.append(el("h2", "Svar"), el("p", data.answer || "", "answer"));
   out.append(answer);
 
+  let chartSvg = null;
   if (advancedView(data) && data.chart && data.chart.length) {
     const chart = el("section");
-    chart.append(el("h2", "Udvikling"), drawChart(data.chart), legend(data.chart));
+    const drawn = drawChart(data.chart);
+    chartSvg = drawn.querySelector("svg");
+    chart.append(el("h2", "Udvikling"), drawn, legend(data.chart));
     out.append(advancedOnly(chart));
   }
 
@@ -314,50 +410,23 @@ function render(data) {
         link.href = fact.url;
         link.target = "_blank";
         link.rel = "noopener";
-        link.textContent = "Tabel " + fact.table + " på Statistikbanken";
+        const title = fact.title ? ", " + fact.title : "";
+        link.textContent = "Tabel " + fact.table + title + " på Statistikbanken";
         facts.append(advancedOnly(link));
       }
     }
   }
-  const list = el("div", null, "facts");
-  if (!data.facts || data.facts.length === 0) {
-    list.append(el("p", "Ingen tal hentet.", "meta"));
+  facts.append(drawGrid(data.grid));
+  if (advancedView(data) && data.facts && data.facts.length && data.csv) {
+    const row = el("div", null, "exports");
+    row.append(advancedOnly(csvButton(data.csv)));
+    row.append(advancedOnly(fileButton("Hent Excel", "xlsx", data.facts)));
+    row.append(advancedOnly(fileButton("Hent JSON", "json", data.facts)));
+    if (chartSvg) row.append(advancedOnly(pngButton(chartSvg)));
+    facts.append(row);
   }
-  for (const fact of data.facts || []) {
-    const card = el("div", null, "fact");
-    const value = typeof fact.value === "number" ? daDigits(fact.value)
-      : (fact.value == null ? "–" : String(fact.value));
-    card.append(el("strong", value));
-    const bits = [
-      "Tabel " + (fact.table || ""),
-      "Periode " + (fact.period || ""),
-      "Enhed " + (fact.unit || ""),
-    ];
-    if (fact.detail) bits.push(fact.detail);
-    if (fact.unpublished) bits.push("Ikke offentliggjort endnu");
-    card.append(el("div", bits.filter(Boolean).join(" · "), "meta"));
-    list.append(card);
-  }
-  facts.append(list);
   out.append(facts);
-
-  if (!data.facts || !data.facts.length || mode === "advanced") {
-    const trace = el("section");
-    trace.append(el("h2", "Værktøjskald"));
-    if (!data.calls || data.calls.length === 0) {
-      trace.append(el("p", "Ingen kald.", "meta"));
-    }
-    for (const call of data.calls || []) {
-      const item = document.createElement("details");
-      item.append(el("summary", call.name || "kald"));
-      item.append(el("div", "Argumenter", "meta"));
-      item.append(el("pre", call.arguments || ""));
-      item.append(el("div", "Resultat", "meta"));
-      item.append(el("pre", call.result || ""));
-      trace.append(item);
-    }
-    out.append(trace);
-  }
+  if (mode === "advanced") out.append(advancedOnly(toolCalls(data)));
 }
 
 form.addEventListener("submit", async (event) => {
@@ -521,6 +590,7 @@ class TurnResult:
     calls: list[dict[str, str]]
     chart: list[dict[str, Any]] = field(default_factory=list)
     csv: str = ""
+    grid: dict[str, Any] = field(default_factory=dict)
     show_numbers: bool = True
 
 
@@ -645,6 +715,7 @@ def _facts_from(name: str, result: str) -> list[dict[str, Any]]:
                 "unit": payload.get("unit") or "",
                 "value": row.get("value"),
                 "detail": detail,
+                "title": payload.get("title") if isinstance(payload.get("title"), str) else "",
                 "unpublished": row.get("unpublished") is True,
                 "url": _table_url(str(payload.get("table") or "")),
             }
@@ -656,6 +727,66 @@ def _table_url(table: str) -> str:
     if table.isalnum():
         return f"https://www.statistikbanken.dk/{table}"
     return ""
+
+
+_TOTAL_LABELS = frozenset({"i alt", "total", "tot", "alle"})
+
+
+def display_label(detail: str, table: str = "") -> str:
+    """'Rudersdal, 80+' rather than 'OMRÅDE: Rudersdal, KØN: I alt, ALDER: 80+'."""
+    if not detail:
+        return table
+    values = []
+    for part in detail.split(", "):
+        _name, sep, value = part.partition(": ")
+        text = value if sep else part
+        if text and text.casefold() not in _TOTAL_LABELS:
+            values.append(text)
+    return ", ".join(values) or table
+
+
+def facts_to_grid(facts: list[dict[str, Any]]) -> dict[str, list[Any]]:
+    """One row per period, one column per series. Every period is kept."""
+    keys: list[tuple[str, str, str]] = []
+    by_period: dict[str, dict[tuple[str, str, str], str]] = {}
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        period = str(fact.get("period") or "")
+        if not period:
+            continue
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("detail") or ""),
+            str(fact.get("unit") or ""),
+        )
+        if key not in keys:
+            keys.append(key)
+        by_period.setdefault(period, {})[key] = _grid_cell(fact)
+    if not keys:
+        return {"columns": [], "rows": []}
+    labels = [display_label(detail, table) for table, detail, _unit in keys]
+    if len(set(labels)) != len(labels):
+        labels = [
+            f"{label} ({table})" if table else label
+            for label, (table, _detail, _unit) in zip(labels, keys, strict=True)
+        ]
+    return {
+        "columns": ["Periode", *labels],
+        "rows": [
+            [period, *[by_period[period].get(key, "–") for key in keys]]
+            for period in sorted(by_period)
+        ],
+    }
+
+
+def _grid_cell(fact: dict[str, Any]) -> str:
+    if fact.get("unpublished"):
+        return "–"
+    value = fact.get("value")
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "–" if value is None else str(value)
+    return _da_number(value)
 
 
 def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -686,7 +817,7 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         table, detail, unit = key
         series.append(
             {
-                "label": detail or table,
+                "label": display_label(detail, table),
                 "table": table,
                 "unit": unit,
                 "points": [
@@ -697,22 +828,145 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return series
 
 
-def facts_to_csv(facts: list[dict[str, Any]]) -> str:
-    """UTF-8 CSV with BOM, semicolon separator, and a decimal comma."""
-    buffer = io.StringIO()
-    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
-    writer.writerow(["tabel", "periode", "dimensioner", "værdi", "enhed"])
+_EXPORT_HEADER = ["tabel", "periode", "dimensioner", "værdi", "enhed"]
+
+
+def _export_rows(facts: list[dict[str, Any]]) -> tuple[list[str], list[list[str]]]:
+    rows = []
     for fact in facts:
-        writer.writerow(
+        if not isinstance(fact, dict):
+            continue
+        rows.append(
             [
-                fact.get("table") or "",
-                fact.get("period") or "",
-                fact.get("detail") or "",
+                str(fact.get("table") or ""),
+                str(fact.get("period") or ""),
+                str(fact.get("detail") or ""),
                 _csv_number(fact.get("value")),
-                fact.get("unit") or "",
+                str(fact.get("unit") or ""),
             ]
         )
+    return list(_EXPORT_HEADER), rows
+
+
+def facts_to_csv(facts: list[dict[str, Any]]) -> str:
+    """UTF-8 CSV with BOM, semicolon separator, and a decimal comma."""
+    header, rows = _export_rows(facts)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(header)
+    writer.writerows(rows)
     return "\ufeff" + buffer.getvalue()
+
+
+def facts_to_json(facts: list[dict[str, Any]]) -> str:
+    """The same columns and cell text as the CSV, as a list of objects."""
+    header, rows = _export_rows(facts)
+    return json.dumps([dict(zip(header, row, strict=True)) for row in rows], ensure_ascii=False)
+
+
+def facts_to_xlsx(facts: list[dict[str, Any]]) -> bytes:
+    """The same columns and cell text as the CSV, as a workbook Excel can open."""
+    header, rows = _export_rows(facts)
+    sheet_rows = []
+    for index, row in enumerate([header, *rows], start=1):
+        cells = []
+        for col, value in enumerate(row):
+            ref = f"{_xlsx_col(col)}{index}"
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{_xml_text(value)}</t></is></c>')
+        sheet_rows.append(f'<row r="{index}">{"".join(cells)}</row>')
+    sheet = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+    )
+    parts = {
+        "[Content_Types].xml": _XLSX_CONTENT_TYPES,
+        "_rels/.rels": _XLSX_ROOT_RELS,
+        "xl/workbook.xml": _XLSX_WORKBOOK,
+        "xl/_rels/workbook.xml.rels": _XLSX_WORKBOOK_RELS,
+        "xl/styles.xml": _XLSX_STYLES,
+        "xl/worksheets/sheet1.xml": sheet,
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, body in parts.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+def _xlsx_col(index: int) -> str:
+    letters = ""
+    number = index + 1
+    while number:
+        number, rem = divmod(number - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def _xml_text(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _xlsx_xml(*lines: str) -> str:
+    return "".join(lines)
+
+
+_XLSX_CONTENT_TYPES = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '<Default Extension="rels" ContentType=',
+    '"application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType=',
+    '"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType=',
+    '"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+    '<Override PartName="/xl/styles.xml" ContentType=',
+    '"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
+    "</Types>",
+)
+
+_XLSX_ROOT_RELS = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type=',
+    '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"',
+    ' Target="xl/workbook.xml"/>',
+    "</Relationships>",
+)
+
+_XLSX_WORKBOOK = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    '<sheets><sheet name="Tal" sheetId="1" r:id="rId1"/></sheets>',
+    "</workbook>",
+)
+
+_XLSX_WORKBOOK_RELS = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type=',
+    '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="worksheets/sheet1.xml"/>',
+    '<Relationship Id="rId2" Type=',
+    '"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"',
+    ' Target="styles.xml"/>',
+    "</Relationships>",
+)
+
+_XLSX_STYLES = _xlsx_xml(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>',
+    '<fills count="2"><fill><patternFill patternType="none"/></fill>',
+    '<fill><patternFill patternType="gray125"/></fill></fills>',
+    '<borders count="1"><border>',
+    "<left/><right/><top/><bottom/><diagonal/></border></borders>",
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>',
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>',
+    "</styleSheet>",
+)
 
 
 def _csv_number(value: Any) -> str:
@@ -748,6 +1002,7 @@ def _turn(
         calls=calls,
         chart=chart_series(kept),
         csv=facts_to_csv(kept) if kept else "",
+        grid=facts_to_grid(kept),
     )
 
 
@@ -824,6 +1079,7 @@ def _closing_instruction(question: str) -> str:
         )
     return (
         f"{language} {scope} "
+        "Do not open with the table id or the table title. "
         "Use only numbers that appear in hent_data rows from this question. "
         "If a tool call failed, say so and do not invent figures."
     )
@@ -1499,14 +1755,19 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
             self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] != "/api/ask":
-                self._json(404, {"error": "Ukendt adresse."})
-                return
+            path = self.path.split("?", 1)[0]
             length = int(self.headers.get("Content-Length", "0") or 0)
-            if length > MAX_BODY_BYTES:
-                self._json(400, {"error": "Spørgsmålet er for langt."})
+            limit = EXPORT_MAX_BYTES if path == "/api/export" else MAX_BODY_BYTES
+            if length > limit:
+                self._json(400, {"error": "Forespørgslen er for lang."})
                 return
             raw = self.rfile.read(length)
+            if path == "/api/export":
+                self._export(raw)
+                return
+            if path != "/api/ask":
+                self._json(404, {"error": "Ukendt adresse."})
+                return
             try:
                 payload = json.loads(raw.decode("utf-8"))
                 question = str(payload.get("question", "")).strip()
@@ -1542,9 +1803,35 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                     "calls": result.calls,
                     "chart": result.chart,
                     "csv": result.csv,
+                    "grid": result.grid,
                     "show_numbers": result.show_numbers,
                 },
             )
+
+        def _export(self, raw: bytes) -> None:
+            """Turn already-fetched facts into a file. No model call, no new data call."""
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+                fmt = str(payload.get("format", ""))
+                facts = payload.get("facts")
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                self._json(400, {"error": "Kunne ikke læse tallene."})
+                return
+            if not isinstance(facts, list) or any(not isinstance(item, dict) for item in facts):
+                self._json(400, {"error": "Kunne ikke læse tallene."})
+                return
+            if fmt == "json":
+                body = facts_to_json(facts).encode("utf-8")
+                self._send(200, body, "application/json; charset=utf-8")
+                return
+            if fmt == "xlsx":
+                self._send(
+                    200,
+                    facts_to_xlsx(facts),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+                return
+            self._json(400, {"error": "Ukendt format."})
 
         def _json(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

@@ -94,7 +94,7 @@ A local page asks a question in Danish or English. The answer sits above the num
 
 ### Modes
 
-The page opens in Basis. Basis shows the answer and the table. Avanceret adds the chart, the CSV download, the link to the table on Statistikbanken, and the tool calls. The browser remembers the choice. Switching redraws the last answer and does not ask again. A mismatch, a question with no rows, and an error look the same in both.
+The page opens in Basis. Basis shows the answer and a compact table (one row per period, one column per series, such as Rudersdal, 80+). It hides the chart, the downloads, the source link, and the tool calls, including when there are no rows and on an error. Avanceret adds the chart, the source line (table id and title), and the tool calls. Under the table it offers CSV, Excel, and JSON, plus a PNG of the chart when a chart is shown. The browser remembers the choice. Switching redraws the last answer and does not ask again.
 
 ```bash
 uv run statistikbanken-web
