@@ -11,6 +11,7 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ### Changed
 
+- The web page tells the model today's date in Europe/Copenhagen and counts `i fjor`, `sidste måned`, and `seneste 10 år` back from that date. Ollama thinking is off unless `STATBANK_LLM_THINK=1` (`reasoning_effort` is `none`). The default local model is `gemma4:26b-a4b-it-qat`. xAI requests are unchanged.
 - `i år`, `i fjor`, `sidste år`, and `sidste måned` follow today's calendar. A period that is not published is an error naming that period and the latest one in the table. A derived figure in the page is kept only when the sentence names the values and they are one measure; a sum also has to be one period.
 - Search maps `arbejdsløshed` and `ledighed` to the Fuldtidsledige tables, so the AUS tables come first. A hyphenated query also matches a title that joins the parts or writes them separately. A complete year on a quarterly or monthly table is one figure: flows are added, levels are averaged, and the note says which. An unclear measure, or a year that is missing a period, is left as separate periods. Danish period phrases (`i år`, `i fjor`, `sidste år`, `sidste kvartal`, `seneste`, month names, `3. kvartal 2025`, `K3 2025`) resolve from the latest period in the table. A fremskrivning table and a prognose row are marked `projection` in the tools and on the page. The number guard keeps a difference, sum, or percentage change that follows from the fetched values, and still hides invented numbers and a value paired with the wrong period or row.
 

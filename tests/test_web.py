@@ -7,8 +7,10 @@ import csv
 import io
 import json
 import threading
+from datetime import date, datetime
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -189,6 +191,43 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     )
     assert "change over time" in trend
     assert "Danish" in trend
+
+
+def _system_message(today: date | None = None) -> str:
+    seen: dict[str, str] = {}
+
+    class Recording:
+        def complete(self, messages: list[dict], tools: list[dict] | None) -> ChatReply:
+            seen["content"] = str(messages[0]["content"])
+            return ChatReply("Ingen tal.", [])
+
+    asyncio.run(
+        run_turn(Recording(), FakeTools({}), "Hvor mange i fjor?", max_tool_calls=1, today=today)
+    )
+    return seen["content"]
+
+
+def test_prompt_counts_relative_periods_back_from_the_given_date() -> None:
+    november = _system_message(date(2026, 11, 2))
+    assert "2026-11-02" in november
+    assert "Europe/Copenhagen" in november
+    assert "'i fjor' is 2025" in november
+    assert "'sidste måned' is 2026-10" in november
+    assert "'seneste 10 år' is 2016 through 2026" in november
+    assert "same language as the question" in november
+
+    january = _system_message(date(2026, 1, 2))
+    assert "2026-01-02" in january
+    assert "'i fjor' is 2025" in january
+    assert "'sidste måned' is 2025-12" in january
+    assert "'seneste 10 år' is 2016 through 2026" in january
+
+
+def test_prompt_date_defaults_to_copenhagen() -> None:
+    day = datetime.now(ZoneInfo("Europe/Copenhagen")).date()
+    text = _system_message()
+    assert day.isoformat() in text
+    assert "Europe/Copenhagen" in text
 
 
 # Excerpts from the qwen2.5 retest (pr7r-ui-log), where the model wrote numbers

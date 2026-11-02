@@ -22,6 +22,7 @@ from statistikbanken_mcp.web import (
     Settings,
     TurnResult,
     _handler,
+    chat_client,
     check_settings,
     client_ip,
     server_command,
@@ -46,6 +47,7 @@ _ENV_KEYS = (
     "STATBANK_MAX_TOOL_CALLS",
     "STATBANK_PROXY_SECRET",
     "STATBANK_FRAME_ANCESTORS",
+    "STATBANK_LLM_THINK",
 )
 
 
@@ -136,6 +138,68 @@ def test_local_defaults_are_unchanged(clean_env: None) -> None:
     assert settings.proxy_secret == ""
     assert settings.frame_ancestors == "'self'"
     assert settings.state_file == ""
+    assert settings.think is False
+
+
+def _completion_body(settings: Settings) -> dict[str, object]:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json={"choices": [{"message": {"content": "hej"}}]})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    chat_client(settings, http).complete([{"role": "user", "content": "hej"}], None)
+    body = seen["body"]
+    assert isinstance(body, dict)
+    return body
+
+
+def test_ollama_thinking_is_off_unless_asked(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = _completion_body(settings_from_env([]))
+    assert body["model"] == "gemma4:26b-a4b-it-qat"
+    assert body["reasoning_effort"] == "none"
+    assert "think" not in body
+
+    monkeypatch.setenv("STATBANK_MODEL", "gemma4-16k")
+    monkeypatch.setenv("STATBANK_LLM_THINK", "1")
+    thinking = _completion_body(settings_from_env([]))
+    assert thinking["model"] == "gemma4-16k"
+    assert "reasoning_effort" not in thinking
+    assert "think" not in thinking
+
+    monkeypatch.setenv("STATBANK_LLM_THINK", "0")
+    off = _completion_body(settings_from_env([]))
+    assert off["reasoning_effort"] == "none"
+    assert "think" not in off
+
+
+def test_xai_requests_omit_reasoning_effort(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STATBANK_LLM", "xai")
+    monkeypatch.setenv("XAI_API_KEY", "dummy")
+    monkeypatch.setenv("STATBANK_LLM_THINK", "0")
+    body = _completion_body(settings_from_env([]))
+    assert "reasoning_effort" not in body
+    assert "think" not in body
+    assert body["max_tokens"] == PUBLIC_MAX_TOKENS
+    assert "dummy" not in json.dumps(body)
+
+    monkeypatch.setenv("STATBANK_LLM_THINK", "1")
+    again = _completion_body(settings_from_env([]))
+    assert "reasoning_effort" not in again
+    assert "think" not in again
+    assert "dummy" not in json.dumps(again)
+
+    monkeypatch.setenv("STATBANK_PUBLIC", "1")
+    monkeypatch.setenv("STATBANK_LLM_THINK", "0")
+    public = _completion_body(settings_from_env(["--llm", "ollama"]))
+    assert public["model"] == "grok-4"
+    assert "reasoning_effort" not in public
+    assert "think" not in public
 
 
 def test_port_prefers_platform_port_then_statbank_port(

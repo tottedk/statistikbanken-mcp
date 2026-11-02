@@ -98,12 +98,28 @@ uv run statistikbanken-web
 
 Then open http://127.0.0.1:8080. The default bind is `127.0.0.1` port `8080`. `--host`, `--port`, `STATBANK_HOST`, and `STATBANK_PORT` change it. `PORT`, when set, is used instead of `STATBANK_PORT`. Copy `.env.example` to `.env` to change the model, the daily question cap, or the per-address limit. `.env` is gitignored. The API key is not printed.
 
-Ollama is the default (`--llm ollama`). The model is `qwen2.5` and the base URL is `http://127.0.0.1:11434/v1`. Pull a model that can call tools, then start the page:
+Ollama is the default (`--llm ollama`). The model is `gemma4:26b-a4b-it-qat` and the base URL is `http://127.0.0.1:11434/v1`. Pull it, then start the page:
 
 ```bash
-ollama pull qwen2.5
+ollama pull gemma4:26b-a4b-it-qat
 uv run statistikbanken-web
 ```
+
+That tag's context is shorter than a tool-calling turn. Create a 16k tag from a Modelfile and select it with `STATBANK_MODEL` or `--model`:
+
+```text
+FROM gemma4:26b-a4b-it-qat
+PARAMETER num_ctx 16384
+```
+
+```bash
+ollama create gemma4-16k -f Modelfile
+STATBANK_MODEL=gemma4-16k uv run statistikbanken-web
+```
+
+`qwen2.5` is an alternative. `ollama pull qwen2.5`, then `STATBANK_MODEL=qwen2.5`.
+
+Ollama thinking is off. The request sends `reasoning_effort` set to `none`. `STATBANK_LLM_THINK=1` leaves thinking on. xAI ignores that variable. The system prompt states today's date in Europe/Copenhagen and counts `i fjor`, `sidste måned`, and `seneste 10 år` back from it.
 
 xAI uses `https://api.x.ai/v1`. The model is `STATBANK_XAI_MODEL`, or `grok-4` when that is unset. `grok-4` may be retired, so set the model when you deploy. Each xAI request sends `max_tokens` (2048). Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
 
