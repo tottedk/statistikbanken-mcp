@@ -1,0 +1,98 @@
+{
+  "dataset": {
+    "dimension": {
+      "OMRÅDE": {
+        "label": "område",
+        "category": {
+          "index": {
+            "561": 0
+          },
+          "label": {
+            "561": "Esbjerg"
+          }
+        }
+      },
+      "ALDER": {
+        "label": "alder",
+        "category": {
+          "index": {
+            "IALT": 0
+          },
+          "label": {
+            "IALT": "Alder i alt"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "FOLK1A": 0
+          },
+          "label": {
+            "FOLK1A": "Befolkningen den 1. i kvartalet"
+          },
+          "unit": {
+            "FOLK1A": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2026K1": 0,
+            "2026K2": 1,
+            "2026K3": 2
+          },
+          "label": {
+            "2026K1": "2026K1",
+            "2026K2": "2026K2",
+            "2026K3": "2026K3"
+          }
+        }
+      },
+      "id": [
+        "OMRÅDE",
+        "ALDER",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        1,
+        3
+      ],
+      "role": {
+        "geo": [
+          "OMRÅDE"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Befolkningen den 1. i kvartalet efter område, alder, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-08-10T06:00:00Z",
+    "value": [
+      114947,
+      114867,
+      114824
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/4a12721d-a8b0-4bde-82d7-1d1c6f319de3",
+        "tableid": "FOLK1A",
+        "decimals": 0
+      }
+    }
+  }
+}

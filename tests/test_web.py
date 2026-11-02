@@ -174,7 +174,8 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "Do not write 2015K1 or 2026Q3." in SYSTEM_PROMPT
     assert "Do not put Tid in sum_range" in SYSTEM_PROMPT
     assert "first value and the last value" in SYSTEM_PROMPT
-    assert "Do not compute a difference" in SYSTEM_PROMPT
+    assert "percentage change" in SYSTEM_PROMPT
+    assert "is allowed when it is computed" in SYSTEM_PROMPT
     assert "Refer to areas and categories by name, not by code." in SYSTEM_PROMPT
     assert "Do not open with the table id or the table title." in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Esbjerg?")
@@ -372,7 +373,6 @@ def test_prose_numbers_only_in_metadata_are_suppressed(
         79: "Gruppen 79 år havde 3.524.",
         561: "Område 561 havde 3.524.",
         1800: "Omkring 1.800 i 2024, mens det hentede tal er 3.524.",
-        1521: "Fra 3.524 til 5.045, en forskel på 1.521.",
         2008: "Siden 2008 er tallet 3.524.",
         2016: "I 2016K2 var tallet 3.524.",
         42: "Tabel 42 viser 3.524.",
@@ -1108,6 +1108,104 @@ def test_question_and_label_numbers_are_not_paired_with_a_place() -> None:
         "Viborg (10 år): 95.776 → 98.104.",
     ):
         assert guard_answer(decade, text, viborg) == text
+
+
+def test_correct_derived_figures_pass_and_invented_ones_do_not() -> None:
+    """Viborg FOLK1A: 96,166 in 2016K3 and 98,104 in 2026K3 differ by 1,938."""
+    question = "Hvordan har befolkningen i Viborg udviklet sig?"
+    facts = [
+        _population_fact(96166, "2016K3", "Viborg"),
+        _population_fact(98104, "2026K3", "Viborg"),
+    ]
+    kept = [
+        "Viborg voksede, en forskel på 1.938.",
+        "Stigningen er 1.938 personer.",
+        "En stigning på 2 procent.",
+        "En stigning på 2,0 procent.",
+        "En stigning på 2,02 procent.",
+        "Fra 2016K3 til 2026K3 er forskellen 1.938.",
+    ]
+    for text in kept:
+        assert guard_answer(question, text, facts) == text, text
+    invented = [
+        "Viborg voksede, en forskel på 1.999.",
+        "I alt 9.999.",
+        "I alt 194.270.",
+        "En stigning på 9 procent.",
+        "Der bor 1.938 personer.",
+    ]
+    for text in invented:
+        assert guard_answer(question, text, facts) == UNVERIFIED_NUMBERS, text
+
+
+def test_pairwise_difference_of_a_long_series_is_hidden() -> None:
+    """43 Viborg quarters. 1.200 is some pair's gap, and the sentence names no pair."""
+    question = "Hvordan har befolkningen i Viborg udviklet sig?"
+    facts = []
+    for index in range(43):
+        year = 2016 + index // 4
+        quarter = index % 4 + 1
+        facts.append(_population_fact(90_000 + index * 100, f"{year}K{quarter}", "Viborg"))
+    assert guard_answer(question, "En forskel på 1.200.", facts) == UNVERIFIED_NUMBERS
+    named = "Fra 2016K1 til 2017K1 er forskellen 400."
+    assert guard_answer(question, named, facts) == named
+    wrong = "Fra 2016K1 til 2017K1 er forskellen 1.200."
+    assert guard_answer(question, wrong, facts) == UNVERIFIED_NUMBERS
+
+
+def test_different_measures_are_not_added_or_subtracted() -> None:
+    question = "Hvordan har foreninger og medlemmer i Esbjerg udviklet sig?"
+    facts = [
+        {
+            "table": "IDRFOR01",
+            "period": "2025",
+            "unit": "Antal",
+            "value": 212,
+            "detail": "BLSTKOM: Esbjerg, AKTP: Foreninger",
+            "unpublished": False,
+        },
+        {
+            "table": "IDRFOR01",
+            "period": "2025",
+            "unit": "Antal",
+            "value": 54205,
+            "detail": "BLSTKOM: Esbjerg, AKTP: Medlemmer",
+            "unpublished": False,
+        },
+    ]
+    assert guard_answer(question, "En stigning på 53.995.", facts) == UNVERIFIED_NUMBERS
+    mixed = "I alt 54.417 medlemmer og foreninger."
+    assert guard_answer(question, mixed, facts) == UNVERIFIED_NUMBERS
+
+
+def test_derived_figures_do_not_bypass_the_wrong_period_check() -> None:
+    question = "Hvordan har befolkningen i Viborg udviklet sig siden 2013?"
+    facts = _viborg_quarters()
+    assert guard_answer(question, "Viborg havde 94.486 i 2013K1.", facts) == UNVERIFIED_NUMBERS
+    assert guard_answer(question, "Viborg havde 94.486 i 2014K1.", facts) == (
+        "Viborg havde 94.486 i 2014K1."
+    )
+
+
+def test_projection_and_year_derivation_are_visible() -> None:
+    projected = _population_fact(57160, "2030", "Esbjerg")
+    projected["projection"] = True
+    question = "Hvor mange bor der i Esbjerg i 2030?"
+    answer = guard_answer(question, "Der bor 57.160.", [projected])
+    assert "57.160" in answer
+    assert "fremskrivning" in answer
+    grid = facts_to_grid([projected])
+    assert "fremskrivning" in grid["rows"][0][1]
+    exported = json.loads(facts_to_json([projected]))
+    assert exported[0]["fremskrivning"] is True
+    assert exported[0]["periode_label"] == "2030 (fremskrivning)"
+    yearly = _population_fact(115029, "2025")
+    yearly["derivation"] = (
+        "Gennemsnit af 2025K1, 2025K2, 2025K3, 2025K4 (niveau, perioderne er gennemsnit)."
+    )
+    shown = guard_answer("Hvor mange bor i Esbjerg i 2025?", "115.029", [yearly])
+    assert "Gennemsnit af 2025K1" in shown
+    assert "115.029" in shown
 
 
 def test_swapped_place_names_are_suppressed() -> None:

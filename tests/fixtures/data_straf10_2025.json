@@ -1,0 +1,85 @@
+{
+  "dataset": {
+    "dimension": {
+      "OVERTRÆD": {
+        "label": "overtrædelsens art",
+        "category": {
+          "index": {
+            "1": 0
+          },
+          "label": {
+            "1": "Straffelov i alt"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "STRAF10": 0
+          },
+          "label": {
+            "STRAF10": "Anmeldte forbrydelser"
+          },
+          "unit": {
+            "STRAF10": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2025K1": 0,
+            "2025K2": 1,
+            "2025K3": 2,
+            "2025K4": 3
+          },
+          "label": {
+            "2025K1": "2025K1",
+            "2025K2": "2025K2",
+            "2025K3": "2025K3",
+            "2025K4": "2025K4"
+          }
+        }
+      },
+      "id": [
+        "OVERTRÆD",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        4
+      ],
+      "role": {
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Anmeldte forbrydelser efter overtrædelsens art, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-10-19T06:00:00Z",
+    "value": [
+      75797,
+      75288,
+      77113,
+      77641
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/c1ac7749-1e15-4d3a-8ed0-fb2d26a9fe93",
+        "tableid": "STRAF10",
+        "decimals": 0
+      }
+    }
+  }
+}

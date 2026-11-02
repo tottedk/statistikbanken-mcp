@@ -1,0 +1,88 @@
+{
+  "dataset": {
+    "status": {
+      "1": ".."
+    },
+    "dimension": {
+      "AFGRØDE": {
+        "label": "afgrøde",
+        "category": {
+          "index": {
+            "H110": 0
+          },
+          "label": {
+            "H110": "Vinterhvede"
+          }
+        }
+      },
+      "ENHED": {
+        "label": "enhed",
+        "category": {
+          "index": {
+            "3A": 0,
+            "4A": 1
+          },
+          "label": {
+            "3A": "Prognose",
+            "4A": "Høstet areal"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "HST5": 0
+          },
+          "label": {
+            "HST5": "Prognose for vinterafgrøder til høst"
+          },
+          "unit": {
+            "HST5": {
+              "base": "1.000 ha",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2026": 0
+          },
+          "label": {
+            "2026": "2026"
+          }
+        }
+      },
+      "id": [
+        "AFGRØDE",
+        "ENHED",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        2,
+        1,
+        1
+      ],
+      "role": {
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Prognose for vinterafgrøder til høst efter afgrøde, enhed, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2025-11-28T07:00:00Z",
+    "value": [
+      426,
+      null
+    ]
+  }
+}

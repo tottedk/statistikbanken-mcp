@@ -1,0 +1,108 @@
+{
+  "dataset": {
+    "dimension": {
+      "KOMMUNEDK": {
+        "label": "kommune",
+        "category": {
+          "index": {
+            "561": 0
+          },
+          "label": {
+            "561": "Esbjerg"
+          }
+        }
+      },
+      "ALDER": {
+        "label": "alder",
+        "category": {
+          "index": {
+            "TOT": 0
+          },
+          "label": {
+            "TOT": "Alder i alt"
+          }
+        }
+      },
+      "KØN": {
+        "label": "køn",
+        "category": {
+          "index": {
+            "M": 0,
+            "K": 1
+          },
+          "label": {
+            "M": "Mænd",
+            "K": "Kvinder"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "FRKM126": 0
+          },
+          "label": {
+            "FRKM126": "Befolkningsfremskrivning 2026"
+          },
+          "unit": {
+            "FRKM126": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2030": 0
+          },
+          "label": {
+            "2030": "2030"
+          }
+        }
+      },
+      "id": [
+        "KOMMUNEDK",
+        "ALDER",
+        "KØN",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        2,
+        1,
+        1
+      ],
+      "role": {
+        "geo": [
+          "KOMMUNEDK"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Befolkningsfremskrivning 2026 efter kommune, alder, køn, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-06-12T06:00:00Z",
+    "value": [
+      57160,
+      56898
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/222dff0b-5dd4-4df2-848c-4cdd8f310d78",
+        "tableid": "FRKM126",
+        "decimals": 0
+      }
+    }
+  }
+}

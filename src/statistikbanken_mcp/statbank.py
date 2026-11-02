@@ -14,6 +14,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -116,6 +117,51 @@ _STOPWORDS = frozenset(
     }
 )
 
+# Whole words only. "bruttoledighed" keeps its own synonym; replacing the
+# inner "ledighed" would point that query at the wrong title.
+_UNEMPLOYMENT_RE = re.compile(
+    r"(?<![0-9a-zæøå])(?:arbejdsløshed|arbejdsloshed|ledighed)(?![0-9a-zæøå])"
+)
+# Stems are matched after _fold, which maps ø to o and æ to ae.
+_FLOW_STEMS = (
+    "anmeld",
+    "overnatning",
+    "fodt",
+    "fodsel",
+    "dodsfald",
+    "indvandr",
+    "udvandr",
+    "flytt",
+    "eksport",
+    "import",
+    "omsaet",
+    "transaktion",
+    "skilsmis",
+    "viels",
+    "forbryd",
+)
+_STOCK_RE = re.compile(
+    r"den 1\.|pr\. 1\.|\bultimo\b|\bprimo\b|\bbestand\b|\bbeholdning\b|"
+    r"\bpris(?:er|indeks)?\b|\bkurs\b|\bindeks\b|\bprocent\b|\bpct\b",
+    re.IGNORECASE,
+)
+_LEVEL_UNITS = frozenset({"pct", "procent", "indeks", "index"})
+_MONTH_NUMBERS = {
+    "januar": 1,
+    "februar": 2,
+    "marts": 3,
+    "april": 4,
+    "maj": 5,
+    "juni": 6,
+    "juli": 7,
+    "august": 8,
+    "september": 9,
+    "oktober": 10,
+    "november": 11,
+    "december": 12,
+}
+_QUARTER_WORDS = {"forste": 1, "anden": 2, "andet": 2, "tredje": 3, "fjerde": 4}
+
 _TABLE_MISSING = re.compile(r"Tabel findes ikke:\s*(.*?)\s*$")
 _VARIABLE_MISSING = re.compile(r"Kan ikke finde variablen:\s*(.*?)\s*$")
 _VALUE_MISSING = re.compile(r"Kan ikke finde værdien:\s*(.*?)\s*\((.*?)\)\s*$")
@@ -136,6 +182,13 @@ class _Variable:
     eliminable: bool
     time: bool
     values: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
+class _YearPlan:
+    year: str
+    codes: tuple[str, ...]
+    complete: bool
 
 
 @dataclass(frozen=True)
@@ -165,7 +218,10 @@ class StatbankClient:
         *,
         base_url: str = BASE_URL,
         timeout: float = 30.0,
+        today: date | None = None,
     ) -> None:
+        # None uses the real clock. Tests pass a date so fixtures do not depend on it.
+        self.today = today
         self._owns_http = http is None
         if http is None and os.environ.get("STATBANK_HTTP_TIMEOUT"):
             timeout = float(os.environ["STATBANK_HTTP_TIMEOUT"])
@@ -199,13 +255,16 @@ class StatbankClient:
                 score = (score or 0) + 250
             if score is None:
                 continue
+            title = table.get("text") or ""
             hit = {
                 "id": table.get("id"),
-                "title": table.get("text") or "",
+                "title": title,
                 "unit": table.get("unit") or "",
                 "latest_period": table.get("latestPeriod"),
                 "variables": list(table.get("variables") or []),
             }
+            if _title_is_projection(str(title)):
+                hit["projection"] = True
             if place_hit:
                 hit["matched_values"] = [
                     {"variable": "OMRÅDE", "id": item["id"], "text": item["text"]}
@@ -274,6 +333,10 @@ class StatbankClient:
             metadata, values, sum_from, sum_range
         )
         notes.extend(promoted)
+        values, year_plans, period_notes = _prepare_periods(
+            metadata, values, self.today or date.today()
+        )
+        notes.extend(period_notes)
         values, dropped = _drop_equivalent_value_sums(values, sum_from)
         notes.extend(dropped)
         selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
@@ -298,6 +361,10 @@ class StatbankClient:
             if isinstance(data, dict):
                 source = (data.get("dataset") or {}).get("source") or source
         _flag_unpublished(rows)
+        if year_plans:
+            rows, year_notes = _collapse_years(metadata, rows, year_plans)
+            notes.extend(year_notes)
+        notes.extend(_mark_projections(metadata, rows))
         result = {
             "table": metadata.id,
             "title": metadata.title,
@@ -310,6 +377,8 @@ class StatbankClient:
         }
         if assumed:
             result["defaults"] = assumed
+        if any(row.get("projection") for row in rows):
+            result["projection"] = True
         if notes:
             result["notes"] = notes
         return result
@@ -403,20 +472,47 @@ class StatbankClient:
 
 def _query_tokens(query: str) -> list[str]:
     folded = " ".join(query.casefold().split())
+    # "ledighed" also sits in AKU titles. The unemployment tables are titled
+    # "Fuldtidsledige", so the word is replaced rather than added as a synonym.
+    folded = _UNEMPLOYMENT_RE.sub("fuldtidsledige", folded)
     for phrase, replacement in _PHRASES:
         folded = folded.replace(phrase, replacement)
-    parts = []
+    parts: list[str] = []
     for part in folded.split():
         cleaned = part.strip(".,;:!?\"'()[]")
         if cleaned:
-            parts.append(cleaned)
-    kept = [part for part in parts if part not in _STOPWORDS and len(part) >= 3]
+            parts.extend(_hyphen_forms(cleaned))
+    deduped = list(dict.fromkeys(parts))
+    kept = [part for part in deduped if part not in _STOPWORDS and len(part) >= 3]
     if kept:
         return kept
     # A query that is only "Danmark" or "i Danmark" still searches Danmark.
     # Short function words are not put back, or "i" would match half the catalogue.
-    content = [part for part in parts if len(part) >= 3]
-    return content or parts
+    content = [part for part in deduped if len(part) >= 3]
+    return content or deduped
+
+
+def _hyphen_forms(token: str) -> list[str]:
+    """'fuldtids-ledige' is the joined word and each part.
+
+    A title may write the same word joined, hyphenated, or with a space.
+    The original token is kept so a hyphenated place name still matches.
+    """
+    if "-" not in token and "–" not in token and "—" not in token:
+        return [token]
+    parts = [part for part in re.split(r"[-–—]+", token) if part]
+    forms = [token]
+    joined = "".join(parts)
+    if joined and joined not in forms:
+        forms.append(joined)
+    for part in parts:
+        if part not in forms:
+            forms.append(part)
+    return forms
+
+
+def _without_hyphen(text: str) -> str:
+    return text.replace("-", "").replace("–", "").replace("—", "")
 
 
 def _with_stem(token: str, found: list[str]) -> None:
@@ -457,9 +553,13 @@ def _primary_forms(token: str) -> tuple[str, ...]:
 
 
 def _contains_token(haystack: str, token: str) -> bool:
-    if len(token) >= 4:
-        return token in haystack
-    return re.search(rf"(?<!\w){re.escape(token)}(?!\w)", haystack) is not None
+    hay = _without_hyphen(haystack)
+    tok = _without_hyphen(token)
+    if len(tok) >= 4:
+        return tok in hay
+    if not tok:
+        return False
+    return re.search(rf"(?<!\w){re.escape(tok)}(?!\w)", hay) is not None
 
 
 def _field_weight(table_id: str, title: str, variables: str, term: str) -> int:
@@ -612,7 +712,7 @@ def _public_metadata(
                 f"Unknown variable '{variable}' on table {table.id}. Known variables: {known}."
             )
         chosen = (match,)
-    return {
+    published: dict[str, Any] = {
         "id": table.id,
         "title": table.title,
         "description": table.description,
@@ -621,6 +721,9 @@ def _public_metadata(
         "active": table.active,
         "variables": [_public_variable(item, values_filter=values_filter) for item in chosen],
     }
+    if _title_is_projection(table.title):
+        published["projection"] = True
+    return published
 
 
 def _public_variable(variable: _Variable, *, values_filter: str | None = None) -> dict[str, Any]:
@@ -1200,6 +1303,502 @@ def _time_advice(variable: _Variable, token: str) -> str:
     if hint:
         advice = f"{advice} {hint}"
     return advice
+
+
+def _title_is_projection(title: str) -> bool:
+    """Population projections are tables. A mixed table such as HST5 is not."""
+    return "fremskriv" in _fold(title)
+
+
+def _label_is_forecast(text: str) -> bool:
+    folded = _fold(text)
+    return "fremskriv" in folded or re.search(r"\bprognose", folded) is not None
+
+
+def _mark_projections(table: _Table, rows: list[dict[str, Any]]) -> list[str]:
+    table_level = _title_is_projection(table.title)
+    marked = False
+    for row in rows:
+        labels = [
+            str(value)
+            for key, value in row.items()
+            if key not in {"value", "unpublished", "year_total", "projection"}
+            and isinstance(value, str)
+        ]
+        if table_level or any(_label_is_forecast(label) for label in labels):
+            row["projection"] = True
+            marked = True
+    if table_level and marked:
+        return [
+            "This table is a projection (fremskrivning), not observed figures. "
+            "Rows are marked projection."
+        ]
+    if marked:
+        return [
+            "Rows marked projection are forecasts (prognose or fremskrivning), "
+            "not observed figures."
+        ]
+    return []
+
+
+def _measure_sides(text: str) -> tuple[bool, bool]:
+    folded = _fold(text)
+    flow = any(stem in folded for stem in _FLOW_STEMS) or re.search(r"\bdode\b", folded) is not None
+    unit = folded.strip(" .")
+    stock = _STOCK_RE.search(folded) is not None or unit in _LEVEL_UNITS
+    return flow, stock
+
+
+def _one_measure(text: str) -> str | None:
+    """'sum' for a flow, 'average' for a level, None when the text is silent or both."""
+    flow, stock = _measure_sides(text)
+    if flow == stock:
+        return None
+    return "sum" if flow else "average"
+
+
+def _measure_method(table: _Table, labels: str) -> str | None:
+    """Flow is added. A stock or level is averaged. Mixed or unknown signals are not guessed."""
+    table_text = f"{table.title} {table.description} {table.unit}"
+    table_method = _one_measure(table_text)
+    label_method = _one_measure(labels) if labels.strip() else None
+    if table_method and label_method and table_method != label_method:
+        return None
+    return label_method or table_method
+
+
+def _prepare_periods(
+    table: _Table,
+    values: dict[str, list[str]] | None,
+    today: date,
+) -> tuple[dict[str, list[str]] | None, list[_YearPlan], list[str]]:
+    """Rewrite Danish period phrases and bare years into the table's own codes."""
+    if not values:
+        return values, [], []
+    time_var = next((variable for variable in table.variables if variable.time), None)
+    if time_var is None or time_var.id not in values:
+        return values, [], []
+    plans: list[_YearPlan] = []
+    notes: list[str] = []
+    rewritten: list[str] = []
+    for token in values[time_var.id]:
+        if _is_expression(token) or _value_matches(time_var, token):
+            rewritten.append(token)
+            continue
+        meaning = _period_meaning(table, time_var, token, today)
+        if meaning is None:
+            rewritten.append(token)
+            continue
+        codes, plan, read_as = meaning
+        rewritten.extend(codes)
+        if plan is not None:
+            plans.append(plan)
+        if read_as and read_as.casefold() != token.strip().casefold():
+            notes.append(f"Read {token.strip()!r} as {read_as}.")
+    updated = dict(values)
+    updated[time_var.id] = rewritten
+    return updated, plans, notes
+
+
+def _period_meaning(
+    table: _Table,
+    variable: _Variable,
+    token: str,
+    today: date,
+) -> tuple[list[str], _YearPlan | None, str] | None:
+    """Codes to request, an optional year plan, and the text of the read-as note.
+
+    None means the token is not a period phrase. The caller leaves it for the
+    ordinary unknown-value error.
+    """
+    text = " ".join(_fold(token).replace("–", " ").replace("—", " ").split())
+    text = text.replace(".", " ").replace("  ", " ").strip()
+    text = " ".join(text.split())
+    latest = _latest_period(variable)
+    if latest is None:
+        return None
+    latest_code, latest_year, latest_quarter, latest_month = latest
+
+    if text in {"seneste", "nyeste", "seneste periode", "nyeste periode"}:
+        return [latest_code], None, latest_code
+    # i år / i fjor / sidste måned follow the calendar, not the table's last period.
+    if text in {"i aar", "iaar"}:
+        return _year_meaning(table, variable, token, today.year, unpublished=True)
+    if text in {"i fjor", "sidste aar", "forrige aar"}:
+        return _year_meaning(table, variable, token, today.year - 1, unpublished=True)
+    if text in {"seneste kvartal", "sidste kvartal"}:
+        quarter = _relative_quarter(variable, token, latest_year, latest_quarter, text)
+        return _quarter_meaning(table, variable, token, *quarter)
+    if text == "seneste maaned":
+        if latest_month is None:
+            raise StatbankError(
+                f"{token.strip()!r} needs a monthly table. {_time_advice(variable, token)}"
+            )
+        return [latest_code], None, latest_code
+    if text == "sidste maaned":
+        previous = today.replace(day=1) - timedelta(days=1)
+        return _calendar_code(table, variable, token, f"{previous.year}M{previous.month:02d}")
+    month = _month_phrase(text)
+    if month is not None:
+        year, number = month
+        return _one_code(table, variable, token, f"{year}M{number:02d}")
+    quarter = _quarter_phrase(text)
+    if quarter is not None:
+        year, number = quarter
+        if number < 1 or number > 4:
+            raise StatbankError(
+                f"{token.strip()!r} is not a quarter. Use 1 to 4. {_time_advice(variable, token)}"
+            )
+        return _quarter_meaning(table, variable, token, year, number)
+    if re.fullmatch(r"\d{4}", text):
+        return _year_meaning(table, variable, token, int(text))
+    return None
+
+
+def _latest_period(
+    variable: _Variable,
+) -> tuple[str, int, int | None, int | None] | None:
+    best: tuple[tuple[int, int, int], str, int, int | None, int | None] | None = None
+    for item in variable.values:
+        parsed = _parsed_period(item["id"])
+        if parsed is None:
+            continue
+        year, kind, index = parsed
+        key = (year, kind, index)
+        if best is None or key > best[0]:
+            quarter = index if kind == 1 else (index - 1) // 3 + 1 if kind == 3 else None
+            month = index if kind == 3 else None
+            best = (key, item["id"], year, quarter, month)
+    if best is None:
+        return None
+    return best[1], best[2], best[3], best[4]
+
+
+def _parsed_period(code: str) -> tuple[int, int, int] | None:
+    """(year, kind, index). Kind is 0 year, 1 quarter, 2 half, 3 month."""
+    match = re.fullmatch(r"(\d{4})(?:(K|Q)([1-4])|(H)([12])|(M)(\d{2}))?", code.strip(), re.I)
+    if match is None:
+        return None
+    year = int(match.group(1))
+    if match.group(2):
+        return year, 1, int(match.group(3))
+    if match.group(4):
+        return year, 2, int(match.group(5))
+    if match.group(6):
+        return year, 3, int(match.group(7))
+    return year, 0, 0
+
+
+def _relative_quarter(
+    variable: _Variable,
+    token: str,
+    year: int,
+    quarter: int | None,
+    text: str,
+) -> tuple[int, int]:
+    if quarter is None:
+        raise StatbankError(
+            f"{token.strip()!r} needs a quarterly or monthly table. {_time_advice(variable, token)}"
+        )
+    if text.startswith("sidste"):
+        index = year * 4 + (quarter - 1) - 1
+        return index // 4, index % 4 + 1
+    return year, quarter
+
+
+def _month_phrase(text: str) -> tuple[int, int] | None:
+    named = "|".join(_MONTH_NUMBERS)
+    front = re.fullmatch(rf"(?:i )?({named}) (\d{{4}})", text)
+    if front:
+        return int(front.group(2)), _MONTH_NUMBERS[front.group(1)]
+    back = re.fullmatch(rf"(\d{{4}}) ({named})", text)
+    if back:
+        return int(back.group(1)), _MONTH_NUMBERS[back.group(2)]
+    return None
+
+
+def _quarter_phrase(text: str) -> tuple[int, int] | None:
+    words = "|".join(_QUARTER_WORDS)
+    patterns = (
+        (r"(\d{4})\s*(\d)\s*(?:kvartal|kvt)", True),
+        (r"(\d{4})\s*[kq]\s*(\d)", True),
+        (r"(\d)\s*(?:kvartal|kvt)\s*(\d{4})", False),
+        (r"[kq]\s*(\d)\s*(\d{4})", False),
+        (rf"({words})\s+kvartal\s+(\d{{4}})", False),
+    )
+    for pattern, year_first in patterns:
+        match = re.fullmatch(pattern, text)
+        if match is None:
+            continue
+        first, second = match.group(1), match.group(2)
+        if year_first:
+            return int(first), int(second)
+        quarter = _QUARTER_WORDS[first] if first in _QUARTER_WORDS else int(first)
+        return int(second), quarter
+    return None
+
+
+def _not_published(token: str, code: str, table: _Table, variable: _Variable) -> StatbankError:
+    latest = _latest_period(variable)
+    shown = latest[0] if latest else "none"
+    return StatbankError(
+        f"{token.strip()!r} means {code}, which is not published in {table.id}. "
+        f"Latest available period: {shown}."
+    )
+
+
+def _calendar_code(
+    table: _Table,
+    variable: _Variable,
+    token: str,
+    code: str,
+) -> tuple[list[str], _YearPlan | None, str]:
+    found = _code_on(variable, code)
+    if found is None:
+        raise _not_published(token, code, table, variable)
+    return [found], None, found
+
+
+def _one_code(
+    table: _Table,
+    variable: _Variable,
+    token: str,
+    code: str,
+) -> tuple[list[str], _YearPlan | None, str]:
+    found = _code_on(variable, code)
+    if found is None:
+        raise StatbankError(
+            f"{token.strip()!r} is {code}, which is not in table {table.id}. "
+            f"{_time_advice(variable, code)}"
+        )
+    return [found], None, found
+
+
+def _quarter_meaning(
+    table: _Table,
+    variable: _Variable,
+    token: str,
+    year: int,
+    quarter: int,
+) -> tuple[list[str], _YearPlan | None, str]:
+    quarter_code = _code_on(variable, f"{year}K{quarter}") or _code_on(
+        variable, f"{year}Q{quarter}"
+    )
+    if quarter_code is not None:
+        return [quarter_code], None, quarter_code
+    months = [f"{year}M{month:02d}" for month in range((quarter - 1) * 3 + 1, quarter * 3 + 1)]
+    found = [code for month in months if (code := _code_on(variable, month))]
+    if len(found) == 3:
+        shown = ", ".join(found)
+        return found, None, shown
+    target = quarter_code or f"{year}K{quarter}"
+    raise StatbankError(
+        f"{token.strip()!r} is {target}, which is not in table {table.id}. "
+        f"{_time_advice(variable, token)}"
+    )
+
+
+def _year_meaning(
+    table: _Table,
+    variable: _Variable,
+    token: str,
+    year: int,
+    *,
+    unpublished: bool = False,
+) -> tuple[list[str], _YearPlan | None, str]:
+    exact = _code_on(variable, str(year))
+    if exact is not None:
+        return [exact], None, exact
+    codes = [
+        item["id"]
+        for item in variable.values
+        if re.fullmatch(
+            rf"{year}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2])|H[12])",
+            item["id"],
+            re.IGNORECASE,
+        )
+    ]
+    if not codes:
+        if unpublished:
+            raise _not_published(token, str(year), table, variable)
+        raise StatbankError(
+            f"{token.strip()!r} is {year}, which is not in table {table.id}. "
+            f"{_time_advice(variable, str(year))}"
+        )
+    plan = _YearPlan(year=str(year), codes=tuple(codes), complete=_year_is_complete(codes))
+    return list(codes), plan, str(year)
+
+
+def _year_is_complete(codes: list[str]) -> bool:
+    suffixes = {code[4:].upper() for code in codes}
+    if suffixes <= {f"K{i}" for i in range(1, 5)}:
+        return suffixes == {f"K{i}" for i in range(1, 5)}
+    if suffixes <= {f"Q{i}" for i in range(1, 5)}:
+        return suffixes == {f"Q{i}" for i in range(1, 5)}
+    months = {f"M{i:02d}" for i in range(1, 13)}
+    if suffixes <= months and all(item.startswith("M") for item in suffixes):
+        return suffixes == months
+    if suffixes <= {"H1", "H2"}:
+        return suffixes == {"H1", "H2"}
+    return False
+
+
+def _code_on(variable: _Variable, code: str) -> str | None:
+    for item in variable.values:
+        if item["id"].casefold() == code.casefold():
+            return item["id"]
+    return None
+
+
+def _collapse_years(
+    table: _Table,
+    rows: list[dict[str, Any]],
+    plans: list[_YearPlan],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    time_id = next((variable.id for variable in table.variables if variable.time), None)
+    if time_id is None:
+        return rows, []
+    notes: list[str] = []
+    consumed: set[int] = set()
+    produced: dict[int, list[dict[str, Any]]] = {}
+    seen_years: set[str] = set()
+    for plan in plans:
+        if plan.year in seen_years:
+            continue
+        seen_years.add(plan.year)
+        wanted = {code.casefold() for code in plan.codes}
+        indexes = [
+            index
+            for index, row in enumerate(rows)
+            if index not in consumed and str(row.get(time_id) or "").casefold() in wanted
+        ]
+        chosen = [rows[index] for index in indexes]
+        labels = " ".join(
+            str(value)
+            for row in chosen
+            for key, value in row.items()
+            if key not in {time_id, "value", "unpublished", "projection", "year_total"}
+            and isinstance(value, str)
+        )
+        method = _measure_method(table, labels) if plan.complete else None
+        aggregated = _aggregate_year(chosen, time_id, plan, method) if method else None
+        if aggregated is None:
+            notes.append(_year_skip_note(plan, method))
+            continue
+        notes.append(_year_method_note(plan, method))
+        if indexes:
+            consumed.update(indexes)
+            produced[indexes[0]] = aggregated
+    if not consumed:
+        return rows, notes
+    output: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if index in produced:
+            output.extend(produced[index])
+        if index not in consumed:
+            output.append(row)
+    return output, notes
+
+
+def _listed_periods(codes: tuple[str, ...]) -> str:
+    items = list(codes)
+    if len(items) < 2:
+        return ", ".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _year_skip_note(plan: _YearPlan, method: str | None) -> str:
+    listed = _listed_periods(plan.codes)
+    if not plan.complete:
+        return (
+            f"{plan.year} is not a full year in this table ({listed}). "
+            "No yearly figure was calculated."
+        )
+    if method is None:
+        return (
+            f"{plan.year} cannot be combined into one figure ({listed}). "
+            "The table does not say whether the measure is a flow (add the periods) "
+            "or a level (average them), so no yearly figure was calculated. "
+            "The periods are listed separately."
+        )
+    return (
+        f"{plan.year} could not be combined ({listed}) because a period has no number. "
+        "No yearly figure was calculated. The periods are listed separately."
+    )
+
+
+def _year_method_note(plan: _YearPlan, method: str) -> str:
+    listed = _listed_periods(plan.codes)
+    if method == "sum":
+        return (
+            f"{plan.year} is the sum of {listed}. The measure is a flow, so the periods are added."
+        )
+    return (
+        f"{plan.year} is the average of {listed}. "
+        "The measure is a level at a point in time, so the periods are averaged."
+    )
+
+
+def _aggregate_year(
+    rows: list[dict[str, Any]],
+    time_id: str,
+    plan: _YearPlan,
+    method: str | None,
+) -> list[dict[str, Any]] | None:
+    if method not in {"sum", "average"} or not rows:
+        return None
+    expected = [code.casefold() for code in plan.codes]
+    groups: dict[tuple[tuple[str, Any], ...], dict[str, dict[str, Any]]] = {}
+    order: list[tuple[tuple[str, Any], ...]] = []
+    for row in rows:
+        period = str(row.get(time_id) or "").casefold()
+        identity = tuple(
+            (key, row.get(key))
+            for key in row
+            if key not in {time_id, "value", "unpublished", "projection", "year_total"}
+        )
+        bucket = groups.get(identity)
+        if bucket is None:
+            bucket = {}
+            groups[identity] = bucket
+            order.append(identity)
+        bucket[period] = row
+    aggregated: list[dict[str, Any]] = []
+    for identity in order:
+        series = groups[identity]
+        if any(code not in series for code in expected):
+            return None
+        values: list[int | float] = []
+        for code in expected:
+            row = series[code]
+            if row.get("unpublished"):
+                return None
+            value = row.get("value")
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                return None
+            values.append(value)
+        total = _combine_period_values(values, method)
+        combined = {key: item for key, item in identity}
+        combined[time_id] = plan.year
+        combined["value"] = total
+        combined["year_total"] = {
+            "method": method,
+            "measure": "flow" if method == "sum" else "level",
+            "periods": list(plan.codes),
+        }
+        aggregated.append(combined)
+    return aggregated or None
+
+
+def _combine_period_values(values: list[int | float], method: str) -> int | float:
+    total = sum(values)
+    if method == "sum":
+        if isinstance(total, float) and total.is_integer():
+            return int(total)
+        return total
+    if all(isinstance(value, int) for value in values) and total % len(values) == 0:
+        return int(total // len(values))
+    return total / len(values)
 
 
 def _year_span_hint(variable: _Variable, token: str) -> str:
