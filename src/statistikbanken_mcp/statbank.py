@@ -247,9 +247,11 @@ class StatbankClient:
         tokens = _query_tokens(query)
         folded = query.casefold().strip()
         places = self._matching_places(tokens)
+        catalogue = self._table_list()
+        named_ids = _explicit_table_ids(query, catalogue)
         ranked: list[tuple[int, int, dict[str, Any]]] = []
-        for index, table in enumerate(self._table_list()):
-            score = _score_table(table, tokens, folded)
+        for index, table in enumerate(catalogue):
+            score = _score_table(table, tokens, folded, named_ids)
             place_hit = places if str(table.get("id")) == "FOLK1A" else []
             if place_hit:
                 score = (score or 0) + 250
@@ -616,6 +618,116 @@ def _token_score(table_id: str, title: str, variables: str, token: str) -> int:
     return min(fallback, 14)
 
 
+@dataclass(frozen=True)
+class _TablePreference:
+    """Rank one table first when a common question would otherwise tie.
+
+    Each group in `all_of` is a set of alternatives, and every group has to
+    match the query. `unless` turns the preference off, for a forecast, a
+    breakdown, or a different subject that shares a word. The boost only
+    reorders a table that already matched. A table id written in the query
+    outranks every preference.
+    """
+
+    table_id: str
+    all_of: tuple[tuple[str, ...], ...]
+    unless: tuple[str, ...] = ()
+
+
+# One list. Search uses it and nothing else hard-codes these ids.
+# FOLK1A is the quarterly population by municipality or age (BEFOLK3 is 1 January).
+# AUS08 is seasonally adjusted gross unemployment, monthly (over AKU520K and AUF01).
+# INDKP105 is personal income, the amount (INDKP222 counts people in brackets).
+# STRAF10 is crimes reported (STRAF20 adds charges).
+_TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
+    _TablePreference(
+        "FOLK1A",
+        (
+            ("befolkning", "population", "people", "indbyggere"),
+            ("kommune", "kommuner", "municipality", "alder", "age"),
+        ),
+        ("fremskriv", "herkomst"),
+    ),
+    # Quarterly population by origin. IEPCT is a share, FOLK1C adds birth country.
+    _TablePreference(
+        "FOLK1E",
+        (("befolkning", "population", "people", "indbyggere"), ("herkomst",)),
+        ("fremskriv",),
+    ),
+    _TablePreference(
+        "AUS08",
+        (
+            (
+                "ledighed",
+                "ledige",
+                "arbejdsløshed",
+                "unemployment",
+                "unemployed",
+                "bruttoledighed",
+                "fuldtidsledige",
+                "jobless",
+            ),
+        ),
+        ("stilling", "aku"),
+    ),
+    _TablePreference(
+        "INDKP105",
+        (("indkomst", "income"), ("personlig", "personal")),
+        ("køn", "alder", "uddannelse", "sex"),
+    ),
+    _TablePreference(
+        "STRAF10",
+        (("forbrydelse", "forbrydelser", "indbrud", "burglary"),),
+        ("ofre", "offer"),
+    ),
+)
+# Enough to pass a title that matches every word of a short query (about 200).
+_PREFERENCE_BOOST = 400
+
+
+def _term_in_query(folded: str, term: str) -> bool:
+    """A short word has to stand alone, so 'age' does not match 'average'."""
+    needle = _fold(term)
+    if not needle:
+        return False
+    if len(needle) <= 4:
+        return re.search(rf"(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])", folded) is not None
+    return needle in folded
+
+
+def _explicit_table_ids(query: str, tables: list[dict[str, Any]]) -> set[str]:
+    """Table ids written as their own word, such as AUF01.
+
+    The id has to contain a digit. Otherwise "før skat" would name the table
+    SKAT.
+    """
+    words = set(re.findall(r"[0-9a-z]+", _fold(query)))
+    named: set[str] = set()
+    for table in tables:
+        table_id = str(table.get("id") or "")
+        if not table_id or not any(char.isdigit() for char in table_id):
+            continue
+        if _fold(table_id) in words:
+            named.add(table_id.casefold())
+    return named
+
+
+def _preference_boost(table_id: str, query: str, named_ids: set[str]) -> int:
+    # A named id is the caller's choice. Do not pull another table in front of it.
+    if named_ids:
+        return 0
+    folded = _fold(query)
+    for preference in _TABLE_PREFERENCES:
+        if preference.table_id.casefold() != table_id.casefold():
+            continue
+        if any(_term_in_query(folded, term) for term in preference.unless):
+            return 0
+        groups = preference.all_of
+        if groups and all(any(_term_in_query(folded, term) for term in group) for group in groups):
+            return _PREFERENCE_BOOST
+    return 0
+
+
 def _pre_tax_adjustment(query: str, title: str, tokens: list[str]) -> int:
     """Prefer "Indkomst i alt" for income before tax, unless a breakdown is named.
 
@@ -636,7 +748,12 @@ def _pre_tax_adjustment(query: str, title: str, tokens: list[str]) -> int:
     return score
 
 
-def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int | None:
+def _score_table(
+    table: dict[str, Any],
+    tokens: list[str],
+    folded: str,
+    named_ids: set[str] | None = None,
+) -> int | None:
     table_id = str(table.get("id") or "")
     title = str(table.get("text") or "")
     variable_names = " ".join(str(name) for name in table.get("variables") or [])
@@ -661,7 +778,15 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
         score += 30
     if table.get("active") is True:
         score += 5
-    return score + _pre_tax_adjustment(folded, haystack_title, tokens)
+    named = named_ids or set()
+    if table_id.casefold() in named:
+        # Above the preference boost, so "ledighed AUF01" stays AUF01.
+        score += 1000
+    return (
+        score
+        + _pre_tax_adjustment(folded, haystack_title, tokens)
+        + _preference_boost(table_id, folded, named)
+    )
 
 
 def _parse_table(data: Any) -> _Table:
@@ -2051,27 +2176,87 @@ def _fold(text: str) -> str:
     return text.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
 
 
-def _unique_total(variable: _Variable) -> dict[str, str] | None:
-    def is_total(item: dict[str, str]) -> bool:
-        code = item["id"].casefold()
-        text = item["text"].casefold().strip()
-        return code in {"tot", "ialt"} or text in {"i alt", "alle", "total"}
+def _label_key(text: str) -> str:
+    return " ".join(_fold(text).split())
 
-    totals = [item for item in variable.values if is_total(item)]
-    if len(totals) == 1:
-        return totals[0]
+
+_EXACT_TOTALS = frozenset({"i alt", "ialt", "alle", "total", "hele landet"})
+
+
+def _genuine_total(variable: _Variable) -> dict[str, str] | None:
+    """A top-level total: code TOT or IALT, or the label I alt, Total, Alle, Hele landet."""
+    by_code = [item for item in variable.values if item["id"].casefold() in {"tot", "ialt"}]
+    if len(by_code) == 1:
+        return by_code[0]
+    if by_code:
+        return None
+    exact = [item for item in variable.values if _label_key(item["text"]) in _EXACT_TOTALS]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None
     return None
 
 
+def _styled_total(variable: _Variable) -> dict[str, str] | None:
+    """One longer label ending in 'i alt', such as 'Mænd og kvinder i alt'."""
+    styled = [item for item in variable.values if _label_key(item["text"]).endswith(" i alt")]
+    if len(styled) == 1:
+        return styled[0]
+    return None
+
+
+def _unique_total(variable: _Variable) -> dict[str, str] | None:
+    """The total used when the caller omits the variable.
+
+    A top-level total is used even when the variable must be set. A longer
+    label that only ends in "i alt" is used when the API allows elimination.
+    On a variable that must be set, that label is a subcategory ("Ejerlejligheder,
+    i alt", "Hoteller og Feriecentre i alt") and the caller has to choose.
+    """
+    genuine = _genuine_total(variable)
+    if genuine is not None:
+        return genuine
+    if variable.eliminable:
+        return _styled_total(variable)
+    return None
+
+
+def _latest_value(variable: _Variable) -> dict[str, str] | None:
+    latest = _latest_period(variable)
+    if latest is None:
+        return None
+    code = latest[0]
+    for item in variable.values:
+        if item["id"] == code:
+            return item
+    return {"id": code, "text": code}
+
+
 def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict[str, str]]:
+    """Fill every variable the caller left out.
+
+    A top-level total (I alt, Total, Hele landet) is used when the question
+    does not name that variable. A longer "i alt" label is used only when the
+    API allows elimination. A required subcategory is left for the caller, and
+    the error lists its values. Omitted time is the latest published period.
+    """
     assumed: list[dict[str, str]] = []
     missing: list[_Variable] = []
     for variable in table.variables:
-        if variable.time or variable.eliminable or variable.id in selections:
+        if variable.id in selections:
+            continue
+        if variable.time:
+            latest = _latest_value(variable)
+            if latest is None:
+                continue
+            selections[variable.id] = [latest["id"]]
+            assumed.append({"variable": variable.id, "id": latest["id"], "text": latest["text"]})
             continue
         total = _unique_total(variable)
         if total is None:
-            missing.append(variable)
+            if not variable.eliminable:
+                missing.append(variable)
             continue
         selections[variable.id] = [total["id"]]
         assumed.append({"variable": variable.id, "id": total["id"], "text": total["text"]})

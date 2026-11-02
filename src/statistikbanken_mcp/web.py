@@ -68,6 +68,8 @@ You may also pass >=80 in values together with that sum_from. It is the same req
 sum_from and sum_range are arguments beside values, not keys inside values.
 Unless the question asks for a change, a development, or several years, use only the latest period.
 Do not list earlier periods for a question that asks how many there are now.
+Leave out a variable the question does not name. It is set to the total (I alt or Hele landet).
+Leave out Tid for one figure. Omitted time is the latest published period.
 For a change over time, fetch every period in one hent_data call.
 Pass Tid as one range in values, for example >=2015K1.
 Each period comes back as its own row. Do not put Tid in sum_range.
@@ -89,6 +91,39 @@ Write periods like 1. kvartal 2015 or 2015 1. kvt., marts 2015, or 2015 1. halv�
 A year stays 2015. Do not write 2015K1 or 2026Q3."""
 
 
+_DANISH_MONTHS = (
+    "januar",
+    "februar",
+    "marts",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "august",
+    "september",
+    "oktober",
+    "november",
+    "december",
+)
+
+
+def _danish_month(day: date, *, start: bool) -> str:
+    name = _DANISH_MONTHS[day.month - 1]
+    if start:
+        return name[:1].upper() + name[1:]
+    return name
+
+
+def _unpublished_example(day: date) -> str:
+    """The month just gone, and the month before it, so the example does not go stale."""
+    requested = day.replace(day=1) - timedelta(days=1)
+    earlier = requested.replace(day=1) - timedelta(days=1)
+    return (
+        f"{_danish_month(requested, start=True)} {requested.year} er ikke offentliggjort endnu; "
+        f"seneste er {_danish_month(earlier, start=False)} {earlier.year}"
+    )
+
+
 def _previous_quarter(day: date) -> str:
     """Last finished quarter. November is K3 of the same year."""
     quarter = (day.month - 1) // 3
@@ -108,6 +143,7 @@ def system_prompt(today: date | None = None) -> str:
     month_code = f"{last_month.year}M{last_month.month:02d}"
     quarter_code = _previous_quarter(day)
     last_year = day.year - 1
+    example = _unpublished_example(day)
     return (
         f"{SYSTEM_PROMPT}\n"
         f"Today's date is {day.isoformat()} (Europe/Copenhagen). "
@@ -118,7 +154,7 @@ def system_prompt(today: date | None = None) -> str:
         f"These codes are the calendar meaning. "
         f"If that period is not published yet, call hent_data again with the latest "
         f"published period from the error and say so in the answer. "
-        f"For example: 'Oktober er ikke offentliggjort endnu; seneste er september 2026: …'. "
+        f"For example: '{example}.' "
         f"Do the same for 'i år' and 'i fjor' when that year is not published. "
         f"'seneste 10 år' is the latest published period and the same quarter or month "
         f"10 years earlier. If the latest quarter is {quarter_code}, pass "
@@ -162,6 +198,8 @@ PAGE = """<!DOCTYPE html>
   pre { white-space: pre-wrap; word-break: break-word;
     font: 0.85rem/1.4 ui-monospace, monospace; margin: 0.5rem 0 0; }
   .error { color: #8a1f1f; }
+  .suggest { background: #fff; border: 1px solid #c9c2b6; border-radius: 8px;
+    padding: 0.75rem 1rem; margin: 0; }
   .facts { max-height: 16rem; overflow: auto; scrollbar-width: thin; }
   .facts::-webkit-scrollbar { width: 10px; height: 10px; }
   .facts::-webkit-scrollbar-thumb { background: #c9c2b6; border-radius: 8px; }
@@ -500,6 +538,15 @@ function toolCalls(data) {
   return trace;
 }
 
+function suggestionsBlock(data) {
+  const lines = data.suggestions || [];
+  if (!lines.length) return null;
+  const box = el("section");
+  box.append(el("h2", "Forslag"));
+  for (const line of lines) box.append(el("p", line, "suggest"));
+  return box;
+}
+
 function render(data) {
   out.replaceChildren();
   if (data.error) {
@@ -509,6 +556,8 @@ function render(data) {
   const answer = el("section");
   answer.append(el("h2", "Svar"), el("p", data.answer || "", "answer"));
   out.append(answer);
+  const suggestions = suggestionsBlock(data);
+  if (suggestions) out.append(suggestions);
 
   let chartSvg = null;
   if (advancedView(data) && data.chart && data.chart.length) {
@@ -725,6 +774,7 @@ class TurnResult:
     csv: str = ""
     grid: dict[str, Any] = field(default_factory=dict)
     show_numbers: bool = True
+    suggestions: list[str] = field(default_factory=list)
 
 
 async def run_turn(
@@ -1332,7 +1382,36 @@ def _turn(
         axis=chart_axis(chart),
         csv=facts_to_csv(kept) if kept else "",
         grid=facts_to_grid(kept),
+        suggestions=[] if kept else _lookup_suggestions(calls),
     )
+
+
+_DID_YOU_MEAN_RE = re.compile(r"Did you mean ([^?]+)\?")
+_NOT_FOUND_STARTS = ("No table matches", "Unknown table", "Unknown value")
+# The MCP client prefixes a tool failure with "Error executing tool <name>:".
+_TOOL_ERROR_RE = re.compile(r"^(?:Error executing tool\b[^:]*:\s*)+", re.IGNORECASE)
+
+
+def _lookup_suggestions(calls: list[dict[str, str]]) -> list[str]:
+    """Lines to show when a search, a table, or a value was not found."""
+    lines: list[str] = []
+    for call in calls:
+        result = " ".join(str(call.get("result") or "").split())
+        result = _TOOL_ERROR_RE.sub("", result).strip()
+        if not result:
+            continue
+        meant = _DID_YOU_MEAN_RE.findall(result)
+        if meant:
+            lines.extend(f"Mente du {item.strip()}?" for item in meant)
+            continue
+        if result.startswith(_NOT_FOUND_STARTS):
+            parts = re.split(r"(?<=\.)\s+", result)
+            line = " ".join(parts[:2]).strip()
+            if len(line) > 320:
+                line = line[:317].rstrip() + "…"
+            if line:
+                lines.append(line)
+    return list(dict.fromkeys(lines))
 
 
 _DANISH_WORDS = frozenset(
@@ -1428,7 +1507,8 @@ def _closing_instruction(question: str) -> str:
     else:
         scope = (
             "The question asks for one figure. Use only the latest period. "
-            "Do not return a long list of earlier periods."
+            "Do not return a long list of earlier periods. "
+            "Do not pass variables the question does not name."
         )
     return (
         f"{language} {scope} "
@@ -1453,7 +1533,8 @@ def guard_answer(
     from the question or a label is left to that check. A question that asks for one
     figure is answered with the page's own line for the latest period. The
     model's sentence is not used, so a long series or an invented total cannot
-    become the answer.
+    become the answer. A note that the requested period is not published yet
+    is kept with that line.
     """
     if not facts:
         if _is_page_message(answer):
@@ -1467,7 +1548,7 @@ def guard_answer(
     if not _asks_for_trend(question):
         lines = _latest_lines(facts)
         if lines:
-            return "\n".join(lines)
+            return _with_unpublished_note("\n".join(lines), answer)
     if _log_unverified(answer, question, facts, calls):
         if _single_fact(facts):
             return _summary_line(facts[0])
@@ -1476,6 +1557,81 @@ def guard_answer(
         line = _summary_line(facts[0])
         return f"{line}\n\n{answer}" if answer else line
     return answer
+
+
+_NOTE_GLUE_RE = re.compile(
+    r"(?:\s*(?:,|;|:|—|-)?\s*\b(?:med|og|viser|showing|shows|show|er|på|pa|of|with|at)\b\s*)+$",
+    re.IGNORECASE,
+)
+_QUARTER_WORD_RE = re.compile(
+    r"\s*\.?\s*(?:kvartal|kvt|halvår|halvaar)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_sentence_end(text: str, index: int) -> bool:
+    """A period inside 1.234,5 or before 'kvartal' does not end the sentence."""
+    char = text[index]
+    if char == "\n":
+        return True
+    if char in "!?":
+        return True
+    if char != ".":
+        return False
+    prev = text[index - 1] if index else ""
+    nxt = text[index + 1] if index + 1 < len(text) else ""
+    if prev.isdigit() and nxt.isdigit():
+        return False
+    if prev.isdigit() and _QUARTER_WORD_RE.match(text[index + 1 :]):
+        return False
+    return True
+
+
+def _clause_around(text: str, start: int, end: int) -> str:
+    left = start
+    while left > 0 and not _is_sentence_end(text, left - 1):
+        left -= 1
+    right = end
+    while right < len(text) and not _is_sentence_end(text, right):
+        right += 1
+    return text[left:right].strip(" \t;:—-")
+
+
+def _without_unchecked_figures(note: str) -> str:
+    """Keep the period words. Drop a statistic, including one Danish number."""
+    cut = len(note)
+    for match in _NUMBER_RE.finditer(note):
+        token = match.group(1)
+        if re.fullmatch(r"(?:19|20)\d{2}", token):
+            continue
+        if _QUARTER_WORD_RE.match(note[match.end() :]):
+            continue
+        cut = match.start()
+        break
+    kept = _NOTE_GLUE_RE.sub("", note[:cut])
+    kept = re.sub(r"\s{2,}", " ", kept)
+    return kept.strip(" \t;:—-,")
+
+
+def _unpublished_period_note(answer: str) -> str:
+    """The not-published clause, with period names and no statistic."""
+    match = re.search(r"ikke offentliggjort|not published", answer, re.IGNORECASE)
+    if match is None:
+        return ""
+    note = _clause_around(answer, match.start(), match.end())
+    if note and not re.search(r"\b(?:seneste|latest)\b", note, re.IGNORECASE):
+        rest = answer[match.end() :]
+        follow = re.search(r"\b(?:seneste|latest)\b", rest, re.IGNORECASE)
+        if follow and follow.start() < 80:
+            note = _clause_around(answer, match.start(), match.end() + follow.end())
+    return _without_unchecked_figures(note)
+
+
+def _with_unpublished_note(text: str, answer: str) -> str:
+    note = _unpublished_period_note(answer)
+    if not note or note in text:
+        return text
+    return f"{text}\n{note}" if text else note
 
 
 def _latest_lines(facts: list[dict[str, Any]]) -> list[str]:
@@ -2789,6 +2945,7 @@ def _handler(settings: Settings, limiter: Limiter, answer: Any) -> type[BaseHTTP
                     "csv": result.csv,
                     "grid": result.grid,
                     "show_numbers": result.show_numbers,
+                    "suggestions": result.suggestions,
                 },
             )
 

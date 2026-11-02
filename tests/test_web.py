@@ -219,7 +219,8 @@ def test_prompt_counts_relative_periods_back_from_the_given_date() -> None:
     assert "'sidste måned' is 2026M10" in november
     assert "These codes are the calendar meaning." in november
     assert "call hent_data again with the latest published period" in november
-    assert "Oktober er ikke offentliggjort endnu; seneste er september 2026:" in november
+    assert "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026." in november
+    assert "Oktober er ikke offentliggjort endnu; seneste er september 2026:" not in november
     assert "when that year is not published" in november
     assert "2016K3 to 2026K3" in november
     assert "2016M10 to 2026M10" in november
@@ -236,6 +237,9 @@ def test_prompt_counts_relative_periods_back_from_the_given_date() -> None:
     assert "a quarter is 2025K4" in january
     assert "2015K4 to 2025K4" in january
     assert "2015M12 to 2025M12" in january
+    assert "December 2025 er ikke offentliggjort endnu; seneste er november 2025." in january
+    assert "september 2026" not in january
+    assert "Oktober 2026" not in january
 
 
 def test_prompt_date_defaults_to_copenhagen() -> None:
@@ -510,6 +514,66 @@ def test_single_fact_summary_does_not_depend_on_the_prose() -> None:
     assert honest == invented == english == line
 
 
+def test_a_single_figure_keeps_the_note_when_the_period_is_not_published() -> None:
+    fact = _population_fact(115432, "2026M09")
+    question = "Hvor mange ledige var der i oktober 2026?"
+    note = "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026."
+    guarded = guard_answer(question, note, [fact])
+    assert guarded.startswith("115.432")
+    assert note.strip(".") in guarded
+    with_figure = f"{note} Tallet er 9.999."
+    kept = guard_answer(question, with_figure, [fact])
+    assert "9.999" not in kept
+    assert "seneste er september 2026" in kept
+    plain = guard_answer(question, "Der var 115.432 i september.", [fact])
+    assert "offentliggjort" not in plain
+    english = guard_answer(
+        "How many unemployed in October 2026?",
+        "October 2026 is not published yet; the latest is September 2026.",
+        [fact],
+    )
+    assert english.startswith("115.432")
+    assert "not published yet" in english
+    assert "latest is September 2026" in english
+    split = guard_answer(
+        question,
+        "Oktober 2026 er ikke offentliggjort endnu. Seneste er september 2026.",
+        [fact],
+    )
+    assert "Seneste er september 2026" in split
+
+
+def test_unpublished_note_drops_a_danish_figure_instead_of_cutting_it() -> None:
+    fact = _population_fact(5045, "2026M09")
+    question = "Hvor mange ledige var der i oktober 2026?"
+    cases = (
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 med 93.573,6.",
+        (
+            "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 "
+            "og viser 120.000 ledige."
+        ),
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026: 1.234,5.",
+    )
+    for prose in cases:
+        guarded = guard_answer(question, prose, [fact])
+        assert guarded.startswith("5.045"), prose
+        assert "ikke offentliggjort endnu" in guarded
+        assert "seneste er september 2026" in guarded
+        note = guarded.split("\n", 1)[1]
+        assert "93" not in note
+        assert "120" not in note
+        assert "1.234" not in note
+        assert "234" not in note
+        assert "573" not in note
+    quarter = guard_answer(
+        question,
+        "3. kvartal 2026 er ikke offentliggjort endnu; seneste er september 2026.",
+        [fact],
+    )
+    assert "3. kvartal 2026 er ikke offentliggjort endnu" in quarter
+    assert "seneste er september 2026" in quarter
+
+
 def test_a_count_question_uses_only_the_latest_period() -> None:
     facts = [
         _population_fact(4200, "2016K3"),
@@ -769,6 +833,116 @@ def test_fact_cards_and_the_axis_use_danish_dots() -> None:
 def test_csv_button_is_hidden_without_facts() -> None:
     assert "data.facts && data.facts.length && data.csv" in PAGE
     assert _turn("Hvor mange bor i Narnia?", "Ingen tal.", [], []).csv == ""
+
+
+def test_a_miss_shows_did_you_mean_in_the_answer_payload() -> None:
+    tools = FakeTools(
+        {
+            "hent_data": (
+                "Unknown value 'Lyngby' for variable OMRÅDE on table FOLK1A. "
+                "Did you mean Lyngby-Taarbæk (173)?"
+            ),
+            "find_tabel": (
+                "No table matches 'enhjørninger'. Try fewer words, or a subject such as "
+                "'befolkning', 'indkomst' or 'priser'."
+            ),
+        }
+    )
+    missed = asyncio.run(
+        run_turn(
+            ScriptedModel(
+                [
+                    ChatReply(
+                        "",
+                        [_call("hent_data", {"table": "FOLK1A", "values": {"OMRÅDE": ["Lyngby"]}})],
+                    ),
+                    ChatReply("Jeg fandt ikke kommunen.", []),
+                ]
+            ),
+            tools,
+            "Hvor mange bor i Lyngby?",
+            max_tool_calls=2,
+        )
+    )
+    assert missed.facts == []
+    assert missed.suggestions == ["Mente du Lyngby-Taarbæk (173)?"]
+
+    search = asyncio.run(
+        run_turn(
+            ScriptedModel(
+                [
+                    ChatReply("", [_call("find_tabel", {"query": "enhjørninger"})]),
+                    ChatReply("Intet fundet.", []),
+                ]
+            ),
+            tools,
+            "Hvor mange enhjørninger?",
+            max_tool_calls=2,
+        )
+    )
+    assert search.suggestions == [
+        "No table matches 'enhjørninger'. Try fewer words, or a subject such as "
+        "'befolkning', 'indkomst' or 'priser'."
+    ]
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": "{}",
+            "result": "Unknown value 'Lyngby'. Did you mean Lyngby-Taarbæk (173)?",
+        }
+    ]
+    assert _turn("Hvor mange bor i Lyngby?", "Intet.", [], calls).suggestions == [
+        "Mente du Lyngby-Taarbæk (173)?"
+    ]
+    fetched = _turn("Hvor mange bor i Esbjerg?", "5.045", [_population_fact(5045)], calls)
+    assert fetched.suggestions == []
+
+    wrapped = _turn(
+        "Hvor mange bor i Narnia?",
+        "Intet.",
+        [],
+        [
+            {
+                "name": "find_tabel",
+                "arguments": "{}",
+                "result": (
+                    "Error executing tool find_tabel: No table matches 'Narnia'. "
+                    "Try fewer words, or a subject such as 'befolkning', 'indkomst' or 'priser'."
+                ),
+            }
+        ],
+    )
+    assert wrapped.suggestions == [
+        "No table matches 'Narnia'. Try fewer words, or a subject such as "
+        "'befolkning', 'indkomst' or 'priser'."
+    ]
+    prefixed = _turn(
+        "Hvor mange bor i Lyngby?",
+        "Intet.",
+        [],
+        [
+            {
+                "name": "hent_data",
+                "arguments": "{}",
+                "result": (
+                    "Error executing tool hent_data: Unknown value 'Lyngby' for variable "
+                    "OMRÅDE on table FOLK1A. Did you mean Lyngby-Taarbæk (173)?"
+                ),
+            }
+        ],
+    )
+    assert prefixed.suggestions == ["Mente du Lyngby-Taarbæk (173)?"]
+
+
+def test_suggestions_are_drawn_in_basis_and_avanceret() -> None:
+    render = PAGE.split("function render", 1)[1].split("form.addEventListener", 1)[0]
+    block = PAGE.split("function suggestionsBlock", 1)[1].split("function render", 1)[0]
+    assert "data.suggestions" in block
+    assert "Forslag" in block
+    assert "advancedOnly" not in block
+    assert "suggestionsBlock(data)" in render
+    assert "advancedOnly(suggestions" not in render
+    assert render.index("suggestionsBlock") < render.index('if (mode === "advanced")')
 
 
 def test_page_has_basis_and_avanceret_modes() -> None:

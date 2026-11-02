@@ -21,7 +21,11 @@ INSTRUCTIONS = (
     "Tools for Danmarks Statistik (Statistikbanken). "
     "Search with find_tabel, read codes with tabelinfo, then fetch with hent_data. "
     "Search matches some of the words, a few everyday synonyms, and municipality names "
-    "from FOLK1A. arbejdsløshed and ledighed find the Fuldtidsledige tables (AUS). "
+    "from FOLK1A. Population by municipality or age leads with FOLK1A, population "
+    "by origin with FOLK1E, registered unemployment with AUS08, personal income "
+    "with INDKP105, and crimes reported with STRAF10. A table id in the query "
+    "stays first. "
+    "arbejdsløshed and ledighed find the Fuldtidsledige tables (AUS). "
     "A hyphenated word also matches the joined and the spaced spelling. "
     "A miss is an error that suggests a broader query. "
     "The table title, description, unit, and period say what a number measures. "
@@ -87,7 +91,11 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
     and Danish are ignored when the query also names a subject.
     Municipality names are matched against FOLK1A areas and returned on that hit
     as matched_values with their codes. Matching is not case-sensitive.
-    "befolkning" returns FOLK1A near the top. `limit` is 1–25 and defaults to 10.
+    "befolkning" returns FOLK1A near the top. A short preference list ranks the
+    usual table first: population by municipality or age is FOLK1A, population
+    by origin is FOLK1E, registered unemployment is AUS08, personal income is
+    INDKP105, and crimes reported are STRAF10. A table id in the query stays
+    first. `limit` is 1–25 and defaults to 10.
     Each hit has id, title, unit, latest_period, and variables. The title is the
     table's own wording and can be narrower than the query. Read it, then
     tabelinfo, before treating the hit as the answer. If nothing matches, the
@@ -116,7 +124,7 @@ def tabelinfo(
     values_filter to search codes and labels. Several words, separated by a
     comma or a space, match any of them (for example "Esbjerg, Viborg").
     A variable with no match keeps its normal list and says so. `total`, when
-    present, is the code used if that required variable is omitted in hent_data.
+    present, is the code used if that variable is omitted in hent_data.
     eliminable means the variable can be left out. A time variable also accepts
     "(1)" for the latest period and ranges such as ">=2016K3". A table whose
     title is a fremskrivning has projection true.
@@ -135,9 +143,16 @@ def hent_data(
 ) -> dict[str, Any]:
     """Fetch observations from a Statistikbanken table.
 
-    Variables you omit are removed by the API, which keeps their total (for
-    example both sexes). Tid is the exception: omitting it returns the latest
-    period, the same as the value "(1)".
+    Variables you omit are set to their total when that is safe, and the choice
+    is listed in `defaults`. A top-level total (I alt, Total, Hele landet, code
+    TOT or IALT) is filled in even when the variable must be set. A longer label
+    that only ends in "i alt" is filled in when the API allows elimination
+    ("Mænd og kvinder i alt"). It is not filled in when the variable must be
+    set: that label is a subcategory, and the error lists the values. Pass a
+    variable only when the question names it. Tid is the same: omitting it uses
+    the latest published period, also listed in `defaults`, the same period as
+    "(1)" or "seneste". Pass Tid when the question names a period or asks how
+    the figures change.
 
     `values` maps a variable id to codes or labels, matched without case
     sensitivity ("Silkeborg", "København", "kobenhavn"). Each entry may be a
@@ -160,9 +175,8 @@ def hent_data(
     and a range such as ">=2016K3". A range lists matching periods. It does
     not add them together.
 
-    A variable that cannot be omitted and has one total (code TOT or IALT, or
-    text "I alt") is filled with that total and listed in `defaults`. If it
-    has no total, the call fails and lists the codes to pass.
+    A variable that cannot be omitted and has no total makes the call fail and
+    lists the codes to pass.
 
     `sum_from` maps a variable id to a numeric code. Every numeric code from
     that one upward is added into a single figure. {"ALDER": "80"} is everyone
