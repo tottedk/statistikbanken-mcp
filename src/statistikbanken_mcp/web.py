@@ -89,17 +89,36 @@ Write periods like 1. kvartal 2015 or 2015 1. kvt., marts 2015, or 2015 1. halv�
 A year stays 2015. Do not write 2015K1 or 2026Q3."""
 
 
+def _previous_quarter(day: date) -> str:
+    """Last finished quarter. November is K3 of the same year."""
+    quarter = (day.month - 1) // 3
+    if quarter == 0:
+        return f"{day.year - 1}K4"
+    return f"{day.year}K{quarter}"
+
+
+def _years_earlier(code: str, years: int) -> str:
+    return f"{int(code[:4]) - years}{code[4:]}"
+
+
 def system_prompt(today: date | None = None) -> str:
     # None uses the clock in Europe/Copenhagen. Tests pass a date.
     day = today if today is not None else datetime.now(ZoneInfo("Europe/Copenhagen")).date()
-    previous_month = day.replace(day=1) - timedelta(days=1)
-    month = f"{previous_month.year:04d}-{previous_month.month:02d}"
+    last_month = day.replace(day=1) - timedelta(days=1)
+    month_code = f"{last_month.year}M{last_month.month:02d}"
+    quarter_code = _previous_quarter(day)
+    last_year = day.year - 1
     return (
         f"{SYSTEM_PROMPT}\n"
         f"Today's date is {day.isoformat()} (Europe/Copenhagen). "
-        f"Count back from this date: 'i fjor' is {day.year - 1}, "
-        f"'sidste måned' is {month}, "
-        f"and 'seneste 10 år' is {day.year - 10} through {day.year}."
+        f"In hent_data, pass Tid as Statbank codes: a year is {last_year}, "
+        f"a quarter is {quarter_code}, a month is {month_code}. "
+        f"'i fjor' is {last_year}. 'sidste måned' is {month_code}. "
+        f"'seneste 10 år' is the latest published period and the same quarter or month "
+        f"10 years earlier. If the latest quarter is {quarter_code}, pass "
+        f"{_years_earlier(quarter_code, 10)} to {quarter_code}. "
+        f"If the latest month is {month_code}, pass {_years_earlier(month_code, 10)} "
+        f"to {month_code}."
     )
 
 

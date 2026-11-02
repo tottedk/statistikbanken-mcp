@@ -119,7 +119,7 @@ STATBANK_MODEL=gemma4-16k uv run statistikbanken-web
 
 `qwen2.5` is an alternative. `ollama pull qwen2.5`, then `STATBANK_MODEL=qwen2.5`.
 
-Ollama thinking is off. The request sends `reasoning_effort` set to `none`. `STATBANK_LLM_THINK=1` leaves thinking on. xAI ignores that variable. The system prompt states today's date in Europe/Copenhagen and counts `i fjor`, `sidste måned`, and `seneste 10 år` back from it.
+Ollama thinking is off. The request sends `reasoning_effort` set to `none`. `STATBANK_LLM_THINK=1` leaves thinking on. xAI ignores that variable. The system prompt states today's date in Europe/Copenhagen. `i fjor` and `sidste måned` are Statbank codes from that date (`2025`, `2026M10`). `seneste 10 år` is the latest published period and the same quarter or month 10 years earlier (`2016K3` to `2026K3`).
 
 xAI uses `https://api.x.ai/v1`. The model is `STATBANK_XAI_MODEL`, or `grok-4` when that is unset. `grok-4` may be retired, so set the model when you deploy. Each xAI request sends `max_tokens` (2048). Set `XAI_API_KEY` in the environment or in `.env`, not in the repo:
 
