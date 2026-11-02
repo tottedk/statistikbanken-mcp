@@ -1388,6 +1388,8 @@ def _turn(
 
 _DID_YOU_MEAN_RE = re.compile(r"Did you mean ([^?]+)\?")
 _NOT_FOUND_STARTS = ("No table matches", "Unknown table", "Unknown value")
+# The MCP client prefixes a tool failure with "Error executing tool <name>:".
+_TOOL_ERROR_RE = re.compile(r"^(?:Error executing tool\b[^:]*:\s*)+", re.IGNORECASE)
 
 
 def _lookup_suggestions(calls: list[dict[str, str]]) -> list[str]:
@@ -1395,6 +1397,7 @@ def _lookup_suggestions(calls: list[dict[str, str]]) -> list[str]:
     lines: list[str] = []
     for call in calls:
         result = " ".join(str(call.get("result") or "").split())
+        result = _TOOL_ERROR_RE.sub("", result).strip()
         if not result:
             continue
         meant = _DID_YOU_MEAN_RE.findall(result)
@@ -1556,28 +1559,72 @@ def guard_answer(
     return answer
 
 
-_UNPUBLISHED_NOTE_RE = re.compile(
-    r"[^.!?\n]*?(?:ikke offentliggjort|not published)[^.!?\n]*",
+_NOTE_GLUE_RE = re.compile(
+    r"(?:\s*(?:,|;|:|—|-)?\s*\b(?:med|og|viser|showing|shows|show|er|på|pa|of|with|at)\b\s*)+$",
+    re.IGNORECASE,
+)
+_QUARTER_WORD_RE = re.compile(
+    r"\s*\.?\s*(?:kvartal|kvt|halvår|halvaar)\b",
     re.IGNORECASE,
 )
 
 
+def _is_sentence_end(text: str, index: int) -> bool:
+    """A period inside 1.234,5 or before 'kvartal' does not end the sentence."""
+    char = text[index]
+    if char == "\n":
+        return True
+    if char in "!?":
+        return True
+    if char != ".":
+        return False
+    prev = text[index - 1] if index else ""
+    nxt = text[index + 1] if index + 1 < len(text) else ""
+    if prev.isdigit() and nxt.isdigit():
+        return False
+    if prev.isdigit() and _QUARTER_WORD_RE.match(text[index + 1 :]):
+        return False
+    return True
+
+
+def _clause_around(text: str, start: int, end: int) -> str:
+    left = start
+    while left > 0 and not _is_sentence_end(text, left - 1):
+        left -= 1
+    right = end
+    while right < len(text) and not _is_sentence_end(text, right):
+        right += 1
+    return text[left:right].strip(" \t;:—-")
+
+
+def _without_unchecked_figures(note: str) -> str:
+    """Keep the period words. Drop a statistic, including one Danish number."""
+    cut = len(note)
+    for match in _NUMBER_RE.finditer(note):
+        token = match.group(1)
+        if re.fullmatch(r"(?:19|20)\d{2}", token):
+            continue
+        if _QUARTER_WORD_RE.match(note[match.end() :]):
+            continue
+        cut = match.start()
+        break
+    kept = _NOTE_GLUE_RE.sub("", note[:cut])
+    kept = re.sub(r"\s{2,}", " ", kept)
+    return kept.strip(" \t;:—-,")
+
+
 def _unpublished_period_note(answer: str) -> str:
-    """The sentence that a requested period is not out yet, without a trailing figure."""
-    match = _UNPUBLISHED_NOTE_RE.search(answer)
+    """The not-published clause, with period names and no statistic."""
+    match = re.search(r"ikke offentliggjort|not published", answer, re.IGNORECASE)
     if match is None:
         return ""
-    note = match.group(0).strip(" \t;:—-")
+    note = _clause_around(answer, match.start(), match.end())
     if note and not re.search(r"\b(?:seneste|latest)\b", note, re.IGNORECASE):
-        follow = re.match(
-            r"\s*\.\s*([^.!?\n]*\b(?:seneste|latest)\b[^.!?\n]*)",
-            answer[match.end() :],
-            re.IGNORECASE,
-        )
-        if follow:
-            note = f"{note}. {follow.group(1).strip()}"
-    note = re.sub(r"\s*:\s*\d[\d.\s\u00a0]*$", "", note).strip(" \t;:")
-    return note
+        rest = answer[match.end() :]
+        follow = re.search(r"\b(?:seneste|latest)\b", rest, re.IGNORECASE)
+        if follow and follow.start() < 80:
+            note = _clause_around(answer, match.start(), match.end() + follow.end())
+    return _without_unchecked_figures(note)
 
 
 def _with_unpublished_note(text: str, answer: str) -> str:

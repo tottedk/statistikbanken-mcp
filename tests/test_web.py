@@ -543,6 +543,37 @@ def test_a_single_figure_keeps_the_note_when_the_period_is_not_published() -> No
     assert "Seneste er september 2026" in split
 
 
+def test_unpublished_note_drops_a_danish_figure_instead_of_cutting_it() -> None:
+    fact = _population_fact(5045, "2026M09")
+    question = "Hvor mange ledige var der i oktober 2026?"
+    cases = (
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 med 93.573,6.",
+        (
+            "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 "
+            "og viser 120.000 ledige."
+        ),
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026: 1.234,5.",
+    )
+    for prose in cases:
+        guarded = guard_answer(question, prose, [fact])
+        assert guarded.startswith("5.045"), prose
+        assert "ikke offentliggjort endnu" in guarded
+        assert "seneste er september 2026" in guarded
+        note = guarded.split("\n", 1)[1]
+        assert "93" not in note
+        assert "120" not in note
+        assert "1.234" not in note
+        assert "234" not in note
+        assert "573" not in note
+    quarter = guard_answer(
+        question,
+        "3. kvartal 2026 er ikke offentliggjort endnu; seneste er september 2026.",
+        [fact],
+    )
+    assert "3. kvartal 2026 er ikke offentliggjort endnu" in quarter
+    assert "seneste er september 2026" in quarter
+
+
 def test_a_count_question_uses_only_the_latest_period() -> None:
     facts = [
         _population_fact(4200, "2016K3"),
@@ -865,6 +896,42 @@ def test_a_miss_shows_did_you_mean_in_the_answer_payload() -> None:
     ]
     fetched = _turn("Hvor mange bor i Esbjerg?", "5.045", [_population_fact(5045)], calls)
     assert fetched.suggestions == []
+
+    wrapped = _turn(
+        "Hvor mange bor i Narnia?",
+        "Intet.",
+        [],
+        [
+            {
+                "name": "find_tabel",
+                "arguments": "{}",
+                "result": (
+                    "Error executing tool find_tabel: No table matches 'Narnia'. "
+                    "Try fewer words, or a subject such as 'befolkning', 'indkomst' or 'priser'."
+                ),
+            }
+        ],
+    )
+    assert wrapped.suggestions == [
+        "No table matches 'Narnia'. Try fewer words, or a subject such as "
+        "'befolkning', 'indkomst' or 'priser'."
+    ]
+    prefixed = _turn(
+        "Hvor mange bor i Lyngby?",
+        "Intet.",
+        [],
+        [
+            {
+                "name": "hent_data",
+                "arguments": "{}",
+                "result": (
+                    "Error executing tool hent_data: Unknown value 'Lyngby' for variable "
+                    "OMRÅDE on table FOLK1A. Did you mean Lyngby-Taarbæk (173)?"
+                ),
+            }
+        ],
+    )
+    assert prefixed.suggestions == ["Mente du Lyngby-Taarbæk (173)?"]
 
 
 def test_suggestions_are_drawn_in_basis_and_avanceret() -> None:

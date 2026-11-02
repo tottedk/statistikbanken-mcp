@@ -21,9 +21,10 @@ INSTRUCTIONS = (
     "Tools for Danmarks Statistik (Statistikbanken). "
     "Search with find_tabel, read codes with tabelinfo, then fetch with hent_data. "
     "Search matches some of the words, a few everyday synonyms, and municipality names "
-    "from FOLK1A. For population by municipality or age, registered unemployment, "
-    "personal income, and crimes reported, the first hit is FOLK1A, AUS08, "
-    "INDKP105, or STRAF10. "
+    "from FOLK1A. Population by municipality or age leads with FOLK1A, population "
+    "by origin with FOLK1E, registered unemployment with AUS08, personal income "
+    "with INDKP105, and crimes reported with STRAF10. A table id in the query "
+    "stays first. "
     "arbejdsløshed and ledighed find the Fuldtidsledige tables (AUS). "
     "A hyphenated word also matches the joined and the spaced spelling. "
     "A miss is an error that suggests a broader query. "
@@ -91,9 +92,10 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
     Municipality names are matched against FOLK1A areas and returned on that hit
     as matched_values with their codes. Matching is not case-sensitive.
     "befolkning" returns FOLK1A near the top. A short preference list ranks the
-    usual table first: population by municipality or age is FOLK1A, registered
-    unemployment is AUS08, personal income is INDKP105, and crimes reported are
-    STRAF10. `limit` is 1–25 and defaults to 10.
+    usual table first: population by municipality or age is FOLK1A, population
+    by origin is FOLK1E, registered unemployment is AUS08, personal income is
+    INDKP105, and crimes reported are STRAF10. A table id in the query stays
+    first. `limit` is 1–25 and defaults to 10.
     Each hit has id, title, unit, latest_period, and variables. The title is the
     table's own wording and can be narrower than the query. Read it, then
     tabelinfo, before treating the hit as the answer. If nothing matches, the
@@ -141,12 +143,16 @@ def hent_data(
 ) -> dict[str, Any]:
     """Fetch observations from a Statistikbanken table.
 
-    Variables you omit are set to their total when they have one (I alt, Total,
-    Hele landet, or the same wording, including "Mænd og kvinder i alt"). The
-    choice is listed in `defaults`. Pass a variable only when the question names
-    it. Tid is the same: omitting it uses the latest published period, also
-    listed in `defaults`, the same period as "(1)" or "seneste". Pass Tid when
-    the question names a period or asks how the figures change.
+    Variables you omit are set to their total when that is safe, and the choice
+    is listed in `defaults`. A top-level total (I alt, Total, Hele landet, code
+    TOT or IALT) is filled in even when the variable must be set. A longer label
+    that only ends in "i alt" is filled in when the API allows elimination
+    ("Mænd og kvinder i alt"). It is not filled in when the variable must be
+    set: that label is a subcategory, and the error lists the values. Pass a
+    variable only when the question names it. Tid is the same: omitting it uses
+    the latest published period, also listed in `defaults`, the same period as
+    "(1)" or "seneste". Pass Tid when the question names a period or asks how
+    the figures change.
 
     `values` maps a variable id to codes or labels, matched without case
     sensitivity ("Silkeborg", "København", "kobenhavn"). Each entry may be a
