@@ -71,8 +71,12 @@ For a change over time, fetch every period in one hent_data call.
 Pass Tid as one range in values, for example >=2015K1.
 Each period comes back as its own row. Do not put Tid in sum_range.
 Do not sum periods together with several places or an age range.
-Quote only values from the tool results. For each series, quote the first value and the last value.
-Do not compute a difference, a change, or a percentage.
+Quote values from the tool results. A difference, a sum, or a percentage change
+is allowed when it is computed from those values.
+For each series, quote the first value and the last value.
+If a note says the figure is a projection (fremskrivning) or a forecast, say so.
+Do not present it as an observed figure.
+If a note says a year was added or averaged, repeat that.
 Municipality names may be passed as labels.
 One code may be a string. Several codes are a list, or one comma-separated string.
 Refer to areas and categories by name, not by code.
@@ -397,6 +401,23 @@ function pngButton(svg) {
   return button;
 }
 
+function extraNotes(data) {
+  const lines = [];
+  const seen = new Set();
+  let forecast = false;
+  for (const fact of data.facts || []) {
+    if (fact.projection) forecast = true;
+    if (fact.derivation && !seen.has(fact.derivation)) {
+      seen.add(fact.derivation);
+      lines.push(fact.derivation);
+    }
+  }
+  if (forecast) {
+    lines.unshift("Rækker mærket fremskrivning er prognoser, ikke observerede tal.");
+  }
+  return lines;
+}
+
 function drawGrid(grid) {
   const wrap = el("div", null, "facts");
   const rows = (grid && grid.rows) || [];
@@ -476,6 +497,7 @@ function render(data) {
       }
     }
     facts.append(drawGrid(data.grid));
+    for (const line of extraNotes(data)) facts.append(el("p", line, "meta"));
     if (advancedView(data) && data.facts && data.facts.length && data.csv) {
       const row = el("div", null, "exports");
       row.append(advancedOnly(csvButton(data.csv)));
@@ -772,21 +794,41 @@ def _facts_from(name: str, result: str) -> list[dict[str, Any]]:
         detail = ", ".join(
             f"{key}: {value}"
             for key, value in row.items()
-            if key not in {"value", "unpublished", "Tid"}
+            if key not in {"value", "unpublished", "Tid", "projection", "year_total"}
+            and not isinstance(value, dict)
         )
-        facts.append(
-            {
-                "table": payload.get("table") or "",
-                "period": "" if period is None else str(period),
-                "unit": payload.get("unit") or "",
-                "value": row.get("value"),
-                "detail": detail,
-                "title": payload.get("title") if isinstance(payload.get("title"), str) else "",
-                "unpublished": row.get("unpublished") is True,
-                "url": _table_url(str(payload.get("table") or "")),
-            }
-        )
+        fact: dict[str, Any] = {
+            "table": payload.get("table") or "",
+            "period": "" if period is None else str(period),
+            "unit": payload.get("unit") or "",
+            "value": row.get("value"),
+            "detail": detail,
+            "title": payload.get("title") if isinstance(payload.get("title"), str) else "",
+            "unpublished": row.get("unpublished") is True,
+            "url": _table_url(str(payload.get("table") or "")),
+        }
+        if row.get("projection") is True or payload.get("projection") is True:
+            fact["projection"] = True
+        derivation = _derivation_text(row.get("year_total"))
+        if derivation:
+            fact["derivation"] = derivation
+        facts.append(fact)
     return facts
+
+
+def _derivation_text(info: Any) -> str:
+    """Danish sentence for a yearly figure built from shorter periods."""
+    if not isinstance(info, dict):
+        return ""
+    periods = [str(period) for period in info.get("periods") or [] if str(period)]
+    if not periods:
+        return ""
+    listed = ", ".join(periods)
+    if info.get("method") == "sum":
+        return f"Sum af {listed} (strøm, perioderne er lagt sammen)."
+    if info.get("method") == "average":
+        return f"Gennemsnit af {listed} (niveau, perioderne er gennemsnit)."
+    return ""
 
 
 def _table_url(table: str) -> str:
@@ -831,6 +873,13 @@ def period_label(code: str) -> str:
     if _YEAR_RE.fullmatch(text):
         return text
     return text
+
+
+def _shown_period(fact: dict[str, Any]) -> str:
+    label = period_label(str(fact.get("period") or ""))
+    if fact.get("projection"):
+        return f"{label} (fremskrivning)"
+    return label
 
 
 def _period_phrases(code: str) -> list[str]:
@@ -902,14 +951,18 @@ def _grid_cell(fact: dict[str, Any]) -> str:
         return "–"
     value = fact.get("value")
     if isinstance(value, bool) or not isinstance(value, int | float):
-        return "–" if value is None else str(value)
-    return _da_number(value)
+        shown = "–" if value is None else str(value)
+    else:
+        shown = _da_number(value)
+    if fact.get("projection") and shown != "–":
+        return f"{shown} (fremskrivning)"
+    return shown
 
 
 def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group numeric facts that share a table and dimensions across periods."""
-    grouped: dict[tuple[str, str, str], dict[str, int | float]] = {}
-    order: list[tuple[str, str, str]] = []
+    grouped: dict[tuple[str, str, str, bool], dict[str, int | float]] = {}
+    order: list[tuple[str, str, str, bool]] = []
     for fact in facts:
         if fact.get("unpublished"):
             continue
@@ -921,6 +974,7 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(fact.get("table") or ""),
             str(fact.get("detail") or ""),
             str(fact.get("unit") or ""),
+            fact.get("projection") is True,
         )
         if key not in grouped:
             grouped[key] = {}
@@ -931,10 +985,13 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         points = grouped[key]
         if len(points) < 2:
             continue
-        table, detail, unit = key
+        table, detail, unit, projection = key
+        label = display_label(detail, table)
+        if projection:
+            label = f"{label} (fremskrivning)"
         series.append(
             {
-                "label": display_label(detail, table),
+                "label": label,
                 "table": table,
                 "unit": unit,
                 "points": [
@@ -1044,7 +1101,7 @@ def _export_rows(facts: list[dict[str, Any]]) -> tuple[list[str], list[list[str]
         rows.append(
             [
                 str(fact.get("table") or ""),
-                period_label(str(fact.get("period") or "")),
+                _shown_period(fact),
                 _dimension_label(fact),
                 _csv_number(fact.get("value")),
                 str(fact.get("unit") or ""),
@@ -1071,17 +1128,18 @@ def facts_to_json(facts: list[dict[str, Any]]) -> str:
             continue
         raw = str(fact.get("period") or "")
         detail = str(fact.get("detail") or "")
-        rows.append(
-            {
-                "tabel": str(fact.get("table") or ""),
-                "periode": raw,
-                "periode_label": period_label(raw),
-                "dimensioner": _dimension_label(fact),
-                "dimensioner_rå": detail,
-                "værdi": _csv_number(fact.get("value")),
-                "enhed": str(fact.get("unit") or ""),
-            }
-        )
+        row = {
+            "tabel": str(fact.get("table") or ""),
+            "periode": raw,
+            "periode_label": _shown_period(fact),
+            "dimensioner": _dimension_label(fact),
+            "dimensioner_rå": detail,
+            "værdi": _csv_number(fact.get("value")),
+            "enhed": str(fact.get("unit") or ""),
+        }
+        if fact.get("projection"):
+            row["fremskrivning"] = True
+        rows.append(row)
     return json.dumps(rows, ensure_ascii=False)
 
 
@@ -1412,8 +1470,14 @@ def _summary_line(fact: dict[str, Any]) -> str:
     detail = display_label(str(fact.get("detail") or ""))
     if detail:
         bits.append(detail)
+    if fact.get("projection"):
+        bits.append("fremskrivning")
     label = ", ".join(bit for bit in bits if bit)
-    return f"{value} ({label})" if label else value
+    line = f"{value} ({label})" if label else value
+    derivation = str(fact.get("derivation") or "")
+    if derivation:
+        line = f"{line} {derivation}"
+    return line
 
 
 def apply_age_intent(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1620,7 +1684,23 @@ def _unverified_numbers(
     allowed.update(_argument_figures(calls))
     fetched = {str(fact.get("period") or "") for fact in facts}
     scanned = _mask_friendly_periods(answer, fetched)
-    flagged = [number for number in _numbers_in(scanned) if not _near(number, allowed)]
+    derived = _derived_values(facts)
+    flagged = []
+    for start, end, number in _figure_mentions(scanned, []):
+        if _near(number, allowed):
+            continue
+        if _matches_derivation(scanned, start, end, number, derived):
+            continue
+        flagged.append(number)
+    # _figure_mentions leaves bare years to the period check. A year that is not
+    # in the question, a row, or a fetched period is still an invented figure.
+    for match in _NUMBER_RE.finditer(scanned):
+        token = match.group(1)
+        if _BARE_YEAR_RE.fullmatch(token) is None:
+            continue
+        year = _parse_stat_number(token)
+        if not _near(year, allowed):
+            flagged.append(year)
     known_periods = _period_tokens(question)
     for fact in facts:
         known_periods.update(_period_tokens(str(fact.get("period") or "")))
@@ -1957,6 +2037,111 @@ def _title_in(result: str) -> str:
 
 def _near(number: float, allowed: set[float]) -> bool:
     return any(abs(number - item) < 1e-6 for item in allowed)
+
+
+_DERIVED_BEFORE = {
+    "difference": re.compile(
+        r"(?:forskellen|forskel|difference|stigningen|stigning|faldet|fald)\b"
+        r"(?:[ \t]+\S+){0,3}[ \t]*$",
+        re.IGNORECASE,
+    ),
+    "sum": re.compile(
+        r"(?:i alt|in total|summen|sammenlagt|tilsammen)\b(?:[ \t]+\S+){0,3}[ \t]*$",
+        re.IGNORECASE,
+    ),
+}
+_PERCENT_AFTER = re.compile(r"^[ \t]*(?:procent|percentage|percent|pct\.?|%)\b", re.IGNORECASE)
+_DIFF_AFTER = re.compile(r"^[ \t]*(?:flere|færre|faerre)\b", re.IGNORECASE)
+
+
+def _derived_values(facts: list[dict[str, Any]]) -> dict[str, list[float]]:
+    """Differences, sums, and percentage changes of the fetched values."""
+    values = [
+        float(fact["value"])
+        for fact in facts
+        if isinstance(fact.get("value"), int | float) and not isinstance(fact.get("value"), bool)
+    ]
+    differences: list[float] = []
+    sums: list[float] = []
+    percents: list[float] = []
+    for index, left in enumerate(values):
+        for right in values[index + 1 :]:
+            differences.append(abs(left - right))
+            sums.append(left + right)
+            percents.extend(_percentage_changes(left, right))
+    sums.extend(_group_sums(facts))
+    if len(values) >= 2:
+        sums.append(sum(values))
+    return {"difference": differences, "sum": sums, "percent": percents}
+
+
+def _percentage_changes(left: float, right: float) -> list[float]:
+    found: list[float] = []
+    for new, old in ((left, right), (right, left)):
+        if old == 0:
+            continue
+        found.append(abs((new - old) / old * 100))
+    return found
+
+
+def _group_sums(facts: list[dict[str, Any]]) -> list[float]:
+    """Sum of one series, and the sum of every series in one period."""
+    found: list[float] = []
+    for key in ("period", "detail"):
+        grouped: dict[str, list[float]] = {}
+        for fact in facts:
+            value = fact.get("value")
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                continue
+            grouped.setdefault(str(fact.get(key) or ""), []).append(float(value))
+        for items in grouped.values():
+            if len(items) >= 2:
+                found.append(sum(items))
+    return found
+
+
+def _matches_derivation(
+    text: str,
+    start: int,
+    end: int,
+    number: float,
+    derived: dict[str, list[float]],
+) -> bool:
+    kind = _derivation_kind(text, start, end)
+    if kind is None:
+        return False
+    return any(_close_enough(number, exact) for exact in derived.get(kind, ()))
+
+
+def _derivation_kind(text: str, start: int, end: int) -> str | None:
+    before = text[max(0, start - 48) : start]
+    after = text[end : end + 24]
+    if _PERCENT_AFTER.search(after):
+        return "percent"
+    percent_before = re.search(
+        r"(?:procent|percentage|percent|pct\.?|%)\b(?:[ \t]+\S+){0,2}[ \t]*$",
+        before,
+        re.IGNORECASE,
+    )
+    if percent_before:
+        return "percent"
+    if _DERIVED_BEFORE["difference"].search(before) or _DIFF_AFTER.search(after):
+        return "difference"
+    if _DERIVED_BEFORE["sum"].search(before):
+        return "sum"
+    return None
+
+
+def _close_enough(stated: float, exact: float) -> bool:
+    """Whole numbers within 0.5, one decimal within 0.05, and so on."""
+    if abs(stated - exact) <= 1e-6:
+        return True
+    scale = 1.0
+    for _ in range(4):
+        if abs(stated * scale - round(stated * scale)) <= 1e-6:
+            return abs(stated - exact) <= 0.5 / scale + 1e-6
+        scale *= 10
+    return False
 
 
 def _numbers_in(text: str) -> list[float]:

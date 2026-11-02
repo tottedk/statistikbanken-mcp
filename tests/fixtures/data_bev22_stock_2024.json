@@ -1,0 +1,101 @@
+{
+  "dataset": {
+    "dimension": {
+      "OMRÅDE": {
+        "label": "område",
+        "category": {
+          "index": {
+            "561": 0
+          },
+          "label": {
+            "561": "Esbjerg"
+          }
+        }
+      },
+      "BEVÆGELSE": {
+        "label": "bevægelsesart",
+        "category": {
+          "index": {
+            "B20K": 0
+          },
+          "label": {
+            "B20K": "Befolkningen ultimo indeværende kvartal"
+          }
+        }
+      },
+      "ContentsCode": {
+        "label": "Indhold",
+        "category": {
+          "index": {
+            "BEV22": 0
+          },
+          "label": {
+            "BEV22": "Befolkningens udvikling (foreløbig opgørelse)"
+          },
+          "unit": {
+            "BEV22": {
+              "base": "Antal",
+              "decimals": 0
+            }
+          }
+        }
+      },
+      "Tid": {
+        "label": "tid",
+        "category": {
+          "index": {
+            "2024K1": 0,
+            "2024K2": 1,
+            "2024K3": 2,
+            "2024K4": 3
+          },
+          "label": {
+            "2024K1": "2024K1",
+            "2024K2": "2024K2",
+            "2024K3": "2024K3",
+            "2024K4": "2024K4"
+          }
+        }
+      },
+      "id": [
+        "OMRÅDE",
+        "BEVÆGELSE",
+        "ContentsCode",
+        "Tid"
+      ],
+      "size": [
+        1,
+        1,
+        1,
+        4
+      ],
+      "role": {
+        "geo": [
+          "OMRÅDE"
+        ],
+        "metric": [
+          "ContentsCode"
+        ],
+        "time": [
+          "Tid"
+        ]
+      }
+    },
+    "label": "Befolkningens udvikling (foreløbig opgørelse) efter område, bevægelsesart, Indhold og tid",
+    "source": "Danmarks Statistik",
+    "updated": "2026-08-10T06:00:00Z",
+    "value": [
+      115319,
+      115268,
+      115198,
+      115157
+    ],
+    "extension": {
+      "px": {
+        "infofile": "https://www.dst.dk/statistikdokumentation/4a12721d-a8b0-4bde-82d7-1d1c6f319de3",
+        "tableid": "BEV22",
+        "decimals": 0
+      }
+    }
+  }
+}

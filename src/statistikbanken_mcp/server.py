@@ -21,7 +21,9 @@ INSTRUCTIONS = (
     "Tools for Danmarks Statistik (Statistikbanken). "
     "Search with find_tabel, read codes with tabelinfo, then fetch with hent_data. "
     "Search matches some of the words, a few everyday synonyms, and municipality names "
-    "from FOLK1A. A miss is an error that suggests a broader query. "
+    "from FOLK1A. arbejdsløshed and ledighed find the Fuldtidsledige tables (AUS). "
+    "A hyphenated word also matches the joined and the spaced spelling. "
+    "A miss is an error that suggests a broader query. "
     "The table title, description, unit, and period say what a number measures. "
     "If they only partly cover the question, say so. "
     "Values may be codes or labels, for example Silkeborg or København. "
@@ -33,7 +35,9 @@ INSTRUCTIONS = (
     'For the change over time, pass Tid in values as ">=2015K1". '
     "A values entry may be one code or several codes separated by a comma. "
     "A trailing 0 marked unpublished is a period the API has not published yet. "
-    'Omit Tid or pass "(1)" for the latest period.'
+    'Omit Tid or pass "(1)" for the latest period. '
+    "A projection table (fremskrivning) and a forecast row (prognose) are marked "
+    "projection. Say so; do not present them as observed figures."
 )
 
 mcp = MCPServer("statistikbanken", instructions=INSTRUCTIONS)
@@ -77,9 +81,10 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
 
     Matches table id, title, and variable names. A hit can match some of the
     words rather than every word, and a few everyday synonyms are recognised
-    (for example bruttoledighed, huspriser, husdyr, population, people, indbrud,
-    togpassagerer, gini). Danmark, Denmark, and Danish are ignored when the
-    query also names a subject.
+    (for example bruttoledighed, arbejdsløshed, ledighed, huspriser, husdyr,
+    population, people, indbrud, togpassagerer, gini). A hyphenated word matches
+    a title that joins the parts or writes them separately. Danmark, Denmark,
+    and Danish are ignored when the query also names a subject.
     Municipality names are matched against FOLK1A areas and returned on that hit
     as matched_values with their codes. Matching is not case-sensitive.
     "befolkning" returns FOLK1A near the top. `limit` is 1–25 and defaults to 10.
@@ -113,7 +118,8 @@ def tabelinfo(
     A variable with no match keeps its normal list and says so. `total`, when
     present, is the code used if that required variable is omitted in hent_data.
     eliminable means the variable can be left out. A time variable also accepts
-    "(1)" for the latest period and ranges such as ">=2016K3".
+    "(1)" for the latest period and ranges such as ">=2016K3". A table whose
+    title is a fremskrivning has projection true.
     """
     return _guard(
         lambda: get_client().table_info(table, variable=variable, values_filter=values_filter)
@@ -139,9 +145,16 @@ def hent_data(
     ("Esbjerg, Viborg"). On an age variable, "80+", ">=80", "80-" and
     "80 og derover" are the sum from that age upward, and "0-17" is the
     closed range. The result notes the substitution. An unknown value names
-    the closest labels. For Tid, the error states the available period range,
-    and a bare year on a quarterly or monthly table suggests that year's
-    sub-periods (for example ">=2025K1<=2025K4"). These expressions are passed
+    the closest labels.     For Tid, the error states the available period range.
+    A bare year on a quarterly or monthly table is one yearly figure when the
+    year is complete: the quarters or months are added when the measure is a
+    flow, and averaged when it is a level. The note says which. If the measure
+    cannot be told, or the year is missing a period, the periods are listed and
+    no yearly figure is invented. Danish phrases are accepted and resolved from
+    the latest period the table actually has: "i år", "i fjor", "sidste år",
+    "sidste kvartal", "seneste", "marts 2025", "3. kvartal 2025", "K3 2025".
+    A phrase that falls outside the table is an error naming the available range.
+    These expressions are passed
     through: "*"
     (every code), "(1)" (latest period), "(-n+4)" (the four latest periods),
     and a range such as ">=2016K3". A range lists matching periods. It does
@@ -175,8 +188,9 @@ def hent_data(
     measures. If unit is "-", the selected value labels carry the measurement.
     If those words only partly cover the question, say so. A row with
     unpublished true is a trailing 0: the API uses 0 for a period it has not
-    published yet. Each row uses variable ids as keys and labels as text, plus
-    `value`.
+    published yet. A row with projection true is a forecast or a fremskrivning,
+    not an observed figure. Each row uses variable ids as keys and labels as
+    text, plus `value`.
     """
     return _guard(lambda: get_client().fetch(table, values, sum_from, sum_range))
 

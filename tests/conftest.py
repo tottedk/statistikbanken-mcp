@@ -1,8 +1,9 @@
 """Offline tests replay recorded Statistikbanken responses.
 
 The files in tests/fixtures/ are unmodified JSON bodies from
-https://api.statbank.dk/v1, captured on 2026-10-31 and 2026-11-01. They are
-pretty-printed only so they can be read; the objects are the API's.
+https://api.statbank.dk/v1, captured on 2026-10-31, 2026-11-01, and
+2026-11-02. They are pretty-printed only so they can be read; the objects
+are the API's.
 """
 
 from __future__ import annotations
@@ -51,6 +52,12 @@ def _handler(calls: list[dict[str, object]]) -> httpx.MockTransport:
                 return _response(200, "tableinfo_STRAF10.json")
             if table == "hfudd11":
                 return _response(200, "tableinfo_HFUDD11.json")
+            if table == "hst5":
+                return _response(200, "tableinfo_HST5.json")
+            if table == "frkm126":
+                return _response(200, "tableinfo_FRKM126.json")
+            if table == "bev22":
+                return _response(200, "tableinfo_BEV22.json")
             if table == "notatable":
                 return _response(400, "tableinfo_NOTATABLE.json")
             return httpx.Response(500, json={"message": f"no tableinfo fixture for {table}"})
@@ -71,10 +78,27 @@ def _data_response(body: dict[str, object]) -> httpx.Response:
         return _response(200, "data_hotel_months.json")
     if table == "HFUDD11":
         return _response(200, "data_hfudd11_ages.json")
+    if table == "HST5":
+        return _response(200, "data_hst5_2026.json")
+    if table == "FRKM126":
+        return _response(200, "data_frkm126_esbjerg_2030.json")
+    if table == "BEV22":
+        movement = _variable_values(body, "BEVÆGELSE")
+        if movement == ["B02"]:
+            return _response(200, "data_bev22_births_2024.json")
+        if movement == ["B12"]:
+            return _response(200, "data_bev22_corrections_2024.json")
+        if movement == ["B20K"]:
+            return _response(200, "data_bev22_stock_2024.json")
+        return httpx.Response(500, json={"message": "no bev22 fixture", "movement": movement})
     if table == "STRAF10":
         tid_values = _variable_values(body, "Tid")
         if any(str(value).startswith("sum(") for value in tid_values):
             return _response(400, "data_straf10_sum_rejected.json")
+        if tid_values == ["2025K1", "2025K2", "2025K3", "2025K4"]:
+            return _response(200, "data_straf10_2025.json")
+        if tid_values == ["2026K1", "2026K2", "2026K3"]:
+            return _response(200, "data_straf10_2026.json")
         return _response(200, "data_straf10_quarters.json")
     variables = {
         item["code"]: item["values"] for item in body.get("variables", []) if isinstance(item, dict)
@@ -93,6 +117,14 @@ def _data_response(body: dict[str, object]) -> httpx.Response:
             return _response(200, "data_esbjerg_80plus.json")
     if tid and str(tid[0]).startswith(">="):
         return _response(200, "data_viborg_10y.json")
+    if areas == ["561"] and alder == "IALT" and tid == ["2025K1", "2025K2", "2025K3", "2025K4"]:
+        return _response(200, "data_folk1a_esbjerg_2025.json")
+    if areas == ["561"] and alder == "IALT" and tid == ["2026K1", "2026K2", "2026K3"]:
+        return _response(200, "data_folk1a_esbjerg_2026.json")
+    if areas == ["561"] and alder == "IALT" and tid == ["2026K2"]:
+        return _response(200, "data_folk1a_esbjerg_2026k2.json")
+    if areas == ["561"] and alder == "IALT" and tid == ["2026K3"]:
+        return _response(200, "data_esbjerg_total_latest.json")
     if areas == ["561"] and alder == "IALT" and "Tid" not in variables:
         return _response(200, "data_esbjerg_total_latest.json")
     if areas == ["740"]:

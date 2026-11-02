@@ -249,6 +249,82 @@ def test_live_invalid_input_is_actionable(live_client: StatbankClient) -> None:
     assert "errorTypeCode" not in message
 
 
+def test_unemployment_and_hyphen_search_live(live_client: StatbankClient) -> None:
+    for query in ("arbejdsløshed", "ledighed"):
+        ids = [hit["id"] for hit in find_tabel(query, limit=5)]
+        assert ids[0].startswith("AUS"), (query, ids)
+    hyphen = [hit["id"] for hit in find_tabel("fuldtids-ledige", limit=5)]
+    assert hyphen[0].startswith("AUS"), hyphen
+    with pytest.raises(ToolError, match="No table matches"):
+        find_tabel("zzzz-qqqq")
+
+
+def test_year_total_matches_the_quarters_live(live_client: StatbankClient) -> None:
+    quarters = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": [">=2025K1<=2025K4"]},
+    )
+    values = [row["value"] for row in quarters["rows"]]
+    assert len(values) == 4
+    year = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["2025"]},
+    )
+    assert year["rows"][0]["Tid"] == "2025"
+    assert year["rows"][0]["value"] == sum(values) / len(values)
+    assert "average" in " ".join(year["notes"])
+    assert "level" in " ".join(year["notes"])
+
+    parts = hent_data("STRAF10", {"OVERTRÆD": ["1"], "Tid": [">=2025K1<=2025K4"]})
+    crimes = hent_data("STRAF10", {"OVERTRÆD": ["1"], "Tid": ["2025"]})
+    assert crimes["rows"][0]["value"] == sum(row["value"] for row in parts["rows"])
+    assert "sum" in " ".join(crimes["notes"])
+    assert "flow" in " ".join(crimes["notes"])
+
+    births = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["561"], "BEVÆGELSE": ["B02"], "Tid": ["2024"]},
+    )
+    birth_parts = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["561"], "BEVÆGELSE": ["B02"], "Tid": [">=2024K1<=2024K4"]},
+    )
+    assert births["rows"][0]["value"] == sum(row["value"] for row in birth_parts["rows"])
+    corrections = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["561"], "BEVÆGELSE": ["B12"], "Tid": ["2024"]},
+    )
+    assert len(corrections["rows"]) == 4
+    assert all(row["Tid"] != "2024" for row in corrections["rows"])
+    assert "no yearly figure" in " ".join(corrections["notes"]).casefold()
+
+
+def test_danish_periods_and_projection_label_live(live_client: StatbankClient) -> None:
+    info = tabelinfo("FOLK1A")
+    latest = next(item for item in info["variables"] if item["id"] == "Tid")["time_span"]["last"][
+        "id"
+    ]
+    phrase = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["seneste"]},
+    )
+    assert phrase["rows"][0]["Tid"] == latest
+    with pytest.raises(ToolError, match="Available") as caught:
+        hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"], "Tid": ["marts 1990"]})
+    assert "FOLK1A" in str(caught.value)
+    with pytest.raises(ToolError, match="not a quarter"):
+        hent_data("FOLK1A", {"Tid": ["8. kvartal 2025"]})
+    projected = hent_data(
+        "FRKM126",
+        {"KOMMUNEDK": ["561"], "ALDER": ["TOT"], "KØN": ["M"], "Tid": ["2030"]},
+    )
+    assert projected["projection"] is True
+    row = projected["rows"][0]
+    assert row["projection"] is True
+    assert row.get("KOMMUNEDK") == "Esbjerg" or row.get("OMRÅDE") == "Esbjerg"
+    assert isinstance(row["value"], int)
+
+
 def test_stdio_client_calls_each_tool() -> None:
     asyncio.run(_stdio_session())
 

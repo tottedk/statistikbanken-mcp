@@ -1,0 +1,190 @@
+{
+  "id": "HST5",
+  "text": "Prognose for vinterafgrøder til høst",
+  "description": "Prognose for vinterafgrøder til høst efter afgrøde, enhed og tid",
+  "unit": "1.000 ha",
+  "suppressedDataValue": "0",
+  "updated": "2025-11-28T08:00:00",
+  "active": true,
+  "contacts": [
+    {
+      "name": "Martin Lundø",
+      "phone": "+4551461512",
+      "mail": "mlu@dst.dk"
+    }
+  ],
+  "documentation": {
+    "id": "31f48a74-30d5-4839-841f-c42ce9d54c9d",
+    "url": "https://www.dst.dk/statistikdokumentation/31f48a74-30d5-4839-841f-c42ce9d54c9d"
+  },
+  "footnote": {
+    "text": "Høstet areal for seneste år er foreløbigt indtil april året efter, hvor endelige tal offentliggøres i tabellen HST88.",
+    "mandatory": false
+  },
+  "variables": [
+    {
+      "id": "AFGRØDE",
+      "text": "afgrøde",
+      "elimination": false,
+      "time": false,
+      "values": [
+        {
+          "id": "H102",
+          "text": "Samlet vintersæds areal"
+        },
+        {
+          "id": "H110",
+          "text": "Vinterhvede"
+        },
+        {
+          "id": "H130",
+          "text": "Rug"
+        },
+        {
+          "id": "H140",
+          "text": "Triticale"
+        },
+        {
+          "id": "H150",
+          "text": "Vinterbyg"
+        },
+        {
+          "id": "H210",
+          "text": "Vinterraps"
+        }
+      ]
+    },
+    {
+      "id": "ENHED",
+      "text": "enhed",
+      "elimination": false,
+      "time": false,
+      "values": [
+        {
+          "id": "3A",
+          "text": "Prognose"
+        },
+        {
+          "id": "4A",
+          "text": "Høstet areal"
+        }
+      ]
+    },
+    {
+      "id": "Tid",
+      "text": "tid",
+      "elimination": false,
+      "time": true,
+      "values": [
+        {
+          "id": "2000",
+          "text": "2000"
+        },
+        {
+          "id": "2001",
+          "text": "2001"
+        },
+        {
+          "id": "2002",
+          "text": "2002"
+        },
+        {
+          "id": "2003",
+          "text": "2003"
+        },
+        {
+          "id": "2004",
+          "text": "2004"
+        },
+        {
+          "id": "2005",
+          "text": "2005"
+        },
+        {
+          "id": "2006",
+          "text": "2006"
+        },
+        {
+          "id": "2007",
+          "text": "2007"
+        },
+        {
+          "id": "2008",
+          "text": "2008"
+        },
+        {
+          "id": "2009",
+          "text": "2009"
+        },
+        {
+          "id": "2010",
+          "text": "2010"
+        },
+        {
+          "id": "2011",
+          "text": "2011"
+        },
+        {
+          "id": "2012",
+          "text": "2012"
+        },
+        {
+          "id": "2013",
+          "text": "2013"
+        },
+        {
+          "id": "2014",
+          "text": "2014"
+        },
+        {
+          "id": "2015",
+          "text": "2015"
+        },
+        {
+          "id": "2016",
+          "text": "2016"
+        },
+        {
+          "id": "2017",
+          "text": "2017"
+        },
+        {
+          "id": "2018",
+          "text": "2018"
+        },
+        {
+          "id": "2019",
+          "text": "2019"
+        },
+        {
+          "id": "2020",
+          "text": "2020"
+        },
+        {
+          "id": "2021",
+          "text": "2021"
+        },
+        {
+          "id": "2022",
+          "text": "2022"
+        },
+        {
+          "id": "2023",
+          "text": "2023"
+        },
+        {
+          "id": "2024",
+          "text": "2024"
+        },
+        {
+          "id": "2025",
+          "text": "2025"
+        },
+        {
+          "id": "2026",
+          "text": "2026"
+        }
+      ]
+    }
+  ]
+}

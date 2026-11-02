@@ -208,15 +208,12 @@ def test_out_of_range_period_states_the_available_range() -> None:
     assert "2023K1" not in str(caught.value)
 
 
-def test_bare_year_on_a_quarterly_table_suggests_the_quarters() -> None:
-    with pytest.raises(ToolError, match=r">=2025K1<=2025K4") as caught:
-        hent_data("STRAF10", {"Tid": ["2025"]})
+def test_bare_year_outside_the_table_states_the_range() -> None:
+    with pytest.raises(ToolError, match="Available: 2008K1") as caught:
+        hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["1850"]})
     message = str(caught.value)
-    assert "Available: 1995K1" in message
     assert "2026K3" in message
-
-    with pytest.raises(ToolError, match=r">=2026K1<=2026K3"):
-        hent_data("FOLK1A", {"Tid": ["2026"]})
+    assert "Did you mean" not in message
 
 
 def test_values_accept_labels_and_suggest_near_misses(calls: list[dict[str, object]]) -> None:
@@ -510,6 +507,206 @@ def test_omitted_time_is_the_latest_total() -> None:
     ]
     assert result["unit"] == "Antal"
     assert result["source"] == "Danmarks Statistik"
+
+
+def test_unemployment_words_rank_aus_tables() -> None:
+    for query in ("arbejdsløshed", "ledighed", "Arbejdsløshed"):
+        ids = [hit["id"] for hit in find_tabel(query, limit=5)]
+        assert ids[0].startswith("AUS"), (query, ids)
+        assert any(table_id.startswith("AUS") for table_id in ids[:3])
+    with pytest.raises(ToolError, match="No table matches"):
+        find_tabel("arbejdsløshedxyz")
+
+
+def test_hyphenated_query_matches_joined_spaced_and_hyphenated_titles() -> None:
+    from statistikbanken_mcp.statbank import _query_tokens, _score_table
+
+    ids = [hit["id"] for hit in find_tabel("fuldtids-ledige", limit=5)]
+    assert ids[0].startswith("AUS"), ids
+    tokens = _query_tokens("fuldtids-ledige")
+    folded = "fuldtids-ledige"
+    assert _score_table(_title("Fuldtidsledige"), tokens, folded)
+    assert _score_table(_title("Fuldtids ledige"), tokens, folded)
+    assert _score_table(_title("Fuldtids-ledige"), tokens, folded)
+    assert _score_table(_title("Befolkning"), tokens, folded) is None
+    with pytest.raises(ToolError, match="No table matches"):
+        find_tabel("zzzz-qqqq")
+
+
+def _title(text: str) -> dict[str, object]:
+    return {"id": "X", "text": text, "variables": [], "active": True}
+
+
+def test_year_on_a_flow_table_is_the_sum() -> None:
+    result = hent_data("STRAF10", {"OVERTRÆD": ["1"], "Tid": ["2025"]})
+    assert result["rows"] == [
+        {
+            "OVERTRÆD": "Straffelov i alt",
+            "Tid": "2025",
+            "value": 305839,
+            "year_total": {
+                "method": "sum",
+                "measure": "flow",
+                "periods": ["2025K1", "2025K2", "2025K3", "2025K4"],
+            },
+        }
+    ]
+    note = " ".join(result["notes"])
+    assert "sum of 2025K1, 2025K2, 2025K3 and 2025K4" in note
+    assert "flow" in note
+    assert result["periods"] == ["2025"]
+
+
+def test_year_on_a_level_table_is_the_average() -> None:
+    result = hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["2025"]})
+    assert result["rows"] == [
+        {
+            "OMRÅDE": "Esbjerg",
+            "ALDER": "Alder i alt",
+            "Tid": "2025",
+            "value": 115029,
+            "year_total": {
+                "method": "average",
+                "measure": "level",
+                "periods": ["2025K1", "2025K2", "2025K3", "2025K4"],
+            },
+        }
+    ]
+    note = " ".join(result["notes"])
+    assert "average of 2025K1, 2025K2, 2025K3 and 2025K4" in note
+    assert "level" in note
+
+
+def test_incomplete_year_is_not_collapsed() -> None:
+    crimes = hent_data("STRAF10", {"OVERTRÆD": ["1"], "Tid": ["2026"]})
+    assert [row["Tid"] for row in crimes["rows"]] == ["2026K1", "2026K2", "2026K3"]
+    assert [row["value"] for row in crimes["rows"]] == [69970, 76275, 78389]
+    assert "not a full year" in " ".join(crimes["notes"])
+    assert "No yearly figure" in " ".join(crimes["notes"])
+    population = hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["i år"]})
+    assert [row["Tid"] for row in population["rows"]] == ["2026K1", "2026K2", "2026K3"]
+    assert "Read 'i år' as 2026." in population["notes"]
+    assert "No yearly figure" in " ".join(population["notes"])
+
+
+def test_row_label_chooses_sum_average_or_neither() -> None:
+    births = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["Esbjerg"], "BEVÆGELSE": ["B02"], "Tid": ["2024"]},
+    )
+    assert births["rows"] == [
+        {
+            "OMRÅDE": "Esbjerg",
+            "BEVÆGELSE": "Levendefødte",
+            "Tid": "2024",
+            "value": 1025,
+            "year_total": {
+                "method": "sum",
+                "measure": "flow",
+                "periods": ["2024K1", "2024K2", "2024K3", "2024K4"],
+            },
+        }
+    ]
+    stock = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["Esbjerg"], "BEVÆGELSE": ["B20K"], "Tid": ["2024"]},
+    )
+    assert stock["rows"][0]["Tid"] == "2024"
+    assert stock["rows"][0]["value"] == 115235.5
+    assert stock["rows"][0]["year_total"]["method"] == "average"
+    corrections = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["Esbjerg"], "BEVÆGELSE": ["B12"], "Tid": ["2024"]},
+    )
+    assert [row["Tid"] for row in corrections["rows"]] == ["2024K1", "2024K2", "2024K3", "2024K4"]
+    assert [row["value"] for row in corrections["rows"]] == [-1, 0, -8, 3]
+    assert "does not say whether" in " ".join(corrections["notes"])
+    assert "listed separately" in " ".join(corrections["notes"])
+
+
+def test_danish_period_phrases_map_to_codes() -> None:
+    latest = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["seneste"]},
+    )
+    assert latest["rows"][0]["Tid"] == "2026K3"
+    assert latest["rows"][0]["value"] == 114824
+    quarter = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["3. kvartal 2026"]},
+    )
+    assert quarter["rows"][0]["Tid"] == "2026K3"
+    coded = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["K3 2026"]},
+    )
+    assert coded["rows"][0]["value"] == 114824
+    last_year = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["i fjor"]},
+    )
+    assert last_year["rows"][0]["Tid"] == "2025"
+    assert last_year["rows"][0]["value"] == 115029
+    assert "Read 'i fjor' as 2025." in last_year["notes"]
+    also = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["sidste år"]},
+    )
+    assert also["rows"][0]["value"] == 115029
+    previous = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["sidste kvartal"]},
+    )
+    assert previous["rows"][0]["Tid"] == "2026K2"
+    assert previous["rows"][0]["value"] == 114867
+    assert "Read 'sidste kvartal' as 2026K2." in previous["notes"]
+
+
+def test_danish_period_phrases_outside_the_table_name_the_range() -> None:
+    with pytest.raises(ToolError, match="2025M03") as caught:
+        hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"], "Tid": ["marts 2025"]})
+    message = str(caught.value)
+    assert "Available: 2008K1" in message
+    assert "2026K3" in message
+    with pytest.raises(ToolError, match="not a quarter") as caught:
+        hent_data("FOLK1A", {"Tid": ["5. kvartal 2025"]})
+    assert "Available: 2008K1" in str(caught.value)
+    with pytest.raises(ToolError, match="Available: 1987") as caught:
+        hent_data("INDKP105", {"Tid": ["sidste kvartal"]})
+    assert "2025" in str(caught.value)
+    with pytest.raises(ToolError, match="not in table FOLK1A") as caught:
+        hent_data("FOLK1A", {"Tid": ["3. kvartal 1990"]})
+    assert "Available: 2008K1" in str(caught.value)
+
+
+def test_projection_tables_and_forecast_rows_are_labelled() -> None:
+    info = tabelinfo("FRKM126")
+    assert info["projection"] is True
+    assert "projection" not in tabelinfo("FOLK1A")
+    hits = find_tabel("befolkningsfremskrivning", limit=5)
+    assert hits[0]["projection"] is True
+    assert "projection" not in find_tabel("befolkning", limit=1)[0]
+    projected = hent_data(
+        "FRKM126",
+        {"KOMMUNEDK": ["561"], "ALDER": ["TOT"], "KØN": ["M", "K"], "Tid": ["2030"]},
+    )
+    assert projected["projection"] is True
+    assert "fremskrivning" in " ".join(projected["notes"])
+    by_sex = {row["KØN"]: row for row in projected["rows"]}
+    assert by_sex["Mænd"]["value"] == 57160
+    assert by_sex["Kvinder"]["value"] == 56898
+    assert all(row["projection"] is True for row in projected["rows"])
+    forecast = hent_data(
+        "HST5",
+        {"AFGRØDE": ["H110"], "ENHED": ["3A", "4A"], "Tid": ["2026"]},
+    )
+    by_unit = {row["ENHED"]: row for row in forecast["rows"]}
+    assert by_unit["Prognose"]["value"] == 426
+    assert by_unit["Prognose"]["projection"] is True
+    assert by_unit["Høstet areal"]["value"] is None
+    assert "projection" not in by_unit["Høstet areal"]
+    assert forecast["projection"] is True
+    assert "forecast" in " ".join(forecast["notes"]).casefold()
 
 
 def test_unreachable_api_has_no_stack_trace() -> None:
