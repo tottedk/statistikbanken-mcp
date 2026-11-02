@@ -662,6 +662,89 @@ def test_danish_period_phrases_map_to_codes() -> None:
     assert "Read 'sidste kvartal' as 2026K2." in previous["notes"]
 
 
+def test_calendar_phrases_do_not_substitute_another_period(calls: list[dict[str, object]]) -> None:
+    from datetime import date
+
+    from statistikbanken_mcp.statbank import StatbankError, _period_meaning, _Table, _Variable
+
+    result = hent_data(
+        "IDRFOR01",
+        {
+            "BLSTKOM": ["561"],
+            "ORGANISATION": ["100"],
+            "AKTP": ["104", "105"],
+            "Tid": ["i fjor"],
+        },
+    )
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    tid = next(item["values"] for item in sent["variables"] if item["code"] == "Tid")
+    assert tid == ["2025"]
+    assert {row["AKTP"]: row["value"] for row in result["rows"]} == {
+        "Foreninger": 212,
+        "Medlemmer": 54205,
+    }
+    calls.clear()
+    with pytest.raises(ToolError, match="not published") as caught:
+        hent_data(
+            "IDRFOR01",
+            {
+                "BLSTKOM": ["561"],
+                "ORGANISATION": ["100"],
+                "AKTP": ["104", "105"],
+                "Tid": ["i år"],
+            },
+        )
+    message = str(caught.value)
+    assert "2026" in message
+    assert "Latest available period: 2025" in message
+    assert not any(str(call["path"]).endswith("/data") for call in calls)
+
+    codes = [f"2026M{month:02d}" for month in range(1, 10)]
+    variable = _Variable(
+        id="Tid",
+        text="tid",
+        eliminable=False,
+        time=True,
+        values=tuple({"id": code, "text": code} for code in codes),
+    )
+    table = _Table(
+        id="AUS07",
+        title="Fuldtidsledige",
+        description="",
+        unit="Antal",
+        updated=None,
+        active=True,
+        variables=(variable,),
+    )
+    today = date(2026, 11, 2)
+    with pytest.raises(StatbankError, match="2026M10") as missed:
+        _period_meaning(table, variable, "sidste måned", today)
+    assert "Latest available period: 2026M09" in str(missed.value)
+    published = _Variable(
+        id="Tid",
+        text="tid",
+        eliminable=False,
+        time=True,
+        values=tuple({"id": code, "text": code} for code in [*codes, "2026M10"]),
+    )
+    present = _Table(
+        id="AUS07",
+        title="Fuldtidsledige",
+        description="",
+        unit="Antal",
+        updated=None,
+        active=True,
+        variables=(published,),
+    )
+    found, _plan, read_as = _period_meaning(present, published, "sidste måned", today)
+    assert found == ["2026M10"]
+    assert read_as == "2026M10"
+    latest, _plan, read_as = _period_meaning(table, variable, "seneste", today)
+    assert latest == ["2026M09"]
+    assert read_as == "2026M09"
+
+
 def test_danish_period_phrases_outside_the_table_name_the_range() -> None:
     with pytest.raises(ToolError, match="2025M03") as caught:
         hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"], "Tid": ["marts 2025"]})

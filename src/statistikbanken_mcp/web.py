@@ -1684,12 +1684,12 @@ def _unverified_numbers(
     allowed.update(_argument_figures(calls))
     fetched = {str(fact.get("period") or "") for fact in facts}
     scanned = _mask_friendly_periods(answer, fetched)
-    derived = _derived_values(facts)
     flagged = []
     for start, end, number in _figure_mentions(scanned, []):
         if _near(number, allowed):
             continue
-        if _matches_derivation(scanned, start, end, number, derived):
+        # Spans match the unmasked answer; friendly periods stay visible there.
+        if _matches_derivation(answer, start, end, number, facts):
             continue
         flagged.append(number)
     # _figure_mentions leaves bare years to the period check. A year that is not
@@ -2054,50 +2054,16 @@ _PERCENT_AFTER = re.compile(r"^[ \t]*(?:procent|percentage|percent|pct\.?|%)\b",
 _DIFF_AFTER = re.compile(r"^[ \t]*(?:flere|færre|faerre)\b", re.IGNORECASE)
 
 
-def _derived_values(facts: list[dict[str, Any]]) -> dict[str, list[float]]:
-    """Differences, sums, and percentage changes of the fetched values."""
-    values = [
-        float(fact["value"])
-        for fact in facts
-        if isinstance(fact.get("value"), int | float) and not isinstance(fact.get("value"), bool)
-    ]
-    differences: list[float] = []
-    sums: list[float] = []
-    percents: list[float] = []
-    for index, left in enumerate(values):
-        for right in values[index + 1 :]:
-            differences.append(abs(left - right))
-            sums.append(left + right)
-            percents.extend(_percentage_changes(left, right))
-    sums.extend(_group_sums(facts))
-    if len(values) >= 2:
-        sums.append(sum(values))
-    return {"difference": differences, "sum": sums, "percent": percents}
+_AREA_FIELDS = frozenset({"omraade", "kommune", "blstkom", "kommunedk", "region", "landsdel"})
 
 
-def _percentage_changes(left: float, right: float) -> list[float]:
-    found: list[float] = []
-    for new, old in ((left, right), (right, left)):
-        if old == 0:
-            continue
-        found.append(abs((new - old) / old * 100))
-    return found
-
-
-def _group_sums(facts: list[dict[str, Any]]) -> list[float]:
-    """Sum of one series, and the sum of every series in one period."""
-    found: list[float] = []
-    for key in ("period", "detail"):
-        grouped: dict[str, list[float]] = {}
-        for fact in facts:
-            value = fact.get("value")
-            if isinstance(value, bool) or not isinstance(value, int | float):
-                continue
-            grouped.setdefault(str(fact.get(key) or ""), []).append(float(value))
-        for items in grouped.values():
-            if len(items) >= 2:
-                found.append(sum(items))
-    return found
+def _measure_of(fact: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
+    bits = []
+    for part in str(fact.get("detail") or "").split(", "):
+        name, sep, value = part.partition(": ")
+        if sep and _fold_place(name) not in _AREA_FIELDS:
+            bits.append(f"{name}={value}")
+    return str(fact.get("unit") or ""), tuple(bits)
 
 
 def _matches_derivation(
@@ -2105,12 +2071,73 @@ def _matches_derivation(
     start: int,
     end: int,
     number: float,
-    derived: dict[str, list[float]],
+    facts: list[dict[str, Any]],
 ) -> bool:
+    """One measure, named by this clause. A sum also has to be a single period."""
     kind = _derivation_kind(text, start, end)
     if kind is None:
         return False
-    return any(_close_enough(number, exact) for exact in derived.get(kind, ()))
+    chosen = _referred_facts(text, start, facts)
+    if chosen is None:
+        chosen = [fact for fact in facts if _single_value(fact)]
+        if kind == "sum" or len(chosen) != 2:
+            return False
+    if len({_measure_of(fact) for fact in chosen}) != 1 or len(chosen) < 2:
+        return False
+    if kind == "sum":
+        if len({str(fact.get("period") or "") for fact in chosen}) != 1:
+            return False
+        return _close_enough(number, sum(fact["value"] for fact in chosen))
+    if len(chosen) != 2:
+        return False
+    left, right = float(chosen[0]["value"]), float(chosen[1]["value"])
+    if kind == "difference":
+        return _close_enough(number, abs(left - right))
+    return any(
+        old and _close_enough(number, abs(left - right) / abs(old) * 100) for old in (left, right)
+    )
+
+
+def _referred_facts(
+    text: str,
+    start: int,
+    facts: list[dict[str, Any]],
+) -> list[dict[str, Any]] | None:
+    clause_start, clause_end = next(
+        ((begin, end) for begin, end in _clause_ranges(text) if begin <= start <= end),
+        (0, len(text)),
+    )
+    mentions = _period_mentions(text, facts)
+    periods = {code for begin, end, code in mentions if clause_start <= begin and end <= clause_end}
+    covered = [(begin, end) for begin, end, _code in mentions]
+    labels = {
+        label
+        for begin, end, label in _label_mentions(text, facts, covered)
+        if clause_start <= begin and end <= clause_end
+    }
+    quoted = {
+        value
+        for begin, end, value in _figure_mentions(text, covered)
+        if clause_start <= begin
+        and end <= clause_end
+        and begin != start
+        and _near(value, _row_values(facts))
+    }
+    if not periods and not labels and len(quoted) < 2:
+        return None
+    chosen = []
+    for fact in facts:
+        if not _single_value(fact):
+            continue
+        period = str(fact.get("period") or "").casefold()
+        if periods and period not in periods:
+            continue
+        if labels and not (_fact_labels(fact) & labels):
+            continue
+        if not periods and not labels and not _near(float(fact["value"]), quoted):
+            continue
+        chosen.append(fact)
+    return chosen
 
 
 def _derivation_kind(text: str, start: int, end: int) -> str | None:

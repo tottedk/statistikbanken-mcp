@@ -299,6 +299,67 @@ def test_year_total_matches_the_quarters_live(live_client: StatbankClient) -> No
     assert "no yearly figure" in " ".join(corrections["notes"]).casefold()
 
 
+def test_calendar_phrases_follow_today_live(live_client: StatbankClient) -> None:
+    from datetime import date, timedelta
+
+    today = date.today()
+    previous_year = str(today.year - 1)
+    this_year = str(today.year)
+    direct = hent_data(
+        "IDRFOR01",
+        {
+            "BLSTKOM": ["561"],
+            "ORGANISATION": ["100"],
+            "AKTP": ["104", "105"],
+            "Tid": [previous_year],
+        },
+    )
+    phrase = hent_data(
+        "IDRFOR01",
+        {
+            "BLSTKOM": ["561"],
+            "ORGANISATION": ["100"],
+            "AKTP": ["104", "105"],
+            "Tid": ["i fjor"],
+        },
+    )
+    assert {row["AKTP"]: row["value"] for row in phrase["rows"]} == {
+        row["AKTP"]: row["value"] for row in direct["rows"]
+    }
+    assert all(row["Tid"] == previous_year for row in phrase["rows"])
+    info = tabelinfo("IDRFOR01")
+    latest = next(item for item in info["variables"] if item["id"] == "Tid")["time_span"]["last"][
+        "id"
+    ]
+    if this_year > latest:
+        with pytest.raises(ToolError, match="not published") as caught:
+            hent_data(
+                "IDRFOR01",
+                {
+                    "BLSTKOM": ["561"],
+                    "ORGANISATION": ["100"],
+                    "AKTP": ["104", "105"],
+                    "Tid": ["i år"],
+                },
+            )
+        message = str(caught.value)
+        assert this_year in message
+        assert latest in message
+    month = today.replace(day=1) - timedelta(days=1)
+    code = f"{month.year}M{month.month:02d}"
+    aus = tabelinfo("AUS07")
+    aus_latest = next(item for item in aus["variables"] if item["id"] == "Tid")["time_span"][
+        "last"
+    ]["id"]
+    if code > aus_latest:
+        with pytest.raises(ToolError, match="not published") as caught:
+            hent_data("AUS07", {"Tid": ["sidste måned"]})
+        message = str(caught.value)
+        assert code in message
+        assert aus_latest in message
+        assert "2026M08" not in message or code == "2026M08"
+
+
 def test_danish_periods_and_projection_label_live(live_client: StatbankClient) -> None:
     info = tabelinfo("FOLK1A")
     latest = next(item for item in info["variables"] if item["id"] == "Tid")["time_span"]["last"][

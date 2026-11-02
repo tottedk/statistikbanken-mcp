@@ -14,6 +14,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -217,7 +218,10 @@ class StatbankClient:
         *,
         base_url: str = BASE_URL,
         timeout: float = 30.0,
+        today: date | None = None,
     ) -> None:
+        # None uses the real clock. Tests pass a date so fixtures do not depend on it.
+        self.today = today
         self._owns_http = http is None
         if http is None and os.environ.get("STATBANK_HTTP_TIMEOUT"):
             timeout = float(os.environ["STATBANK_HTTP_TIMEOUT"])
@@ -329,7 +333,9 @@ class StatbankClient:
             metadata, values, sum_from, sum_range
         )
         notes.extend(promoted)
-        values, year_plans, period_notes = _prepare_periods(metadata, values)
+        values, year_plans, period_notes = _prepare_periods(
+            metadata, values, self.today or date.today()
+        )
         notes.extend(period_notes)
         values, dropped = _drop_equivalent_value_sums(values, sum_from)
         notes.extend(dropped)
@@ -1364,6 +1370,7 @@ def _measure_method(table: _Table, labels: str) -> str | None:
 def _prepare_periods(
     table: _Table,
     values: dict[str, list[str]] | None,
+    today: date,
 ) -> tuple[dict[str, list[str]] | None, list[_YearPlan], list[str]]:
     """Rewrite Danish period phrases and bare years into the table's own codes."""
     if not values:
@@ -1378,7 +1385,7 @@ def _prepare_periods(
         if _is_expression(token) or _value_matches(time_var, token):
             rewritten.append(token)
             continue
-        meaning = _period_meaning(table, time_var, token)
+        meaning = _period_meaning(table, time_var, token, today)
         if meaning is None:
             rewritten.append(token)
             continue
@@ -1397,6 +1404,7 @@ def _period_meaning(
     table: _Table,
     variable: _Variable,
     token: str,
+    today: date,
 ) -> tuple[list[str], _YearPlan | None, str] | None:
     """Codes to request, an optional year plan, and the text of the read-as note.
 
@@ -1413,15 +1421,23 @@ def _period_meaning(
 
     if text in {"seneste", "nyeste", "seneste periode", "nyeste periode"}:
         return [latest_code], None, latest_code
+    # i år / i fjor / sidste måned follow the calendar, not the table's last period.
     if text in {"i aar", "iaar"}:
-        return _year_meaning(table, variable, token, latest_year)
+        return _year_meaning(table, variable, token, today.year, unpublished=True)
     if text in {"i fjor", "sidste aar", "forrige aar"}:
-        return _year_meaning(table, variable, token, latest_year - 1)
+        return _year_meaning(table, variable, token, today.year - 1, unpublished=True)
     if text in {"seneste kvartal", "sidste kvartal"}:
         quarter = _relative_quarter(variable, token, latest_year, latest_quarter, text)
         return _quarter_meaning(table, variable, token, *quarter)
-    if text in {"seneste maaned", "sidste maaned"}:
-        return _month_shift_meaning(table, variable, token, latest_month, text.startswith("sidste"))
+    if text == "seneste maaned":
+        if latest_month is None:
+            raise StatbankError(
+                f"{token.strip()!r} needs a monthly table. {_time_advice(variable, token)}"
+            )
+        return [latest_code], None, latest_code
+    if text == "sidste maaned":
+        previous = today.replace(day=1) - timedelta(days=1)
+        return _calendar_code(table, variable, token, f"{previous.year}M{previous.month:02d}")
     month = _month_phrase(text)
     if month is not None:
         year, number = month
@@ -1504,26 +1520,43 @@ def _month_phrase(text: str) -> tuple[int, int] | None:
 def _quarter_phrase(text: str) -> tuple[int, int] | None:
     words = "|".join(_QUARTER_WORDS)
     patterns = (
-        r"(\d)\s*(?:kvartal|kvt)\s*(\d{4})",
-        r"(\d{4})\s*(\d)\s*(?:kvartal|kvt)",
-        r"[kq]\s*(\d)\s*(\d{4})",
-        r"(\d{4})\s*[kq]\s*(\d)",
-        rf"({words})\s+kvartal\s+(\d{{4}})",
+        (r"(\d{4})\s*(\d)\s*(?:kvartal|kvt)", True),
+        (r"(\d{4})\s*[kq]\s*(\d)", True),
+        (r"(\d)\s*(?:kvartal|kvt)\s*(\d{4})", False),
+        (r"[kq]\s*(\d)\s*(\d{4})", False),
+        (rf"({words})\s+kvartal\s+(\d{{4}})", False),
     )
-    for pattern in patterns:
+    for pattern, year_first in patterns:
         match = re.fullmatch(pattern, text)
         if match is None:
             continue
         first, second = match.group(1), match.group(2)
-        if first.isdigit() and len(first) == 4:
+        if year_first:
             return int(first), int(second)
-        if second.isdigit() and len(second) == 4 and not first.isdigit():
-            return int(second), _QUARTER_WORDS[first]
-        if second.isdigit() and len(second) == 4:
-            return int(second), int(first)
-        if first.isdigit() and len(first) == 4:
-            return int(first), int(second)
+        quarter = _QUARTER_WORDS[first] if first in _QUARTER_WORDS else int(first)
+        return int(second), quarter
     return None
+
+
+def _not_published(token: str, code: str, table: _Table, variable: _Variable) -> StatbankError:
+    latest = _latest_period(variable)
+    shown = latest[0] if latest else "none"
+    return StatbankError(
+        f"{token.strip()!r} means {code}, which is not published in {table.id}. "
+        f"Latest available period: {shown}."
+    )
+
+
+def _calendar_code(
+    table: _Table,
+    variable: _Variable,
+    token: str,
+    code: str,
+) -> tuple[list[str], _YearPlan | None, str]:
+    found = _code_on(variable, code)
+    if found is None:
+        raise _not_published(token, code, table, variable)
+    return [found], None, found
 
 
 def _one_code(
@@ -1565,29 +1598,13 @@ def _quarter_meaning(
     )
 
 
-def _month_shift_meaning(
-    table: _Table,
-    variable: _Variable,
-    token: str,
-    latest_month: int | None,
-    previous: bool,
-) -> tuple[list[str], _YearPlan | None, str]:
-    parsed = _parsed_period(_latest_period(variable)[0]) if _latest_period(variable) else None
-    if latest_month is None or parsed is None or parsed[1] != 3:
-        raise StatbankError(
-            f"{token.strip()!r} needs a monthly table. {_time_advice(variable, token)}"
-        )
-    year, month = parsed[0], parsed[2]
-    if previous:
-        year, month = (year - 1, 12) if month == 1 else (year, month - 1)
-    return _one_code(table, variable, token, f"{year}M{month:02d}")
-
-
 def _year_meaning(
     table: _Table,
     variable: _Variable,
     token: str,
     year: int,
+    *,
+    unpublished: bool = False,
 ) -> tuple[list[str], _YearPlan | None, str]:
     exact = _code_on(variable, str(year))
     if exact is not None:
@@ -1602,6 +1619,8 @@ def _year_meaning(
         )
     ]
     if not codes:
+        if unpublished:
+            raise _not_published(token, str(year), table, variable)
         raise StatbankError(
             f"{token.strip()!r} is {year}, which is not in table {table.id}. "
             f"{_time_advice(variable, str(year))}"

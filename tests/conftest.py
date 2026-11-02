@@ -9,6 +9,7 @@ are the API's.
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -159,7 +160,7 @@ def offline_client(request: pytest.FixtureRequest, calls: list[dict[str, object]
         base_url="https://api.statbank.dk/v1",
         transport=_handler(calls),
     )
-    client = StatbankClient(http)
+    client = StatbankClient(http, today=date(2026, 11, 2))
     previous = set_client(client)
     yield client
     set_client(previous)

@@ -145,17 +145,17 @@ def hent_data(
     ("Esbjerg, Viborg"). On an age variable, "80+", ">=80", "80-" and
     "80 og derover" are the sum from that age upward, and "0-17" is the
     closed range. The result notes the substitution. An unknown value names
-    the closest labels.     For Tid, the error states the available period range.
+    the closest labels. For Tid, the error states the available period range.
     A bare year on a quarterly or monthly table is one yearly figure when the
     year is complete: the quarters or months are added when the measure is a
     flow, and averaged when it is a level. The note says which. If the measure
     cannot be told, or the year is missing a period, the periods are listed and
-    no yearly figure is invented. Danish phrases are accepted and resolved from
-    the latest period the table actually has: "i år", "i fjor", "sidste år",
-    "sidste kvartal", "seneste", "marts 2025", "3. kvartal 2025", "K3 2025".
-    A phrase that falls outside the table is an error naming the available range.
-    These expressions are passed
-    through: "*"
+    no yearly figure is invented. "i år", "i fjor", "sidste år", and "sidste
+    måned" follow today's calendar. If that period is not published, the error
+    names it and the latest period in the table, and does not substitute another
+    one. "seneste" is the latest published period. "sidste kvartal", "marts
+    2025", "3. kvartal 2025", and "K3 2025" are unchanged. These expressions
+    are passed through: "*"
     (every code), "(1)" (latest period), "(-n+4)" (the four latest periods),
     and a range such as ">=2016K3". A range lists matching periods. It does
     not add them together.
