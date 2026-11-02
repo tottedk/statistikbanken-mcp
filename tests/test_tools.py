@@ -425,6 +425,7 @@ def test_tabelinfo_filter_finds_a_value_past_the_cap() -> None:
             "text": "område",
             "eliminable": True,
             "time": False,
+            "total": {"id": "000", "text": "Hele landet"},
             "values": [{"id": "740", "text": "Silkeborg"}],
             "value_count": 1,
         }
@@ -790,6 +791,125 @@ def test_projection_tables_and_forecast_rows_are_labelled() -> None:
     assert "projection" not in by_unit["Høstet areal"]
     assert forecast["projection"] is True
     assert "forecast" in " ".join(forecast["notes"]).casefold()
+
+
+def _sent_variables(calls: list[dict[str, object]]) -> dict[str, list[str]]:
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    variables = sent["variables"]
+    assert isinstance(variables, list)
+    return {str(item["code"]): list(item["values"]) for item in variables if isinstance(item, dict)}
+
+
+def test_population_by_municipality_or_age_ranks_folk1a_first() -> None:
+    for query in (
+        "befolkning kommune alder",
+        "befolkning efter kommune og alder",
+        "population by municipality and age",
+    ):
+        ids = [hit["id"] for hit in find_tabel(query, limit=8)]
+        assert ids[0] == "FOLK1A", query
+        assert ids.index("FOLK1A") < ids.index("BEFOLK3"), query
+    forecast = [hit["id"] for hit in find_tabel("befolkningsfremskrivning kommune", limit=3)]
+    assert forecast[0] == "FRKM126"
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["registrerede ledige", "registreret ledighed", "bruttoledighed", "arbejdsløshed"],
+)
+def test_registered_unemployment_ranks_aus08_first(query: str) -> None:
+    ids = [hit["id"] for hit in find_tabel(query, limit=8)]
+    assert ids[0] == "AUS08", (query, ids)
+    for other in ("AKU520K", "AUF01"):
+        if other in ids:
+            assert ids.index("AUS08") < ids.index(other), (query, ids)
+
+
+def test_job_vacancies_are_not_ranked_as_unemployment() -> None:
+    assert find_tabel("ledige stillinger", limit=1)[0]["id"].startswith("LSK")
+
+
+def test_personal_income_ranks_indkp105_first() -> None:
+    ids = [hit["id"] for hit in find_tabel("personlig indkomst", limit=8)]
+    assert ids[0] == "INDKP105"
+    assert ids.index("INDKP105") < ids.index("INDKP222")
+    english = [hit["id"] for hit in find_tabel("personal income", limit=5)]
+    assert english[0] == "INDKP105"
+
+
+def test_reported_crimes_rank_straf10_first() -> None:
+    ids = [hit["id"] for hit in find_tabel("anmeldte forbrydelser", limit=6)]
+    assert ids[0] == "STRAF10"
+    assert ids.index("STRAF10") < ids.index("STRAF20")
+    victims = [hit["id"] for hit in find_tabel("ofre for anmeldte forbrydelser", limit=3)]
+    assert victims[0] == "STRAF5"
+
+
+def test_omitted_variables_default_to_the_total_and_the_latest_period(
+    calls: list[dict[str, object]],
+) -> None:
+    result = hent_data("FOLK1A", {"OMRÅDE": ["Esbjerg"]})
+    assert result["rows"][0]["value"] == 114824
+    assert result["rows"][0]["Tid"] == "2026K3"
+    chosen = {(item["variable"], item["id"], item["text"]) for item in result["defaults"]}
+    assert ("KØN", "TOT", "I alt") in chosen
+    assert ("CIVILSTAND", "TOT", "I alt") in chosen
+    assert ("ALDER", "IALT", "Alder i alt") in chosen
+    assert ("Tid", "2026K3", "2026K3") in chosen
+    assert all(item["variable"] != "OMRÅDE" for item in result["defaults"])
+    sent = _sent_variables(calls)
+    assert sent["OMRÅDE"] == ["561"]
+    assert sent["KØN"] == ["TOT"]
+    assert sent["ALDER"] == ["IALT"]
+    assert sent["CIVILSTAND"] == ["TOT"]
+    assert sent["Tid"] == ["2026K3"]
+
+
+def test_an_explicit_period_and_category_are_kept(calls: list[dict[str, object]]) -> None:
+    result = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "KØN": ["1"], "ALDER": ["IALT"], "Tid": ["2025"]},
+    )
+    assert result["rows"][0]["Tid"] == "2025"
+    filled = {item["variable"] for item in result["defaults"]}
+    assert "KØN" not in filled
+    assert "Tid" not in filled
+    assert "CIVILSTAND" in filled
+    sent = _sent_variables(calls)
+    assert sent["KØN"] == ["1"]
+    assert sent["Tid"] == ["2025K1", "2025K2", "2025K3", "2025K4"]
+
+
+def test_omitted_area_and_income_groups_use_total_labels(
+    calls: list[dict[str, object]],
+) -> None:
+    income = hent_data(
+        "INDKP105",
+        {"OMRÅDE": ["Esbjerg"], "ENHED": ["118"], "Tid": ["2025"]},
+    )
+    by_var = {item["variable"]: item for item in income["defaults"]}
+    assert by_var["KOEN"] == {
+        "variable": "KOEN",
+        "id": "MOK",
+        "text": "Mænd og kvinder i alt",
+    }
+    assert by_var["ALDER1"]["text"] == "I alt"
+    assert by_var["INDKINTB"]["text"] == "Alle"
+    assert "ENHED" not in by_var
+    assert "OMRÅDE" not in by_var
+    assert "Tid" not in by_var
+    sent = _sent_variables(calls)
+    assert sent["KOEN"] == ["MOK"]
+    assert sent["ALDER1"] == ["00"]
+    assert sent["INDKINTB"] == ["000"]
+
+    calls.clear()
+    hotel = hent_data("HOTEL1", {"TAL": ["1030"], "PERIODE": ["08"], "Tid": ["2026"]})
+    by_var = {item["variable"]: item for item in hotel["defaults"]}
+    assert by_var["OMRÅDE"]["id"] == "000"
+    assert by_var["OMRÅDE"]["text"] == "Hele landet"
+    assert by_var["NATION1"]["text"] == "I alt"
 
 
 def test_unreachable_api_has_no_stack_trace() -> None:

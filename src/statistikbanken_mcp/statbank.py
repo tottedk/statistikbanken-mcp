@@ -616,6 +616,89 @@ def _token_score(table_id: str, title: str, variables: str, token: str) -> int:
     return min(fallback, 14)
 
 
+@dataclass(frozen=True)
+class _TablePreference:
+    """Rank one table first when a common question would otherwise tie.
+
+    Each group in `all_of` is a set of alternatives, and every group has to
+    match the query. `unless` turns the preference off, for a forecast, a
+    breakdown, or a different subject that shares a word. The boost only
+    reorders a table that already matched. An exact table id still wins.
+    """
+
+    table_id: str
+    all_of: tuple[tuple[str, ...], ...]
+    unless: tuple[str, ...] = ()
+
+
+# One list. Search uses it and nothing else hard-codes these ids.
+# FOLK1A is the quarterly population by municipality or age (BEFOLK3 is 1 January).
+# AUS08 is seasonally adjusted gross unemployment, monthly (over AKU520K and AUF01).
+# INDKP105 is personal income, the amount (INDKP222 counts people in brackets).
+# STRAF10 is crimes reported (STRAF20 adds charges).
+_TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
+    _TablePreference(
+        "FOLK1A",
+        (
+            ("befolkning", "population", "people", "indbyggere"),
+            ("kommune", "kommuner", "municipality", "alder", "age"),
+        ),
+        ("fremskriv",),
+    ),
+    _TablePreference(
+        "AUS08",
+        (
+            (
+                "ledighed",
+                "ledige",
+                "arbejdsløshed",
+                "unemployment",
+                "unemployed",
+                "bruttoledighed",
+                "fuldtidsledige",
+                "jobless",
+            ),
+        ),
+        ("stilling",),
+    ),
+    _TablePreference(
+        "INDKP105",
+        (("indkomst", "income"), ("personlig", "personal")),
+        ("køn", "alder", "uddannelse", "sex"),
+    ),
+    _TablePreference(
+        "STRAF10",
+        (("forbrydelse", "forbrydelser", "indbrud", "burglary"),),
+        ("ofre", "offer"),
+    ),
+)
+# Enough to pass a title that matches every word of a short query (about 200).
+_PREFERENCE_BOOST = 400
+
+
+def _term_in_query(folded: str, term: str) -> bool:
+    """A short word has to stand alone, so 'age' does not match 'average'."""
+    needle = _fold(term)
+    if not needle:
+        return False
+    if len(needle) <= 4:
+        return re.search(rf"(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])", folded) is not None
+    return needle in folded
+
+
+def _preference_boost(table_id: str, query: str) -> int:
+    folded = _fold(query)
+    for preference in _TABLE_PREFERENCES:
+        if preference.table_id.casefold() != table_id.casefold():
+            continue
+        if any(_term_in_query(folded, term) for term in preference.unless):
+            return 0
+        groups = preference.all_of
+        if groups and all(any(_term_in_query(folded, term) for term in group) for group in groups):
+            return _PREFERENCE_BOOST
+    return 0
+
+
 def _pre_tax_adjustment(query: str, title: str, tokens: list[str]) -> int:
     """Prefer "Indkomst i alt" for income before tax, unless a breakdown is named.
 
@@ -661,7 +744,11 @@ def _score_table(table: dict[str, Any], tokens: list[str], folded: str) -> int |
         score += 30
     if table.get("active") is True:
         score += 5
-    return score + _pre_tax_adjustment(folded, haystack_title, tokens)
+    return (
+        score
+        + _pre_tax_adjustment(folded, haystack_title, tokens)
+        + _preference_boost(table_id, folded)
+    )
 
 
 def _parse_table(data: Any) -> _Table:
@@ -2051,27 +2138,70 @@ def _fold(text: str) -> str:
     return text.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
 
 
-def _unique_total(variable: _Variable) -> dict[str, str] | None:
-    def is_total(item: dict[str, str]) -> bool:
-        code = item["id"].casefold()
-        text = item["text"].casefold().strip()
-        return code in {"tot", "ialt"} or text in {"i alt", "alle", "total"}
+def _label_key(text: str) -> str:
+    return " ".join(_fold(text).split())
 
-    totals = [item for item in variable.values if is_total(item)]
-    if len(totals) == 1:
-        return totals[0]
+
+def _unique_total(variable: _Variable) -> dict[str, str] | None:
+    """The one total, or none when several values could be it.
+
+    A code TOT or IALT wins. Otherwise one label I alt, Total, Alle, or
+    Hele landet. A single longer label that ends in "i alt" ("Mænd og kvinder
+    i alt") is the same kind of total. Several of those, as on a crime
+    breakdown, are not a total.
+    """
+    by_code = [item for item in variable.values if item["id"].casefold() in {"tot", "ialt"}]
+    if len(by_code) == 1:
+        return by_code[0]
+    if by_code:
+        return None
+    exact_labels = {"i alt", "ialt", "alle", "total", "hele landet"}
+    exact = [item for item in variable.values if _label_key(item["text"]) in exact_labels]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None
+    styled = [item for item in variable.values if _label_key(item["text"]).endswith(" i alt")]
+    if len(styled) == 1:
+        return styled[0]
     return None
 
 
+def _latest_value(variable: _Variable) -> dict[str, str] | None:
+    latest = _latest_period(variable)
+    if latest is None:
+        return None
+    code = latest[0]
+    for item in variable.values:
+        if item["id"] == code:
+            return item
+    return {"id": code, "text": code}
+
+
 def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict[str, str]]:
+    """Fill every variable the caller left out.
+
+    A total (I alt, Total, Hele landet) is used when the question does not
+    name that variable, so the model does not have to choose it. Omitted time
+    is the latest published period. A required variable with no total is still
+    an error that lists the codes.
+    """
     assumed: list[dict[str, str]] = []
     missing: list[_Variable] = []
     for variable in table.variables:
-        if variable.time or variable.eliminable or variable.id in selections:
+        if variable.id in selections:
+            continue
+        if variable.time:
+            latest = _latest_value(variable)
+            if latest is None:
+                continue
+            selections[variable.id] = [latest["id"]]
+            assumed.append({"variable": variable.id, "id": latest["id"], "text": latest["text"]})
             continue
         total = _unique_total(variable)
         if total is None:
-            missing.append(variable)
+            if not variable.eliminable:
+                missing.append(variable)
             continue
         selections[variable.id] = [total["id"]]
         assumed.append({"variable": variable.id, "id": total["id"], "text": total["text"]})
