@@ -215,7 +215,12 @@ def test_prompt_counts_relative_periods_back_from_the_given_date() -> None:
     assert "a quarter is 2026K3" in november
     assert "a month is 2026M10" in november
     assert "'i fjor' is 2025" in november
+    assert "'i år' is 2026" in november
     assert "'sidste måned' is 2026M10" in november
+    assert "These codes are the calendar meaning." in november
+    assert "call hent_data again with the latest published period" in november
+    assert "Oktober er ikke offentliggjort endnu; seneste er september 2026:" in november
+    assert "when that year is not published" in november
     assert "2016K3 to 2026K3" in november
     assert "2016M10 to 2026M10" in november
     assert "2026-10" not in november
@@ -225,7 +230,9 @@ def test_prompt_counts_relative_periods_back_from_the_given_date() -> None:
     january = _system_message(date(2026, 1, 2))
     assert "2026-01-02" in january
     assert "'i fjor' is 2025" in january
+    assert "'i år' is 2026" in january
     assert "'sidste måned' is 2025M12" in january
+    assert "These codes are the calendar meaning." in january
     assert "a quarter is 2025K4" in january
     assert "2015K4 to 2025K4" in january
     assert "2015M12 to 2025M12" in january
