@@ -23,9 +23,10 @@ import traceback
 import zipfile
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 from mcp import Client, StdioServerParameters
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
 XAI_BASE_URL = "https://api.x.ai/v1"
-DEFAULT_OLLAMA_MODEL = "qwen2.5"
+DEFAULT_OLLAMA_MODEL = "gemma4:26b-a4b-it-qat"
 DEFAULT_XAI_MODEL = "grok-4"
 TRACE_LIMIT = 2_000
 MODEL_RESULT_LIMIT = 12_000
@@ -86,6 +87,46 @@ Do not answer in English when the question is Danish.
 Write Danish numbers with a dot as the thousands separator: 5.045, never 5,045.
 Write periods like 1. kvartal 2015 or 2015 1. kvt., marts 2015, or 2015 1. halvår.
 A year stays 2015. Do not write 2015K1 or 2026Q3."""
+
+
+def _previous_quarter(day: date) -> str:
+    """Last finished quarter. November is K3 of the same year."""
+    quarter = (day.month - 1) // 3
+    if quarter == 0:
+        return f"{day.year - 1}K4"
+    return f"{day.year}K{quarter}"
+
+
+def _years_earlier(code: str, years: int) -> str:
+    return f"{int(code[:4]) - years}{code[4:]}"
+
+
+def system_prompt(today: date | None = None) -> str:
+    # None uses the clock in Europe/Copenhagen. Tests pass a date.
+    day = today if today is not None else datetime.now(ZoneInfo("Europe/Copenhagen")).date()
+    last_month = day.replace(day=1) - timedelta(days=1)
+    month_code = f"{last_month.year}M{last_month.month:02d}"
+    quarter_code = _previous_quarter(day)
+    last_year = day.year - 1
+    return (
+        f"{SYSTEM_PROMPT}\n"
+        f"Today's date is {day.isoformat()} (Europe/Copenhagen). "
+        f"In hent_data, pass Tid as Statbank codes: a year is {last_year}, "
+        f"a quarter is {quarter_code}, a month is {month_code}. "
+        f"'i fjor' is {last_year}. 'i år' is {day.year}. "
+        f"'sidste måned' is {month_code}. "
+        f"These codes are the calendar meaning. "
+        f"If that period is not published yet, call hent_data again with the latest "
+        f"published period from the error and say so in the answer. "
+        f"For example: 'Oktober er ikke offentliggjort endnu; seneste er september 2026: …'. "
+        f"Do the same for 'i år' and 'i fjor' when that year is not published. "
+        f"'seneste 10 år' is the latest published period and the same quarter or month "
+        f"10 years earlier. If the latest quarter is {quarter_code}, pass "
+        f"{_years_earlier(quarter_code, 10)} to {quarter_code}. "
+        f"If the latest month is {month_code}, pass {_years_earlier(month_code, 10)} "
+        f"to {month_code}."
+    )
+
 
 PAGE = """<!DOCTYPE html>
 <html lang="da">
@@ -570,7 +611,7 @@ class ToolRunner(Protocol):
 
 
 class ChatClient:
-    """POST /v1/chat/completions. The same body works for Ollama and xAI."""
+    """POST /v1/chat/completions for Ollama or xAI."""
 
     def __init__(
         self,
@@ -581,11 +622,13 @@ class ChatClient:
         http: httpx.Client | None = None,
         *,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self._owns_http = http is None
         self._http = http or httpx.Client(timeout=timeout)
 
@@ -601,6 +644,8 @@ class ChatClient:
         body: dict[str, Any] = {"model": self.model, "messages": messages, "temperature": 0}
         if self.max_tokens is not None:
             body["max_tokens"] = self.max_tokens
+        if self.reasoning_effort is not None:
+            body["reasoning_effort"] = self.reasoning_effort
         if tools is not None:
             body["tools"] = tools
             body["tool_choice"] = "auto"
@@ -688,11 +733,12 @@ async def run_turn(
     question: str,
     *,
     max_tool_calls: int,
+    today: date | None = None,
 ) -> TurnResult:
     specs = await runner.list_tools()
     tools = openai_tools(specs)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt(today)},
         {"role": "user", "content": question},
         {"role": "system", "content": _closing_instruction(question)},
     ]
@@ -2333,6 +2379,7 @@ class Settings:
     max_tokens: int | None = None
     max_concurrent: int | None = None
     state_file: str = ""
+    think: bool = False
 
     def __repr__(self) -> str:
         return (
@@ -2456,6 +2503,21 @@ def settings_from_env(argv: list[str] | None = None) -> Settings:
         max_tokens=PUBLIC_MAX_TOKENS if llm == "xai" else None,
         max_concurrent=PUBLIC_MAX_CONCURRENT if public else None,
         state_file=_state_file(),
+        think=_env_flag("STATBANK_LLM_THINK"),
+    )
+
+
+def chat_client(settings: Settings, http: httpx.Client | None = None) -> ChatClient:
+    # Ollama thinks unless this is none. xAI is left unchanged.
+    effort = "none" if settings.llm == "ollama" and not settings.think else None
+    return ChatClient(
+        settings.base_url,
+        settings.api_key,
+        settings.model,
+        settings.llm_timeout,
+        http=http,
+        max_tokens=settings.max_tokens,
+        reasoning_effort=effort,
     )
 
 
@@ -2521,13 +2583,7 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
         raise LLMError("XAI_API_KEY mangler. Sæt den i miljøet eller i .env.")
 
     async def _run() -> TurnResult:
-        llm = ChatClient(
-            settings.base_url,
-            settings.api_key,
-            settings.model,
-            settings.llm_timeout,
-            max_tokens=settings.max_tokens,
-        )
+        llm = chat_client(settings)
         try:
             async with Client(
                 server_command(settings.tool_timeout),
