@@ -668,6 +668,24 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
                 "jobless",
             ),
         ),
+        # AUS08 is area x month. Age or sex belongs on a table that has those columns.
+        ("stilling", "aku", "alder", "køn", "koen", "sex", "age"),
+    ),
+    _TablePreference(
+        "AUF01",
+        (
+            (
+                "ledighed",
+                "ledige",
+                "arbejdsløshed",
+                "unemployment",
+                "unemployed",
+                "bruttoledighed",
+                "fuldtidsledige",
+                "jobless",
+            ),
+            ("alder", "køn", "koen", "sex", "age"),
+        ),
         ("stilling", "aku"),
     ),
     _TablePreference(

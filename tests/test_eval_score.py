@@ -1,0 +1,233 @@
+"""Scorer and verifier fixtures. No xAI call and no Statistikbanken call."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from evals.score import Truth, classify, cost_usd, parse_numbers, prices_from_env, render_report
+from evals.verify import evaluate_check
+
+from statistikbanken_mcp.web import NO_DATA_ANSWER, UNVERIFIED_NUMBERS
+
+QUESTIONS = Path(__file__).resolve().parents[1] / "evals" / "questions.json"
+
+
+def _result(answer: str, facts=None, calls=None, **extra):
+    payload = {
+        "answer": answer,
+        "facts": facts or [],
+        "calls": calls or [],
+        "show_numbers": True,
+        "suggestions": [],
+        "error": None,
+    }
+    payload.update(extra)
+    return payload
+
+
+def _fact(value, table="FOLK1A", period="2026K3"):
+    return {"table": table, "period": period, "value": value}
+
+
+def test_parses_danish_and_english_numbers() -> None:
+    assert parse_numbers("Der bor 58.381 personer.") == [58381]
+    assert parse_numbers("7,7 procent og 102.6") == [7.7, 102.6]
+    assert parse_numbers("12.190 tusind, English 1,234.5") == [12190, 1234.5]
+    assert parse_numbers("faldet er -10,2") == [-10.2]
+    assert parse_numbers("0-6 år i 2026K3") == [0, 6]
+    assert 58381 in parse_numbers("5 045 og 58.381")
+
+
+def test_figures_taxonomy() -> None:
+    question = {"question": "Hvor mange?", "expect": {"kind": "figures"}}
+    truth = [Truth("FOLK1A", [58381], ["2026K3"])]
+    assert classify(question, _result("58.381 indbyggere."), truth) == "correct"
+    hidden = _result(UNVERIFIED_NUMBERS, [_fact(58381)])
+    assert classify(question, hidden, truth) == "guard_hid_correct_answer"
+    assert classify(question, _result(NO_DATA_ANSWER), truth) == "no_answer"
+    wrong_table = _result(
+        "6.977",
+        [_fact(6977, "FOLK1C", "2026K3")],
+        [{"name": "hent_data", "arguments": json.dumps({"table": "FOLK1C"})}],
+    )
+    assert classify(question, wrong_table, truth) == "wrong_table"
+    wrong_period = _result("20.064", [_fact(20064, "BIL55", "2026M09")])
+    year = [Truth("BIL55", [185394], ["2025"])]
+    assert classify(question, wrong_period, year) == "wrong_period"
+    wrong_number = _result("1.000", [_fact(1000, "FOLK1A", "2026K3")])
+    assert classify(question, wrong_number, truth) == "wrong_number"
+    assert classify(question, _result("", error="timed out"), truth) == "timeout_error"
+
+
+def test_edge_behaviours() -> None:
+    gap = {"question": "Hvor mange bor der i Narnia?", "expect": {"kind": "no_table"}}
+    assert classify(gap, _result(NO_DATA_ANSWER), []) == "correct"
+    assert classify(gap, _result("Der bor 58.381."), []) == "edge_behaviour_wrong"
+    future = {
+        "question": "Hvor mange indbyggere havde Gentofte Kommune i 1. kvartal 2030?",
+        "expect": {"kind": "not_published"},
+    }
+    assert (
+        classify(future, _result("1. kvartal 2030 er ikke offentliggjort endnu."), []) == "correct"
+    )
+    assert classify(future, _result("75.241"), []) == "edge_behaviour_wrong"
+    broad = {"question": "Hvordan går det med Danmark?", "expect": {"kind": "too_broad"}}
+    assert classify(broad, _result("Spørgsmålet er for bredt."), []) == "correct"
+    assert classify(broad, _result("", facts=[_fact(6000000)]), []) == "edge_behaviour_wrong"
+    dogs = {"question": "Hvor mange hunde bor i Lynge?", "expect": {"kind": "not_available"}}
+    assert classify(dogs, _result("Statistikbanken har ikke tal for hunde."), []) == "correct"
+    assert classify(dogs, _result("Der bor 400 hunde."), []) == "edge_behaviour_wrong"
+
+
+def test_owner_partial_and_lower_bound() -> None:
+    partial = {
+        "question": "Median indkomst i Danmark vs Sverige.",
+        "expect": {"kind": "partial"},
+    }
+    truth = [Truth("INDKP201", [351100], ["2025"])]
+    good = "Medianen i Danmark er 351.100 kr. Sverige er ikke i Statistikbanken."
+    assert classify(partial, _result(good), truth) == "correct"
+    assert classify(partial, _result("Medianen er 351.100 kr."), truth) == "edge_behaviour_wrong"
+    invented = "Danmark 351.100 og Sverige 400.000."
+    assert classify(partial, _result(invented), truth) == "edge_behaviour_wrong"
+    approximate = {
+        "question": "Hvor mange børn bor der i København der lever med mere end 2 voksne?",
+        "expect": {"kind": "approximate"},
+    }
+    bound = [Truth("FAM133N", [7655], ["2026"])]
+    stated = "Mindst 7.655. Optællingen er ufuldstændig, fordi 6 personer og derover er topkodet."
+    assert classify(approximate, _result(stated), bound) == "correct"
+    assert classify(approximate, _result("Der er 7.655 børn."), bound) == "edge_behaviour_wrong"
+    assert (
+        classify(approximate, _result("Det kan ikke opgøres ud fra Statistikbanken."), bound)
+        == "correct"
+    )
+
+
+def test_verifier_sums_only_the_named_cells() -> None:
+    check = {
+        "table": "FAM133N",
+        "variables": {"OMRÅDE": ["101"], "ALDER": {"from": 0, "to": 1}},
+        "time": "latest",
+        "aggregate": "sum",
+        "sum_where": [
+            {"ANTPERSH": "4", "ANTBORNH": "1"},
+            {"ANTPERSH": "6-", "ANTBORNH": "3"},
+        ],
+    }
+
+    def fetch_rows(table, variables):
+        assert table == "FAM133N"
+        assert variables["Tid"] == ["2026"]
+        assert "4" in variables["ANTPERSH"] and "6-" in variables["ANTPERSH"]
+        return [
+            {"ANTPERSH": "4", "ANTBORNH": "1", "ALDER": "0", "TID": "2026", "value": 10},
+            {"ANTPERSH": "4", "ANTBORNH": "2", "ALDER": "0", "TID": "2026", "value": 99},
+            {"ANTPERSH": "6-", "ANTBORNH": "3", "ALDER": "1", "TID": "2026", "value": 7},
+        ]
+
+    def time_codes(table):
+        return "Tid", ["2025", "2026"]
+
+    truth = evaluate_check(check, fetch_rows=fetch_rows, time_codes=time_codes)
+    assert truth.values == [17]
+    assert truth.periods == ["2026"]
+
+
+def test_a_year_total_is_not_the_latest_month() -> None:
+    check = {
+        "table": "BIL55",
+        "variables": {"REGBIL": ["4000101002"]},
+        "time": {"year": "2025", "grain": "month"},
+        "aggregate": "sum",
+    }
+
+    def fetch_rows(table, variables):
+        assert variables["Tid"] == [f"2025M{month:02d}" for month in range(1, 13)]
+        return [{"TID": code, "value": 1} for code in variables["Tid"]]
+
+    def time_codes(table):
+        months = [f"2025M{month:02d}" for month in range(1, 13)]
+        return "Tid", months + ["2026M09"]
+
+    truth = evaluate_check(check, fetch_rows=fetch_rows, time_codes=time_codes)
+    assert truth.values == [12]
+    assert truth.periods == ["2025"]
+
+
+def test_cost_uses_list_prices_and_counts_reasoning_as_output() -> None:
+    prices = prices_from_env()
+    # 10 fresh input tokens, 90 cached, 4 completion, 6 reasoning.
+    spent = cost_usd(prompt=100, cached=90, completion=4, reasoning=6, prices=prices)
+    expected = 10 * 1.25 / 1_000_000 + 90 * 0.20 / 1_000_000 + 10 * 2.50 / 1_000_000
+    assert spent == expected
+    assert "docs.x.ai" in prices.source
+
+
+def test_report_headline_counts_only_correct() -> None:
+    prices = prices_from_env()
+    records = [
+        {
+            "id": 1,
+            "category": "municipality",
+            "outcome": "correct",
+            "answer": "58.381",
+            "tables": ["FOLK1A"],
+            "latency_s": 10,
+            "prompt_tokens": 100,
+            "cached_tokens": 40,
+            "completion_tokens": 5,
+            "reasoning_tokens": 5,
+            "source": "regression",
+        },
+        {
+            "id": 63,
+            "category": "annual_aggregate",
+            "outcome": "wrong_period",
+            "answer": "20.064 i september",
+            "tables": ["BIL55"],
+            "latency_s": 30,
+            "prompt_tokens": 100,
+            "cached_tokens": 0,
+            "completion_tokens": 0,
+            "reasoning_tokens": 0,
+            "source": "regression",
+        },
+    ]
+    report = render_report(
+        records,
+        {
+            "date": "2026-11-03",
+            "model": "grok-4",
+            "served_model": "grok-4.3",
+            "set_size": 105,
+            "prices": prices,
+        },
+    )
+    assert "**1/2 correct**" in report
+    assert "| timeout/error | 0 |" in report
+    assert "| wrong_period | 1 |" in report
+    assert "Q63" in report
+
+
+def test_question_file_is_the_fixed_set() -> None:
+    questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
+    assert [item["id"] for item in questions] == list(range(1, 106))
+    by_id = {item["id"]: item for item in questions}
+    assert by_id[63]["expect"]["checks"][0]["aggregate"] == "sum"
+    assert by_id[63]["expect"]["checks"][0]["time"]["year"] == "2025"
+    owner = [item for item in questions if item.get("source") == "owner"]
+    assert [item["id"] for item in owner] == [101, 102, 103, 104, 105]
+    assert {item["category"] for item in owner} == {"hard/ambiguous"}
+    assert by_id[101]["expect"]["kind"] == "approximate"
+    assert by_id[101]["expect"]["checks"][0]["table"] == "FAM133N"
+    assert by_id[102]["expect"]["checks"][0]["variables"]["FAMTYP"] == ["EKMB"]
+    assert by_id[103]["expect"]["kind"] == "not_available"
+    assert by_id[103]["expect"].get("checks") is None
+    assert by_id[104]["expect"]["kind"] == "partial"
+    assert by_id[104]["expect"]["checks"][0]["table"] == "INDKP201"
+    ages = by_id[105]["expect"]["checks"][0]["variables"]["ALDER"]
+    assert ages == {"from": 23, "to": 45}
+    assert by_id[80]["expect"]["kind"] == "no_table"
+    assert by_id[96]["expect"]["kind"] == "too_broad"

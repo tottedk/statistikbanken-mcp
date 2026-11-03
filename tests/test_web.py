@@ -553,6 +553,8 @@ def test_unpublished_note_drops_a_danish_figure_instead_of_cutting_it() -> None:
             "og viser 120.000 ledige."
         ),
         "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026: 1.234,5.",
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 med ca 93.573.",
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 (1.234.",
     )
     for prose in cases:
         guarded = guard_answer(question, prose, [fact])
@@ -565,6 +567,8 @@ def test_unpublished_note_drops_a_danish_figure_instead_of_cutting_it() -> None:
         assert "1.234" not in note
         assert "234" not in note
         assert "573" not in note
+        assert not note.rstrip().endswith("ca")
+        assert "(" not in note
     quarter = guard_answer(
         question,
         "3. kvartal 2026 er ikke offentliggjort endnu; seneste er september 2026.",
@@ -881,8 +885,8 @@ def test_a_miss_shows_did_you_mean_in_the_answer_payload() -> None:
         )
     )
     assert search.suggestions == [
-        "No table matches 'enhjørninger'. Try fewer words, or a subject such as "
-        "'befolkning', 'indkomst' or 'priser'."
+        "Ingen tabel matcher 'enhjørninger'. Prøv færre ord, eller et emne som "
+        "'befolkning', 'indkomst' eller 'priser'."
     ]
     calls = [
         {
@@ -913,8 +917,8 @@ def test_a_miss_shows_did_you_mean_in_the_answer_payload() -> None:
         ],
     )
     assert wrapped.suggestions == [
-        "No table matches 'Narnia'. Try fewer words, or a subject such as "
-        "'befolkning', 'indkomst' or 'priser'."
+        "Ingen tabel matcher 'Narnia'. Prøv færre ord, eller et emne som "
+        "'befolkning', 'indkomst' eller 'priser'."
     ]
     prefixed = _turn(
         "Hvor mange bor i Lyngby?",

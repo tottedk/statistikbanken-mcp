@@ -1387,6 +1387,7 @@ def _turn(
 
 
 _DID_YOU_MEAN_RE = re.compile(r"Did you mean ([^?]+)\?")
+_NO_TABLE_RE = re.compile(r"No table matches (?P<query>'[^']*'|\"[^\"]*\")")
 _NOT_FOUND_STARTS = ("No table matches", "Unknown table", "Unknown value")
 # The MCP client prefixes a tool failure with "Error executing tool <name>:".
 _TOOL_ERROR_RE = re.compile(r"^(?:Error executing tool\b[^:]*:\s*)+", re.IGNORECASE)
@@ -1403,6 +1404,14 @@ def _lookup_suggestions(calls: list[dict[str, str]]) -> list[str]:
         meant = _DID_YOU_MEAN_RE.findall(result)
         if meant:
             lines.extend(f"Mente du {item.strip()}?" for item in meant)
+            continue
+        missed = _NO_TABLE_RE.search(result)
+        if missed:
+            quoted = missed.group("query")
+            lines.append(
+                f"Ingen tabel matcher {quoted}. Prøv færre ord, eller et emne som "
+                "'befolkning', 'indkomst' eller 'priser'."
+            )
             continue
         if result.startswith(_NOT_FOUND_STARTS):
             parts = re.split(r"(?<=\.)\s+", result)
@@ -1560,9 +1569,11 @@ def guard_answer(
 
 
 _NOTE_GLUE_RE = re.compile(
-    r"(?:\s*(?:,|;|:|—|-)?\s*\b(?:med|og|viser|showing|shows|show|er|på|pa|of|with|at)\b\s*)+$",
+    r"(?:\s*(?:,|;|:|—|-)?\s*\b(?:med|og|viser|showing|shows|show|er|på|pa|of|with|at|"
+    r"ca|cirka|about|approx|approximately)\b\.?\s*)+$",
     re.IGNORECASE,
 )
+_DANGLING_OPEN_RE = re.compile(r"[\s(\[{]+$")
 _QUARTER_WORD_RE = re.compile(
     r"\s*\.?\s*(?:kvartal|kvt|halvår|halvaar)\b",
     re.IGNORECASE,
@@ -1609,6 +1620,7 @@ def _without_unchecked_figures(note: str) -> str:
         cut = match.start()
         break
     kept = _NOTE_GLUE_RE.sub("", note[:cut])
+    kept = _DANGLING_OPEN_RE.sub("", kept)
     kept = re.sub(r"\s{2,}", " ", kept)
     return kept.strip(" \t;:—-,")
 

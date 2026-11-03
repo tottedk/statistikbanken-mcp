@@ -829,6 +829,12 @@ def test_registered_unemployment_ranks_aus08_first(query: str) -> None:
             assert ids.index("AUS08") < ids.index(other), (query, ids)
 
 
+def test_unemployment_by_age_and_sex_is_not_the_area_table() -> None:
+    hit = find_tabel("ledighed efter alder og koen", limit=5)[0]
+    assert hit["id"] == "AUF01"
+    assert any("alder" in name.casefold() for name in hit["variables"])
+
+
 def test_job_vacancies_are_not_ranked_as_unemployment() -> None:
     assert find_tabel("ledige stillinger", limit=1)[0]["id"].startswith("LSK")
 
