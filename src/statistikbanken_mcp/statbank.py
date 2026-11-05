@@ -468,16 +468,28 @@ class StatbankClient:
         return parsed
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:
-        try:
-            response = self._http.post(path, json=payload)
-        except httpx.TimeoutException as exc:
-            raise StatbankError(
-                "Statistikbanken did not respond in time. Try a smaller request."
-            ) from exc
-        except httpx.HTTPError as exc:
+        response: httpx.Response | None = None
+        for attempt in range(2):
+            try:
+                response = self._http.post(path, json=payload)
+                break
+            except httpx.TimeoutException as exc:
+                if attempt == 0:
+                    continue
+                raise StatbankError(
+                    "Statistikbanken did not respond in time. Try a smaller request."
+                ) from exc
+            except httpx.HTTPError as exc:
+                # A dropped connection is the same class of failure as a timeout.
+                if attempt == 0 and type(exc).__name__ == "RemoteProtocolError":
+                    continue
+                raise StatbankError(
+                    "Could not reach Statistikbanken (https://api.statbank.dk). Try again."
+                ) from exc
+        if response is None:
             raise StatbankError(
                 "Could not reach Statistikbanken (https://api.statbank.dk). Try again."
-            ) from exc
+            )
         if response.status_code >= 400:
             try:
                 payload_error = response.json()

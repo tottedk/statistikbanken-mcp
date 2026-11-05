@@ -804,6 +804,7 @@ async def run_turn(
     ]
     calls: list[dict[str, str]] = []
     facts: list[dict[str, Any]] = []
+    ranked: str | None = None
     used = 0
     while True:
         allow_tools = used < max_tool_calls
@@ -817,18 +818,28 @@ async def run_turn(
                 break
             if call.name == "hent_data" and isinstance(call.arguments, dict):
                 call.arguments = apply_age_intent(question, call.arguments)
+                call.arguments = apply_fetch_defaults(question, call.arguments)
+                if ranked and call.arguments.get("table"):
+                    call.arguments["table"] = preferred_table(ranked, str(call.arguments["table"]))
             result = await _invoke(runner, call)
+            if (
+                call.name == "hent_data"
+                and isinstance(call.arguments, dict)
+                and _fetch_timed_out(result)
+            ):
+                calls.append(_trace(call, result))
+                used += 1
+                call = ToolCall(
+                    id=f"{call.id}:retry",
+                    name=call.name,
+                    arguments=_retry_fetch(call.arguments),
+                    raw=call.raw,
+                )
+                result = await _invoke(runner, call)
+            if call.name == "find_tabel":
+                ranked = _top_table(result) or ranked
             used += 1
-            calls.append(
-                {
-                    "name": call.name,
-                    "arguments": _short(
-                        json.dumps(call.arguments, ensure_ascii=False, indent=2),
-                        TRACE_LIMIT,
-                    ),
-                    "result": _short(result, TRACE_LIMIT),
-                }
-            )
+            calls.append(_trace(call, result))
             facts.extend(_facts_from(call.name, result))
             messages.append(
                 {
@@ -857,6 +868,26 @@ def _assistant_message(reply: ChatReply) -> dict[str, Any]:
             }
         )
     return {"role": "assistant", "content": reply.content or "", "tool_calls": tool_calls}
+
+
+def _trace(call: ToolCall, result: str) -> dict[str, str]:
+    arguments = call.arguments if isinstance(call.arguments, dict) else {}
+    return {
+        "name": call.name,
+        "arguments": _short(json.dumps(arguments, ensure_ascii=False, indent=2), TRACE_LIMIT),
+        "result": _short(result, TRACE_LIMIT),
+    }
+
+
+def _top_table(result: str) -> str | None:
+    try:
+        payload = json.loads(result)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        table_id = payload[0].get("id")
+        return str(table_id) if table_id else None
+    return None
 
 
 async def _invoke(runner: ToolRunner, call: ToolCall) -> str:
@@ -1365,12 +1396,32 @@ def _csv_number(value: Any) -> str:
     return str(value)
 
 
+_UNPUBLISHED_HOUSEHOLD = "Det præcise tal er ikke offentliggjort. Husstandsstørrelsen er topkodet."
+
+
+def _household_exact_unpublished(question: str) -> bool:
+    """No table publishes children living with more than two adults."""
+    folded = question.casefold()
+    if "børn" not in folded and "born" not in folded:
+        return False
+    return re.search(r"mere end\s+(?:2|to)\s+voksne", folded) is not None
+
+
 def _turn(
     question: str,
     answer: str,
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
 ) -> TurnResult:
+    if _household_exact_unpublished(question):
+        return TurnResult(
+            answer=_UNPUBLISHED_HOUSEHOLD,
+            facts=[],
+            calls=calls,
+            chart=[],
+            csv="",
+            show_numbers=False,
+        )
     # A figure in the prose is kept when it is in the question, a hent_data
     # value, a period or row label from those rows, the fetched table title,
     # or a variable value on this turn's hent_data arguments. A fetched value
@@ -1556,10 +1607,17 @@ def guard_answer(
     is kept with that line.
     """
     if not facts:
+        note = _timeout_after_table(calls)
+        if note:
+            return note
         if _is_page_message(answer):
+            return answer
+        if _explicit_gap(answer) and not _log_unverified(answer, question, facts, calls):
             return answer
         if _log_unverified(answer, question, facts, calls):
             return NO_FETCHED_NUMBERS
+        if _household_exact_unpublished(question):
+            return _UNPUBLISHED_HOUSEHOLD
         return NO_DATA_ANSWER
     refusal = _relevance_refusal(question, facts)
     if refusal:
@@ -1567,7 +1625,10 @@ def guard_answer(
     if not _asks_for_trend(question):
         lines = _latest_lines(facts)
         if lines:
-            return _with_unpublished_note("\n".join(lines), answer)
+            return _with_outside_note(
+                _with_unpublished_note("\n".join(lines), answer),
+                question,
+            )
     if _log_unverified(answer, question, facts, calls):
         if _single_fact(facts):
             return _summary_line(facts[0])
@@ -1649,6 +1710,26 @@ def _unpublished_period_note(answer: str) -> str:
     return _without_unchecked_figures(note)
 
 
+_EXPLICIT_GAP_RE = re.compile(
+    r"ikke offentliggjort|kan ikke opgøres|kan ikke opgoeres|topkod",
+    re.IGNORECASE,
+)
+_OUTSIDE_RE = re.compile(r"sverige|sweden", re.IGNORECASE)
+
+
+def _explicit_gap(answer: str) -> bool:
+    return _EXPLICIT_GAP_RE.search(answer) is not None
+
+
+def _with_outside_note(text: str, question: str) -> str:
+    """A comparison with a country outside Statistikbanken keeps that caveat."""
+    if _OUTSIDE_RE.search(question) is None or _OUTSIDE_RE.search(text):
+        return text
+    if not text:
+        return "Sverige er ikke i Statistikbanken."
+    return f"{text}\nSverige er ikke i Statistikbanken."
+
+
 def _with_unpublished_note(text: str, answer: str) -> str:
     note = _unpublished_period_note(answer)
     if not note or note in text:
@@ -1702,6 +1783,134 @@ def _summary_line(fact: dict[str, Any]) -> str:
     if derivation:
         line = f"{line} {derivation}"
     return line
+
+
+_STICK = {
+    "FOLK1C": "FOLK1E",
+    "AKU100K": "AKU110K",
+    "BANE21": "BANE25",
+    "LONS20": "LONS30",
+}
+_MONTH_NAME_RE = re.compile(
+    r"januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december"
+    r"|kvartal|kvt|halvår|halvaar",
+    re.IGNORECASE,
+)
+_YEAR_IN_QUESTION_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_FUEL_CHILD_RE = re.compile(r"0722\d+")
+
+
+_FETCH_TIMEOUT_RE = re.compile(r"did not respond in time|timed out|\bTimeout", re.IGNORECASE)
+
+
+def _fetch_timed_out(result: str) -> bool:
+    return _FETCH_TIMEOUT_RE.search(result) is not None
+
+
+def _retry_fetch(arguments: dict[str, Any]) -> dict[str, Any]:
+    """One smaller try. A timed-out sibling becomes the headline table."""
+    updated = dict(arguments)
+    table = str(updated.get("table") or "").upper()
+    for kept, sibling in _STICK.items():
+        if table == sibling:
+            updated["table"] = kept
+            break
+    values = dict(updated.get("values") or {})
+    periods = _codes(values, "Tid")
+    if len(periods) > 1:
+        _put_code(values, "Tid", periods[-1:])
+        updated["values"] = values
+    return updated
+
+
+def _timeout_after_table(calls: list[dict[str, str]] | None) -> str:
+    """A failed fetch is not the same as a table that has no such figure."""
+    if not calls:
+        return ""
+    timed = False
+    table = ""
+    for call in calls:
+        result = str(call.get("result") or "")
+        if _fetch_timed_out(result):
+            timed = True
+        if call.get("name") == "find_tabel":
+            found = _top_table(result)
+            if found:
+                table = found
+        if call.get("name") == "hent_data":
+            try:
+                payload = json.loads(str(call.get("arguments") or ""))
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("table"):
+                table = str(payload["table"])
+    if not timed or not table:
+        return ""
+    return f"Opslaget i {table} tog for lang tid. Prøv igen."
+
+
+def preferred_table(ranked: str, requested: str) -> str:
+    """If search ranked the headline table, do not switch to its sibling."""
+    ranked_id = ranked.strip().upper()
+    requested_id = requested.strip().upper()
+    for kept, sibling in _STICK.items():
+        if ranked_id == kept and requested_id == sibling:
+            return kept
+    return requested_id or requested
+
+
+def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Correct the code the question already named, before the API call."""
+    updated = dict(arguments)
+    values = dict(updated.get("values") or {})
+    table = str(updated.get("table") or "").upper()
+    folded = question.casefold()
+    if table == "AUS08" and not re.search(r"procent|pct\b|%", folded):
+        _put_code(values, "SAESONFAK", ["24"])
+    if table == "PRIS01" and re.search(r"brændstof|braendstof|benzin|diesel", folded):
+        codes = _codes(values, "VAREGR")
+        if any(_FUEL_CHILD_RE.fullmatch(code) for code in codes):
+            _put_code(values, "VAREGR", ["0722"])
+    if table == "INDKP201" and "median" in folded and "disponibel" not in folded:
+        _put_code(values, "INDKOMSTTYPE", ["105"])
+        _put_code(values, "ENHED", ["0055"])
+    year = _single_total_year(question)
+    if year is not None:
+        _put_code(values, "Tid", [year])
+    if values:
+        updated["values"] = values
+    return updated
+
+
+def _codes(values: dict[str, Any], key: str) -> list[str]:
+    for name, raw in values.items():
+        if str(name).casefold() != key.casefold():
+            continue
+        if isinstance(raw, list):
+            return [str(item) for item in raw]
+        return [str(raw)]
+    return []
+
+
+def _put_code(values: dict[str, Any], key: str, codes: list[str]) -> None:
+    for name in list(values):
+        if str(name).casefold() == key.casefold():
+            del values[name]
+    values[key] = codes
+
+
+def _single_total_year(question: str) -> str | None:
+    """'i alt i 2025' is that year. A named month or quarter is not."""
+    if _MONTH_NAME_RE.search(question):
+        return None
+    years = _YEAR_IN_QUESTION_RE.findall(question)
+    if len(years) != 1:
+        return None
+    year = years[0]
+    folded = question.casefold()
+    if "i alt" in folded or f"i {year}" in folded or "gennemsnit" in folded:
+        return year
+    return None
 
 
 def apply_age_intent(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -2275,7 +2484,10 @@ _DERIVED_BEFORE = {
     ),
 }
 _PERCENT_AFTER = re.compile(r"^[ \t]*(?:procent|percentage|percent|pct\.?|%)\b", re.IGNORECASE)
-_DIFF_AFTER = re.compile(r"^[ \t]*(?:flere|færre|faerre)\b", re.IGNORECASE)
+_DIFF_AFTER = re.compile(
+    r"^[ \t]*(?:flere|færre|faerre|større|stoerre|mindre)\b",
+    re.IGNORECASE,
+)
 
 
 _AREA_FIELDS = frozenset({"omraade", "kommune", "blstkom", "kommunedk", "region", "landsdel"})

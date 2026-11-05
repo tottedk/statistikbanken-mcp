@@ -612,6 +612,28 @@ def test_omitted_dwelling_status_adds_occupied_and_unoccupied_only() -> None:
     assert _headline_sums(table, explicit) == []
 
 
+def test_a_timed_out_post_is_tried_once_more() -> None:
+    from statistikbanken_mcp.statbank import StatbankClient
+
+    calls = {"n": 0}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.TimeoutException("timed out", request=request)
+        return httpx.Response(200, json={"ok": True})
+
+    client = StatbankClient(
+        httpx.Client(
+            base_url="https://api.statbank.dk/v1",
+            transport=httpx.MockTransport(handle),
+        )
+    )
+    assert client._post("data", {"table": "FOLK1A"}) == {"ok": True}
+    assert calls["n"] == 2
+    client.close()
+
+
 def test_year_on_a_flow_table_is_the_sum() -> None:
     result = hent_data("STRAF10", {"OVERTRÆD": ["1"], "Tid": ["2025"]})
     assert result["rows"] == [
