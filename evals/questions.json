@@ -729,10 +729,23 @@
           },
           "time": "latest",
           "aggregate": "values"
+        },
+        {
+          "table": "INDOPH1",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "OPHGR1": [
+              "0000"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
         }
       ]
     },
-    "note": "FOLK1C code 4 is all immigrants. FOLK1E splits them in two; the sum is the same figure."
+    "note": "FOLK1C code 4 is the quarterly immigrant stock. INDOPH1 is the 1 January stock and is also accepted."
   },
   {
     "id": 34,
@@ -1150,6 +1163,22 @@
           "aggregate": "mean"
         },
         {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "SAESONFAK": [
+              "10"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "month"
+          },
+          "aggregate": "mean"
+        },
+        {
           "table": "AUF01",
           "variables": {
             "OMRÅDE": [
@@ -1167,7 +1196,7 @@
         }
       ]
     },
-    "note": "Mean of the 12 months of 2025. AUS08 code 24 or AUF01 gross unemployment."
+    "note": "Mean of the 12 months of 2025. AUS08 code 24 (actual), code 10 (seasonally adjusted), or AUF01."
   },
   {
     "id": 51,
@@ -2155,6 +2184,19 @@
           "aggregate": "values"
         },
         {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "SAESONFAK": [
+              "10"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
           "table": "AUF01",
           "variables": {
             "OMRÅDE": [
@@ -2169,7 +2211,7 @@
         }
       ]
     },
-    "note": "English wording. Same two official unemployment counts as the Danish monthly question."
+    "note": "English wording. AUS08 code 24, AUS08 code 10 (seasonally adjusted headline), or AUF01."
   },
   {
     "id": 96,

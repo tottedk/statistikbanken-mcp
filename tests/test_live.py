@@ -259,6 +259,20 @@ def test_unemployment_and_hyphen_search_live(live_client: StatbankClient) -> Non
         find_tabel("zzzz-qqqq")
 
 
+def test_new_cars_and_gentofte_dwellings_match_the_known_totals(
+    live_client: StatbankClient,
+) -> None:
+    cars = hent_data("BIL55", {"REGBIL": ["4000101002"], "Tid": ["2025"]})
+    assert cars["rows"][0]["Tid"] == "2025"
+    assert cars["rows"][0]["value"] == 185394
+    assert cars["rows"][0]["year_total"]["method"] == "sum"
+    homes = hent_data("BOL101", {"OMRÅDE": ["157"]})
+    assert len(homes["rows"]) == 1
+    assert homes["rows"][0]["value"] == 36145
+    note = " ".join(homes["notes"]).casefold()
+    assert "holiday" in note or "fritid" in note
+
+
 def test_year_total_matches_the_quarters_live(live_client: StatbankClient) -> None:
     quarters = hent_data(
         "FOLK1A",

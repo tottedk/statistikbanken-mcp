@@ -88,7 +88,17 @@ A Danish question gets a Danish answer, even if the tool text is English.
 Do not answer in English when the question is Danish.
 Write Danish numbers with a dot as the thousands separator: 5.045, never 5,045.
 Write periods like 1. kvartal 2015 or 2015 1. kvt., marts 2015, or 2015 1. halvår.
-A year stays 2015. Do not write 2015K1 or 2026Q3."""
+A year stays 2015. Do not write 2015K1 or 2026Q3.
+If find_tabel returned a table, call hent_data, or name the concrete blocker.
+Do not say there are no figures.
+A question with no metric asks which figure is wanted. Do not choose a population number.
+When only one side of a comparison is in Statistikbanken,
+give that figure and say the other is not covered.
+steget, faldet, or ændret asks for the change: use the change unit,
+or the first and last value of one series.
+Do not answer with the index level alone.
+A named year is the Tid code for that year, such as 2025.
+Do not pass an open >= range for one year."""
 
 
 _DANISH_MONTHS = (
@@ -2746,10 +2756,18 @@ class McpRunner:
         return "\n".join(parts)
 
 
-def answer_with_server(settings: Settings, question: str) -> TurnResult:
-    if settings.llm == "xai" and not settings.api_key:
-        raise LLMError("XAI_API_KEY mangler. Sæt den i miljøet eller i .env.")
+def _transient(exc: BaseException) -> bool:
+    """One retry is worth it for a dropped model call or a dead MCP session."""
+    for leaf in _unwrap(exc):
+        if isinstance(leaf, (LLMError, TimeoutError, ConnectionError)):
+            return True
+        folded = type(leaf).__name__.casefold()
+        if "timeout" in folded or "mcperror" in folded or folded.startswith("connect"):
+            return True
+    return False
 
+
+def _answer_once(settings: Settings, question: str) -> TurnResult:
     async def _run() -> TurnResult:
         llm = chat_client(settings)
         try:
@@ -2769,6 +2787,17 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
             llm.close()
 
     return asyncio.run(_run())
+
+
+def answer_with_server(settings: Settings, question: str) -> TurnResult:
+    if settings.llm == "xai" and not settings.api_key:
+        raise LLMError("XAI_API_KEY mangler. Sæt den i miljøet eller i .env.")
+    try:
+        return _answer_once(settings, question)
+    except Exception as exc:
+        if not _transient(exc):
+            raise
+        return _answer_once(settings, question)
 
 
 def check_settings(settings: Settings) -> None:

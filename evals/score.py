@@ -315,12 +315,31 @@ def _score_partial(result: dict[str, Any], truths: list[Truth]) -> str:
     return "edge_behaviour_wrong"
 
 
+# A generic "ingen tal" give-up is not an explanation that the exact count is unpublished.
+_EXACT_UNPUBLISHED = (
+    "ikke opgjort",
+    "kan ikke opgøres",
+    "kan ikke opgoeres",
+    "ikke præcis",
+    "ikke praecis",
+    "det præcise",
+    "det praecise",
+    "ikke en kategori",
+    "topkod",
+    "exact count",
+    "ikke offentliggjort",
+)
+
+
 def _score_approximate(
     question: dict[str, Any],
     result: dict[str, Any],
     truths: list[Truth],
 ) -> str:
-    """A lower bound with a caveat, or an honest statement that the exact count is unpublished."""
+    """A lower bound with a caveat, or a specific reason the exact count is unpublished.
+
+    The fixed no-data sentence is not that reason. It also covers a search miss.
+    """
     if not truths:
         return "timeout_error"
     stated = _stated(result)
@@ -331,7 +350,7 @@ def _score_approximate(
         if has_bound and any(phrase in text for phrase in _LOWER_BOUND_PHRASES):
             return "correct"
         return "edge_behaviour_wrong"
-    if any(phrase in text for phrase in _GAP_PHRASES):
+    if any(phrase in text for phrase in _EXACT_UNPUBLISHED):
         return "correct"
     return "edge_behaviour_wrong"
 
@@ -352,10 +371,11 @@ def _score_clarify(question: dict[str, Any], result: dict[str, Any], truths: lis
 
 
 def _score_not_published(result: dict[str, Any]) -> str:
+    answer = str(result.get("answer") or "")
     text = _visible(result).casefold()
-    if _is_no_data(str(result.get("answer") or "")) or any(
-        phrase in text for phrase in _UNPUBLISHED_PHRASES
-    ):
+    if _is_placeholder(answer) and " ".join(answer.split()) == " ".join(NO_FETCHED_NUMBERS.split()):
+        return "correct"
+    if _is_no_data(answer) or any(phrase in text for phrase in _UNPUBLISHED_PHRASES):
         return "correct"
     return "edge_behaviour_wrong"
 

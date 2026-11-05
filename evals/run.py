@@ -23,7 +23,6 @@ from zoneinfo import ZoneInfo
 from evals.score import classify, cost_usd, parse_numbers, prices_from_env, render_report
 from evals.verify import VerifierError, truths_for
 from statistikbanken_mcp import web
-from statistikbanken_mcp.web import LLMError
 
 ROOT = Path(__file__).resolve().parent
 QUESTIONS = ROOT / "questions.json"
@@ -164,10 +163,10 @@ def _run_one(settings: web.Settings, question: dict[str, Any]) -> dict[str, Any]
         try:
             answer = web.answer_with_server(settings, str(question["question"]))
             result = dataclasses.asdict(answer)
-        except LLMError as exc:
-            error = _redact(str(exc))
         except Exception as exc:
-            error = _redact(f"{type(exc).__name__}: {exc}")
+            leaf = web._unwrap(exc)
+            shown = leaf[-1] if leaf else exc
+            error = _redact(f"{type(shown).__name__}: {shown}")
     finally:
         web._parse_reply = original
     latency = round(time.perf_counter() - started, 2)

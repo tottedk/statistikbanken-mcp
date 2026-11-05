@@ -180,6 +180,11 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "is allowed when it is computed" in SYSTEM_PROMPT
     assert "Refer to areas and categories by name, not by code." in SYSTEM_PROMPT
     assert "Do not open with the table id or the table title." in SYSTEM_PROMPT
+    assert "call hent_data, or name the concrete blocker" in SYSTEM_PROMPT
+    assert "no metric" in SYSTEM_PROMPT
+    assert "only one side of a comparison" in SYSTEM_PROMPT
+    assert "index level alone" in SYSTEM_PROMPT
+    assert "Do not pass an open >= range for one year." in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Esbjerg?")
     assert "Do not open with the table id or the table title." in single
     assert "2015 1. kvt." in single

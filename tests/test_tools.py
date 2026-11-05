@@ -541,6 +541,77 @@ def _title(text: str) -> dict[str, object]:
     return {"id": "X", "text": text, "variables": [], "active": True}
 
 
+def test_a_registration_title_is_a_flow_and_unemployment_is_a_level() -> None:
+    from statistikbanken_mcp.statbank import _one_measure
+
+    assert _one_measure("Nyregistrerede personbiler Antal") == "sum"
+    assert _one_measure("Fuldtidsledige (sæsonkorrigeret) -") == "average"
+
+
+def test_an_open_range_collapses_one_complete_year_and_keeps_a_long_series() -> None:
+    from statistikbanken_mcp.statbank import (
+        _collapse_years,
+        _plans_from_open_range,
+        _Table,
+        _Variable,
+    )
+
+    months = tuple(
+        {"id": f"2025M{month:02d}", "text": f"2025M{month:02d}"} for month in range(1, 13)
+    ) + tuple({"id": f"2026M{month:02d}", "text": f"2026M{month:02d}"} for month in range(1, 4))
+    table = _Table(
+        "BIL55",
+        "Nyregistrerede personbiler",
+        "",
+        "Antal",
+        None,
+        True,
+        (_Variable("Tid", "tid", False, True, months),),
+    )
+    rows = [{"Tid": f"2025M{month:02d}", "value": 10} for month in range(1, 13)]
+    rows += [{"Tid": f"2026M{month:02d}", "value": 1} for month in range(1, 4)]
+    plans = _plans_from_open_range(table, {"Tid": [">=2025M01"]}, rows)
+    collapsed, _notes = _collapse_years(table, rows, plans)
+    year = next(row for row in collapsed if row["Tid"] == "2025")
+    assert year["value"] == 120
+    assert year["year_total"]["method"] == "sum"
+    assert any(row["Tid"] == "2026M01" for row in collapsed)
+    long_rows = [{"Tid": f"{year}K1", "value": 1} for year in range(2016, 2027)]
+    assert _plans_from_open_range(table, {"Tid": [">=2016K1"]}, long_rows) == []
+
+
+def test_omitted_dwelling_status_adds_occupied_and_unoccupied_only() -> None:
+    from statistikbanken_mcp.statbank import _headline_sums, _Table, _Variable
+
+    table = _Table(
+        "BOL101",
+        "Boliger",
+        "",
+        "Antal",
+        None,
+        True,
+        (
+            _Variable(
+                "BEBO",
+                "beboertype",
+                False,
+                False,
+                (
+                    {"id": "1000", "text": "beboede"},
+                    {"id": "2000", "text": "ubeboede"},
+                    {"id": "5000", "text": "fritidshuse"},
+                ),
+            ),
+        ),
+    )
+    selections: dict[str, list[str]] = {}
+    sums = _headline_sums(table, selections)
+    assert selections["BEBO"] == ["1000", "2000"]
+    assert sums and "5000" not in sums[0][1]
+    explicit = {"BEBO": ["1000", "2000", "5000"]}
+    assert _headline_sums(table, explicit) == []
+
+
 def test_year_on_a_flow_table_is_the_sum() -> None:
     result = hent_data("STRAF10", {"OVERTRÆD": ["1"], "Tid": ["2025"]})
     assert result["rows"] == [
@@ -837,6 +908,41 @@ def test_unemployment_by_age_and_sex_is_not_the_area_table() -> None:
 
 def test_job_vacancies_are_not_ranked_as_unemployment() -> None:
     assert find_tabel("ledige stillinger", limit=1)[0]["id"].startswith("LSK")
+
+
+@pytest.mark.parametrize(
+    ("query", "table_id"),
+    [
+        ("elpris", "PRIS01"),
+        ("brændstof benzin og diesel", "PRIS01"),
+        ("aktive firmaer", "GF11"),
+        ("udlån fra folkebibliotekerne", "BIB3A"),
+        ("hvor mange boliger", "BOL101"),
+        ("ejerboliger", "BOL101"),
+        ("vareeksport", "UHM"),
+        ("kontanthjælp", "KY21"),
+        ("arbejdsstyrken ifølge AKU", "AKU100K"),
+        ("enlige mødre indkomst", "INDKF111"),
+        ("indvandrere i Rudersdal kommune", "FOLK1C"),
+    ],
+)
+def test_headline_topics_rank_the_preferred_table(query: str, table_id: str) -> None:
+    assert find_tabel(query, limit=5)[0]["id"] == table_id, query
+
+
+def test_preference_unless_turns_the_boost_off() -> None:
+    from statistikbanken_mcp.statbank import _preference_boost
+
+    assert _preference_boost("PRIS01", "elpris", set()) == 400
+    assert _preference_boost("PRIS01", "HICP inflation", set()) == 0
+    assert _preference_boost("GF11", "aktive firmaer", set()) == 400
+    assert _preference_boost("GF11", "nye virksomheder", set()) == 0
+    assert _preference_boost("BIB3A", "udlån folkebibliotek", set()) == 400
+    assert _preference_boost("BIB3A", "interurban udlån", set()) == 0
+    assert _preference_boost("BOL101", "hvor mange boliger", set()) == 400
+    assert _preference_boost("BOL101", "påbegyndte boliger", set()) == 0
+    assert _preference_boost("AKU100K", "arbejdsstyrken ifølge AKU", set()) == 400
+    assert _preference_boost("AKU100K", "AKU ledighed", set()) == 0
 
 
 def test_a_named_table_beats_the_preference() -> None:

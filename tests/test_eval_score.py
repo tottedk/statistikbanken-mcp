@@ -8,7 +8,7 @@ from pathlib import Path
 from evals.score import Truth, classify, cost_usd, parse_numbers, prices_from_env, render_report
 from evals.verify import evaluate_check
 
-from statistikbanken_mcp.web import NO_DATA_ANSWER, UNVERIFIED_NUMBERS
+from statistikbanken_mcp.web import NO_DATA_ANSWER, NO_FETCHED_NUMBERS, UNVERIFIED_NUMBERS
 
 QUESTIONS = Path(__file__).resolve().parents[1] / "evals" / "questions.json"
 
@@ -64,6 +64,17 @@ def test_edge_behaviours() -> None:
     gap = {"question": "Hvor mange bor der i Narnia?", "expect": {"kind": "no_table"}}
     assert classify(gap, _result(NO_DATA_ANSWER), []) == "correct"
     assert classify(gap, _result("Der bor 58.381."), []) == "edge_behaviour_wrong"
+    future = {
+        "question": "Hvor mange indbyggere havde Gentofte Kommune i 1. kvartal 2030?",
+        "expect": {"kind": "not_published"},
+    }
+    assert classify(future, _result(NO_FETCHED_NUMBERS), []) == "correct"
+    approximate = {
+        "question": "Hvor mange børn bor der i København der lever med mere end 2 voksne?",
+        "expect": {"kind": "approximate"},
+    }
+    bound = [Truth("FAM133N", [7655], ["2026"])]
+    assert classify(approximate, _result(NO_DATA_ANSWER), bound) == "edge_behaviour_wrong"
     future = {
         "question": "Hvor mange indbyggere havde Gentofte Kommune i 1. kvartal 2030?",
         "expect": {"kind": "not_published"},
@@ -231,3 +242,88 @@ def test_question_file_is_the_fixed_set() -> None:
     assert ages == {"from": 23, "to": 45}
     assert by_id[80]["expect"]["kind"] == "no_table"
     assert by_id[96]["expect"]["kind"] == "too_broad"
+    assert any(
+        check["variables"].get("SAESONFAK") == ["10"] for check in by_id[95]["expect"]["checks"]
+    )
+    assert any(
+        check["variables"].get("SAESONFAK") == ["10"] for check in by_id[50]["expect"]["checks"]
+    )
+    assert any(check["table"] == "INDOPH1" for check in by_id[33]["expect"]["checks"])
+
+
+def test_a_transient_group_is_retried_once_and_the_leaf_is_recorded(monkeypatch) -> None:
+    from evals.run import _run_one
+
+    from statistikbanken_mcp.web import LLM_TIMEOUT_TEXT, LLMError, Settings, TurnResult
+
+    calls = {"n": 0}
+
+    def once(_settings, _question):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ExceptionGroup(
+                "unhandled errors in a TaskGroup",
+                [LLMError(LLM_TIMEOUT_TEXT)],
+            )
+        return TurnResult(
+            answer="58.381",
+            facts=[{"table": "FOLK1A", "period": "2026K3", "value": 58381}],
+            calls=[],
+        )
+
+    monkeypatch.setattr("statistikbanken_mcp.web._answer_once", once)
+    monkeypatch.setattr(
+        "evals.run.truths_for",
+        lambda question, client=None: [Truth("FOLK1A", [58381.0], ["2026K3"])],
+    )
+    settings = Settings(
+        llm="xai",
+        base_url="https://api.x.ai/v1",
+        model="grok-4",
+        api_key="test-key",
+        host="127.0.0.1",
+        port=8080,
+        daily_cap=1,
+        per_minute=1,
+        max_question_chars=300,
+        max_tool_calls=8,
+        llm_timeout=45,
+        tool_timeout=30,
+    )
+    question = {
+        "id": 1,
+        "question": "Hvor mange?",
+        "category": "municipality",
+        "expect": {"kind": "figures", "checks": [{"table": "FOLK1A"}]},
+    }
+    record = _run_one(settings, question)
+    assert calls["n"] == 2
+    assert record["outcome"] == "correct"
+    assert record["error"] is None
+
+    calls["n"] = 0
+
+    def always_fail(_settings, _question):
+        calls["n"] += 1
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [LLMError(LLM_TIMEOUT_TEXT)],
+        )
+
+    monkeypatch.setattr("statistikbanken_mcp.web._answer_once", always_fail)
+    failed = _run_one(settings, question)
+    assert calls["n"] == 2
+    assert failed["outcome"] == "timeout_error"
+    assert "ExceptionGroup" not in (failed["error"] or "")
+    assert "LLMError" in (failed["error"] or "")
+
+    calls["n"] = 0
+
+    def not_transient(_settings, _question):
+        calls["n"] += 1
+        raise ValueError("nope")
+
+    monkeypatch.setattr("statistikbanken_mcp.web._answer_once", not_transient)
+    plain = _run_one(settings, question)
+    assert calls["n"] == 1
+    assert "ValueError" in (plain["error"] or "")
