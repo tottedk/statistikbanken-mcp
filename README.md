@@ -211,7 +211,7 @@ uv run python -m evals.run --ids 63,101-105
 uv run python -m evals.run --model grok-4 --out evals/reports/custom.md
 ```
 
-Set `XAI_API_KEY` in the environment, not in the repo. The key is not printed and not written to the report. The default model is `STATBANK_XAI_MODEL`, or `grok-4`. The report is `evals/reports/<date>-<model>.md` plus a `.jsonl` file next to it. That directory is gitignored.
+Set `XAI_API_KEY` in the environment, not in the repo. The key is not printed and not written to the report. The default model is `STATBANK_XAI_MODEL`, or `grok-4`. The report is `evals/reports/<date>-<model>.md` plus a `.jsonl` file next to it. That directory is gitignored. The M2 proof is `evals/reports/2026-11-05-grok-4.md`: 100/105, grok-4, $1.35.
 
 Prices default to the grok-4.3 rates on <https://docs.x.ai/docs/models>: input $1.25, cached input $0.20, and output $2.50 per million tokens. `grok-4` is served as grok-4.3, and reasoning tokens are billed as output. `XAI_PRICE_INPUT_PER_M`, `XAI_PRICE_CACHED_PER_M`, and `XAI_PRICE_OUTPUT_PER_M` override the defaults.
 
