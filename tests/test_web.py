@@ -180,6 +180,11 @@ def test_prompt_requires_the_question_language_and_danish_periods() -> None:
     assert "is allowed when it is computed" in SYSTEM_PROMPT
     assert "Refer to areas and categories by name, not by code." in SYSTEM_PROMPT
     assert "Do not open with the table id or the table title." in SYSTEM_PROMPT
+    assert "call hent_data, or name the concrete blocker" in SYSTEM_PROMPT
+    assert "no metric" in SYSTEM_PROMPT
+    assert "only one side of a comparison" in SYSTEM_PROMPT
+    assert "index level alone" in SYSTEM_PROMPT
+    assert "Do not pass an open >= range for one year." in SYSTEM_PROMPT
     single = _closing_instruction("Hvor mange over 80 bor i Esbjerg?")
     assert "Do not open with the table id or the table title." in single
     assert "2015 1. kvt." in single
@@ -553,6 +558,8 @@ def test_unpublished_note_drops_a_danish_figure_instead_of_cutting_it() -> None:
             "og viser 120.000 ledige."
         ),
         "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026: 1.234,5.",
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 med ca 93.573.",
+        "Oktober 2026 er ikke offentliggjort endnu; seneste er september 2026 (1.234.",
     )
     for prose in cases:
         guarded = guard_answer(question, prose, [fact])
@@ -565,6 +572,8 @@ def test_unpublished_note_drops_a_danish_figure_instead_of_cutting_it() -> None:
         assert "1.234" not in note
         assert "234" not in note
         assert "573" not in note
+        assert not note.rstrip().endswith("ca")
+        assert "(" not in note
     quarter = guard_answer(
         question,
         "3. kvartal 2026 er ikke offentliggjort endnu; seneste er september 2026.",
@@ -620,6 +629,49 @@ def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
     assert hidden.chart == []
     assert hidden.csv == ""
     assert hidden.show_numbers is False
+
+
+def test_fetch_defaults_keep_the_preferred_table_and_the_headline_code() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults, preferred_table
+
+    assert preferred_table("FOLK1C", "FOLK1E") == "FOLK1C"
+    assert preferred_table("AKU100K", "AKU110K") == "AKU100K"
+    assert preferred_table("BANE21", "BANE25") == "BANE21"
+    assert preferred_table("LONS20", "LONS30") == "LONS20"
+    assert preferred_table("FOLK1E", "FOLK1C") == "FOLK1C"
+    assert preferred_table("FOLK1A", "FOLK1E") == "FOLK1E"
+
+    count = apply_fetch_defaults(
+        "Hvor mange fuldtidsledige er der i Rudersdal Kommune i seneste måned?",
+        {"table": "AUS08", "values": {"OMRÅDE": ["230"], "SAESONFAK": ["10"]}},
+    )
+    assert count["values"]["SAESONFAK"] == ["24"]
+    percent = apply_fetch_defaults(
+        "Hvad er ledighedsprocenten i Region Hovedstaden?",
+        {"table": "AUS08", "values": {"SAESONFAK": ["9"]}},
+    )
+    assert percent["values"]["SAESONFAK"] == ["9"]
+    fuel = apply_fetch_defaults(
+        "Hvor meget har prisen på brændstof (benzin og diesel) ændret sig det seneste år?",
+        {"table": "PRIS01", "values": {"VAREGR": ["07221", "07222"], "ENHED": ["300"]}},
+    )
+    assert fuel["values"]["VAREGR"] == ["0722"]
+    median = apply_fetch_defaults(
+        "Median indkomst i Danmark vs Sverige.",
+        {"table": "INDKP201", "values": {"INDKOMSTTYPE": ["100"], "ENHED": ["0055"]}},
+    )
+    assert median["values"]["INDKOMSTTYPE"] == ["105"]
+    assert median["values"]["ENHED"] == ["0055"]
+    year = apply_fetch_defaults(
+        "Hvor mange nye personbiler blev registreret i alt i 2025?",
+        {"table": "BIL55", "values": {"REGBIL": ["4000101002"], "Tid": ["2026M09"]}},
+    )
+    assert year["values"]["Tid"] == ["2025"]
+    month = apply_fetch_defaults(
+        "Hvor mange nye personbiler blev registreret i marts 2025?",
+        {"table": "BIL55", "values": {"Tid": ["2025M03"]}},
+    )
+    assert month["values"]["Tid"] == ["2025M03"]
 
 
 def test_question_age_replaces_the_codes_the_model_sent() -> None:
@@ -881,8 +933,8 @@ def test_a_miss_shows_did_you_mean_in_the_answer_payload() -> None:
         )
     )
     assert search.suggestions == [
-        "No table matches 'enhjørninger'. Try fewer words, or a subject such as "
-        "'befolkning', 'indkomst' or 'priser'."
+        "Ingen tabel matcher 'enhjørninger'. Prøv færre ord, eller et emne som "
+        "'befolkning', 'indkomst' eller 'priser'."
     ]
     calls = [
         {
@@ -913,8 +965,8 @@ def test_a_miss_shows_did_you_mean_in_the_answer_payload() -> None:
         ],
     )
     assert wrapped.suggestions == [
-        "No table matches 'Narnia'. Try fewer words, or a subject such as "
-        "'befolkning', 'indkomst' or 'priser'."
+        "Ingen tabel matcher 'Narnia'. Prøv færre ord, eller et emne som "
+        "'befolkning', 'indkomst' eller 'priser'."
     ]
     prefixed = _turn(
         "Hvor mange bor i Lyngby?",
@@ -1434,6 +1486,161 @@ def test_projection_and_year_derivation_are_visible() -> None:
     shown = guard_answer("Hvor mange bor i Esbjerg i 2025?", "115.029", [yearly])
     assert "Gennemsnit af 2025K1" in shown
     assert "115.029" in shown
+
+
+def test_a_comparison_of_fetched_figures_is_not_hidden() -> None:
+    question = "Sammenlign befolkningstallet i Rudersdal, Hørsholm og Gentofte i seneste kvartal."
+    facts = [
+        _population_fact(58381, "2026K3", "Rudersdal"),
+        _population_fact(25326, "2026K3", "Hørsholm"),
+        _population_fact(75241, "2026K3", "Gentofte"),
+    ]
+    prose = "Gentofte 75.241 er 49.915 større end Hørsholm 25.326. Rudersdal har 58.381."
+    assert guard_answer(question, prose, facts) == prose
+    invented = "Gentofte 75.241, Rudersdal 58.381 og Hørsholm 99.999."
+    assert guard_answer(question, invented, facts) == UNVERIFIED_NUMBERS
+
+
+def test_an_explicit_unpublished_sentence_is_kept_when_nothing_was_fetched() -> None:
+    question = "Hvor mange børn bor der i København der lever med mere end 2 voksne?"
+    honest = "Det præcise tal er ikke offentliggjort. Husstandsstørrelsen er topkodet."
+    assert guard_answer(question, honest, []) == honest
+    assert guard_answer(question, "Jeg gætter på 7.000.", []) == NO_FETCHED_NUMBERS
+
+
+def test_more_than_two_adults_is_not_published_as_an_exact_count() -> None:
+    question = "Hvor mange børn bor der i København der lever med mere end 2 voksne?"
+    answer = guard_answer(question, "Jeg fandt ingen tal.", [])
+    assert answer != NO_DATA_ANSWER
+    assert "ikke offentliggjort" in answer.casefold()
+    assert "topkod" in answer.casefold()
+    assert not any(char.isdigit() for char in answer)
+    hidden = _turn(question, "Der er 7.655 børn.", [_population_fact(7655)], [])
+    assert hidden.show_numbers is False
+    assert hidden.facts == []
+    assert "7.655" not in hidden.answer
+
+
+class _TimeoutThen:
+    """First hent_data times out. Later calls return the scripted body."""
+
+    def __init__(self, later: str) -> None:
+        self.later = later
+        self.calls: list[tuple[str, dict]] = []
+
+    async def list_tools(self) -> list[ToolSpec]:
+        return [
+            ToolSpec("find_tabel", "search", {"type": "object", "properties": {}}),
+            ToolSpec("hent_data", "fetch", {"type": "object", "properties": {}}),
+        ]
+
+    async def call(self, name: str, arguments: dict) -> str:
+        self.calls.append((name, arguments))
+        fetches = [item for item in self.calls if item[0] == "hent_data"]
+        if name == "find_tabel":
+            return '[{"id": "FOLK1A", "title": "Folketal"}]'
+        if len(fetches) == 1:
+            return "Statistikbanken did not respond in time. Try a smaller request."
+        return self.later
+
+
+def test_a_timed_out_fetch_is_retried_and_the_figure_is_shown() -> None:
+    payload = {
+        "table": "FOLK1A",
+        "unit": "Antal",
+        "periods": ["2024K3"],
+        "rows": [{"OMRÅDE": "Rudersdal", "Tid": "2024K3", "value": 58381}],
+    }
+    tools = _TimeoutThen(json.dumps(payload))
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "Rudersdal"}, "c1")]),
+            ChatReply(
+                "",
+                [
+                    _call(
+                        "hent_data",
+                        {"table": "FOLK1A", "values": {"OMRÅDE": ["230"], "Tid": ["2024K3"]}},
+                        "c2",
+                    )
+                ],
+            ),
+            ChatReply("Jeg fandt ingen tal.", []),
+        ]
+    )
+    question = "Hvor mange indbyggere havde Rudersdal Kommune i 3. kvartal 2024?"
+    result = asyncio.run(run_turn(model, tools, question, max_tool_calls=8))
+    assert "58.381" in result.answer
+    assert result.answer != NO_DATA_ANSWER
+    fetches = [arguments for name, arguments in tools.calls if name == "hent_data"]
+    assert len(fetches) == 2
+    assert fetches[1]["values"]["Tid"] == ["2024K3"]
+
+
+def test_a_timed_out_sibling_is_retried_on_the_headline_table() -> None:
+    payload = {
+        "table": "LONS20",
+        "unit": "kr.",
+        "periods": ["2025"],
+        "rows": [{"Tid": "2025", "value": 45210}],
+    }
+    tools = _TimeoutThen(json.dumps(payload))
+    model = ScriptedModel(
+        [
+            ChatReply(
+                "",
+                [
+                    _call(
+                        "hent_data",
+                        {"table": "LONS30", "values": {"Tid": ["2024", "2025"]}},
+                        "c1",
+                    )
+                ],
+            ),
+            ChatReply("Jeg fandt ingen tal.", []),
+        ]
+    )
+    question = "Hvad er den gennemsnitlige månedsfortjeneste for lønmodtagere i Danmark?"
+    result = asyncio.run(run_turn(model, tools, question, max_tool_calls=8))
+    fetches = [arguments for name, arguments in tools.calls if name == "hent_data"]
+    assert fetches[0]["table"] == "LONS30"
+    assert fetches[1]["table"] == "LONS20"
+    assert fetches[1]["values"]["Tid"] == ["2025"]
+    assert "45.210" in result.answer
+
+
+def test_a_timeout_with_a_found_table_is_not_a_bare_miss() -> None:
+    tools = _TimeoutThen("Statistikbanken did not respond in time. Try a smaller request.")
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "Rudersdal"}, "c1")]),
+            ChatReply(
+                "",
+                [_call("hent_data", {"table": "FOLK1A", "values": {"Tid": ["2024K3"]}}, "c2")],
+            ),
+            ChatReply("Jeg fandt ingen tal.", []),
+        ]
+    )
+    question = "Hvor mange indbyggere havde Rudersdal Kommune i 3. kvartal 2024?"
+    result = asyncio.run(run_turn(model, tools, question, max_tool_calls=8))
+    assert result.answer != NO_DATA_ANSWER
+    assert "FOLK1A" in result.answer
+    assert "58" not in result.answer
+    assert result.facts == []
+
+
+def test_sweden_is_named_when_only_the_danish_figure_exists() -> None:
+    question = "Median indkomst i Danmark vs Sverige."
+    fact = {
+        "table": "INDKP201",
+        "period": "2025",
+        "unit": "kr.",
+        "value": 351100,
+        "detail": "Indkomst i alt",
+    }
+    shown = guard_answer(question, "Medianen er 351.100. Sverige er ikke dækket.", [fact])
+    assert "351.100" in shown
+    assert "Sverige" in shown
 
 
 def test_swapped_place_names_are_suppressed() -> None:

@@ -198,6 +198,25 @@ Limits that remain:
 - Place names in search come from FOLK1A's area list only.
 - There is no table of all association membership by municipality. The nearest table, `IDRFOR01`, counts sports-club memberships, and its title says so.
 
+## Evaluation
+
+`evals/questions.json` is the regression set: 100 questions from 1 November 2026, plus five owner questions (101–105) marked `source: owner` and `category: hard/ambiguous`. Each item names the Statistikbanken selection that defines the right figure, or the behaviour expected when that figure is not published. A short `note` records a judgment, such as a lower bound or a series the table does not split.
+
+The runner uses the same path as the web page: `answer_with_server` with `--llm xai`. It does not open a port. It is not part of `uv run pytest` or CI. A full run calls xAI and costs money.
+
+```bash
+uv run python -m evals.run
+uv run python -m evals.run --limit 5
+uv run python -m evals.run --ids 63,101-105
+uv run python -m evals.run --model grok-4 --out evals/reports/custom.md
+```
+
+Set `XAI_API_KEY` in the environment, not in the repo. The key is not printed and not written to the report. The default model is `STATBANK_XAI_MODEL`, or `grok-4`. The report is `evals/reports/<date>-<model>.md` plus a `.jsonl` file next to it. That directory is gitignored.
+
+Prices default to the grok-4.3 rates on <https://docs.x.ai/docs/models>: input $1.25, cached input $0.20, and output $2.50 per million tokens. `grok-4` is served as grok-4.3, and reasoning tokens are billed as output. `XAI_PRICE_INPUT_PER_M`, `XAI_PRICE_CACHED_PER_M`, and `XAI_PRICE_OUTPUT_PER_M` override the defaults.
+
+To add a question after a real failure, append an object to `evals/questions.json`. Give it the next `id`, the Danish `question`, a `category`, and `expect`. A figure question lists `checks`: `table`, `variables` (a code list, or `{"from", "to"}` for a numeric range), `time` (`latest`, a list of codes, or `{"year", "grain"}`), and `aggregate` (`values`, `sum`, `mean`, or `sum_by_period`). Several checks mean any one of them is an acceptable official figure. A gap question sets `kind` to `no_table`, `not_published`, `too_broad`, `not_available`, `answer_or_clarify`, `partial`, or `approximate`. `tests/test_eval_score.py` checks the scorer with fixtures and does not call the API.
+
 ## Design
 
 - Three tools, not one. Search, then codes, then data.

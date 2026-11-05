@@ -29,13 +29,15 @@ build-backend = "hatchling.build"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "evals"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "live: calls the real Statistikbanken API (run with pytest -m live)",
+    "eval: live xAI regression (python -m evals.run); not part of pytest",
 ]

@@ -38,7 +38,7 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "burglary": ("forbrydelser",),
     "studerende": ("uddannelse",),
     "students": ("uddannelse",),
-    "indvandrere": ("indvandr",),
+    "indvandrere": ("indvandr", "herkomst"),
     "immigrants": ("indvandr",),
     "income": ("indkomst",),
     "kommune": ("område",),
@@ -64,6 +64,18 @@ _SYNONYMS: dict[str, tuple[str, ...]] = {
     "påbegyndt": ("boligbyggeri",),
     "unemployed": ("ledige",),
     "jobless": ("ledige",),
+    "brændstof": ("forbrugerprisindeks",),
+    "benzin": ("forbrugerprisindeks",),
+    "diesel": ("forbrugerprisindeks",),
+    "elpris": ("forbrugerprisindeks",),
+    "firmaer": ("firma",),
+    "virksomheder": ("firma",),
+    "ejerbolig": ("boliger",),
+    "ejerboliger": ("boliger",),
+    "udlån": ("folkebibliotek",),
+    "enlige": ("familier",),
+    "arbejdsstyrke": ("arbejdsmarkedstilknytning",),
+    "arbejdsstyrken": ("arbejdsmarkedstilknytning",),
 }
 # Replaced before tokenising. The separate words hit the wrong titles
 # ("nye" + "virksomheder" is inside "højvækstvirksomheder").
@@ -139,6 +151,9 @@ _FLOW_STEMS = (
     "skilsmis",
     "viels",
     "forbryd",
+    # Counts of events, not a stock. "nyregistrerede" is a flow; "registreret ledighed" is not.
+    "nyregistr",
+    "udlaan",
 )
 _STOCK_RE = re.compile(
     r"den 1\.|pr\. 1\.|\bultimo\b|\bprimo\b|\bbestand\b|\bbeholdning\b|"
@@ -342,6 +357,7 @@ class StatbankClient:
         values, dropped = _drop_equivalent_value_sums(values, sum_from)
         notes.extend(dropped)
         selections, explicit = _build_selections(metadata, values, sum_from, sum_range)
+        headline = _headline_sums(metadata, selections)
         assumed = _fill_required(metadata, selections)
         _guard_time_sums(metadata, selections, explicit)
         variables = [{"code": code, "values": selected} for code, selected in selections.items()]
@@ -363,9 +379,17 @@ class StatbankClient:
             if isinstance(data, dict):
                 source = (data.get("dataset") or {}).get("source") or source
         _flag_unpublished(rows)
-        if year_plans:
-            rows, year_notes = _collapse_years(metadata, rows, year_plans)
+        plans = list(year_plans)
+        if not plans:
+            plans = _plans_from_open_range(metadata, values, rows)
+        if plans:
+            rows, year_notes = _collapse_years(metadata, rows, plans)
             notes.extend(year_notes)
+        for variable_id, codes, label, note in headline:
+            rows = _sum_rows(rows, variable_id, codes)
+            for row in rows:
+                row[variable_id] = label
+            notes.append(note)
         notes.extend(_mark_projections(metadata, rows))
         result = {
             "table": metadata.id,
@@ -444,16 +468,28 @@ class StatbankClient:
         return parsed
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:
-        try:
-            response = self._http.post(path, json=payload)
-        except httpx.TimeoutException as exc:
-            raise StatbankError(
-                "Statistikbanken did not respond in time. Try a smaller request."
-            ) from exc
-        except httpx.HTTPError as exc:
+        response: httpx.Response | None = None
+        for attempt in range(2):
+            try:
+                response = self._http.post(path, json=payload)
+                break
+            except httpx.TimeoutException as exc:
+                if attempt == 0:
+                    continue
+                raise StatbankError(
+                    "Statistikbanken did not respond in time. Try a smaller request."
+                ) from exc
+            except httpx.HTTPError as exc:
+                # A dropped connection is the same class of failure as a timeout.
+                if attempt == 0 and type(exc).__name__ == "RemoteProtocolError":
+                    continue
+                raise StatbankError(
+                    "Could not reach Statistikbanken (https://api.statbank.dk). Try again."
+                ) from exc
+        if response is None:
             raise StatbankError(
                 "Could not reach Statistikbanken (https://api.statbank.dk). Try again."
-            ) from exc
+            )
         if response.status_code >= 400:
             try:
                 payload_error = response.json()
@@ -668,6 +704,24 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
                 "jobless",
             ),
         ),
+        # AUS08 is area x month. Age or sex belongs on a table that has those columns.
+        ("stilling", "aku", "alder", "køn", "koen", "sex", "age"),
+    ),
+    _TablePreference(
+        "AUF01",
+        (
+            (
+                "ledighed",
+                "ledige",
+                "arbejdsløshed",
+                "unemployment",
+                "unemployed",
+                "bruttoledighed",
+                "fuldtidsledige",
+                "jobless",
+            ),
+            ("alder", "køn", "koen", "sex", "age"),
+        ),
         ("stilling", "aku"),
     ),
     _TablePreference(
@@ -679,6 +733,52 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
         "STRAF10",
         (("forbrydelse", "forbrydelser", "indbrud", "burglary"),),
         ("ofre", "offer"),
+    ),
+    # Fuel and electricity in the consumer price index, not a wholesale fuel table.
+    _TablePreference(
+        "PRIS01",
+        (("brændstof", "benzin", "diesel", "elpris"),),
+        ("hicp", "harmoniser", "nettopris"),
+    ),
+    _TablePreference(
+        "GF11",
+        (("firma", "firmaer", "virksomhed", "virksomheder"), ("aktiv", "aktive")),
+        ("erhvervsdemografi", "iværksætter", "højvækst", "etabler", "konkurs"),
+    ),
+    _TablePreference(
+        "BIB3A",
+        (("bibliotek", "folkebibliotek", "udlån"),),
+        ("interurban",),
+    ),
+    _TablePreference(
+        "BOL101",
+        (("bolig", "boliger", "ejerbolig", "ejerboliger"),),
+        ("prisindeks", "salg", "solgt", "påbegynd"),
+    ),
+    _TablePreference(
+        "UHM",
+        (("eksport", "vareeksport"),),
+        ("kn8",),
+    ),
+    _TablePreference(
+        "KY21",
+        (("kontanthjælp",),),
+        ("aktiverede",),
+    ),
+    _TablePreference(
+        "AKU100K",
+        (("arbejdsstyrke",), ("aku",)),
+        ("ledighed", "ledige", "procent"),
+    ),
+    _TablePreference(
+        "INDKF111",
+        (("enlig", "enlige"),),
+        ("personlig",),
+    ),
+    _TablePreference(
+        "FOLK1C",
+        (("indvandrer", "indvandrere"), ("kommune", "kommuner")),
+        ("efterkommer",),
     ),
 )
 # Enough to pass a title that matches every word of a short query (about 200).
@@ -1470,7 +1570,8 @@ def _measure_sides(text: str) -> tuple[bool, bool]:
     folded = _fold(text)
     flow = any(stem in folded for stem in _FLOW_STEMS) or re.search(r"\bdode\b", folded) is not None
     unit = folded.strip(" .")
-    stock = _STOCK_RE.search(folded) is not None or unit in _LEVEL_UNITS
+    # A count of unemployed people is a level: a year is the average, not the sum.
+    stock = _STOCK_RE.search(folded) is not None or unit in _LEVEL_UNITS or "ledige" in folded
     return flow, stock
 
 
@@ -1773,6 +1874,44 @@ def _code_on(variable: _Variable, code: str) -> str | None:
         if item["id"].casefold() == code.casefold():
             return item["id"]
     return None
+
+
+_OPEN_YEAR_START = re.compile(r">=\s*(\d{4})(?:M01|K1|Q1|H1)\Z", re.IGNORECASE)
+
+
+def _plans_from_open_range(
+    table: _Table,
+    values: dict[str, list[str]] | None,
+    rows: list[dict[str, Any]],
+) -> list[_YearPlan]:
+    """Collapse one complete year inside a short open range such as >=2025M01.
+
+    A range that spans more than two calendar years is a time series. Those
+    rows stay as they are.
+    """
+    if not values:
+        return []
+    time_var = next((variable for variable in table.variables if variable.time), None)
+    if time_var is None or time_var.id not in values:
+        return []
+    tokens = values[time_var.id]
+    if len(tokens) != 1:
+        return []
+    match = _OPEN_YEAR_START.fullmatch(tokens[0].strip())
+    if match is None:
+        return []
+    year = match.group(1)
+    periods = [str(row.get(time_var.id) or "") for row in rows if row.get(time_var.id)]
+    years = {period[:4] for period in periods if len(period) >= 6 and period[:4].isdigit()}
+    if len(years) > 2:
+        return []
+    codes: list[str] = []
+    for period in periods:
+        if period.startswith(year) and period not in codes and period != year:
+            codes.append(period)
+    if not _year_is_complete(codes):
+        return []
+    return [_YearPlan(year=year, codes=tuple(codes), complete=True)]
 
 
 def _collapse_years(
@@ -2231,6 +2370,40 @@ def _latest_value(variable: _Variable) -> dict[str, str] | None:
         if item["id"] == code:
             return item
     return {"id": code, "text": code}
+
+
+# BOL101 has no total for who lives in the dwelling. A generic count is occupied
+# plus empty homes. Holiday homes (5000) are a different stock.
+_HEADLINE_SUMS: dict[str, dict[str, tuple[list[str], str, str]]] = {
+    "BOL101": {
+        "BEBO": (
+            ["1000", "2000"],
+            "Beboede og ubeboede boliger",
+            "Occupied and unoccupied dwellings are added. Holiday homes are not included.",
+        )
+    }
+}
+
+
+def _headline_sums(
+    table: _Table,
+    selections: dict[str, list[str]],
+) -> list[tuple[str, list[str], str, str]]:
+    """One summed row for a no-total variable, only for a known headline set.
+
+    Omitted BEBO becomes 1000+2000. The same two codes, already requested, are
+    added as well. Any other selection, including fritidshuse, is left alone.
+    """
+    found: list[tuple[str, list[str], str, str]] = []
+    for variable_id, (codes, label, note) in _HEADLINE_SUMS.get(table.id, {}).items():
+        chosen = selections.get(variable_id)
+        wanted = {code.casefold() for code in codes}
+        if chosen is None:
+            selections[variable_id] = list(codes)
+            found.append((variable_id, list(codes), label, note))
+        elif {code.casefold() for code in chosen} == wanted:
+            found.append((variable_id, list(codes), label, note))
+    return found
 
 
 def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict[str, str]]:

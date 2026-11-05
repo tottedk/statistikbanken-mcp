@@ -1,0 +1,2443 @@
+[
+  {
+    "id": 1,
+    "question": "Hvor mange indbyggere har Rudersdal Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 2,
+    "question": "Hvor mange indbyggere har Hørsholm Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "223"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "question": "Hvor mange bor der i Gentofte Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "question": "Hvor mange personer på 80 år og derover bor i Rudersdal Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "ALDER": {
+              "from": 80,
+              "to": 125
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "question": "Hvor mange børn på 0-6 år bor i Hørsholm Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "223"
+            ],
+            "ALDER": {
+              "from": 0,
+              "to": 6
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 6,
+    "question": "Hvor mange kvinder på 65 år og derover bor i Gentofte Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ],
+            "KØN": [
+              "2"
+            ],
+            "ALDER": {
+              "from": 65,
+              "to": 125
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 7,
+    "question": "Sammenlign befolkningstallet i Rudersdal, Hørsholm og Gentofte i seneste kvartal.",
+    "category": "comparison",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230",
+              "223",
+              "157"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 8,
+    "question": "Hvordan har befolkningen i Rudersdal udviklet sig fra 1. kvartal 2016 til 1. kvartal 2026?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ]
+          },
+          "time": [
+            "2016K1",
+            "2026K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 9,
+    "question": "Hvor mange indbyggere havde Hørsholm Kommune 1. januar 2010?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "223"
+            ]
+          },
+          "time": [
+            "2010K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 10,
+    "question": "Hvor mange mænd bor der i Region Hovedstaden?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "084"
+            ],
+            "KØN": [
+              "1"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 11,
+    "question": "Hvor mange indbyggere har Region Sjælland?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "085"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 12,
+    "question": "Hvor mange indbyggere har Region Syddanmark?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "083"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 13,
+    "question": "Hvor mange 18-24-årige bor i Aarhus Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "751"
+            ],
+            "ALDER": {
+              "from": 18,
+              "to": 24
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 14,
+    "question": "Hvor mange personer på 100 år og derover bor der i Danmark?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "ALDER": {
+              "from": 100,
+              "to": 125
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 15,
+    "question": "Hvor mange teenagere (13-19 år) bor der i Gentofte Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ],
+            "ALDER": {
+              "from": 13,
+              "to": 19
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 16,
+    "question": "Hvor mange ugifte bor der i Københavns Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "101"
+            ],
+            "CIVILSTAND": [
+              "U"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 17,
+    "question": "Hvor mange enker og enkemænd bor der i Rudersdal Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "CIVILSTAND": [
+              "E"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 18,
+    "question": "Hvor mange indbyggere har Ærø Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "492"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 19,
+    "question": "Hvor mange indbyggere har Fanø Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "563"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 20,
+    "question": "Hvilken kommune er størst: Lyngby-Taarbæk eller Furesø?",
+    "category": "comparison",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "173",
+              "190"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 21,
+    "question": "Hvor mange personer på præcis 50 år bor der i Danmark?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "ALDER": [
+              "50"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 22,
+    "question": "Hvor mange indbyggere havde Danmark i 1. kvartal 2008?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ]
+          },
+          "time": [
+            "2008K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 23,
+    "question": "Hvor mange flere indbyggere har Københavns Kommune end Aarhus Kommune?",
+    "category": "comparison",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "101",
+              "751"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Both populations have to appear. The difference may appear as well."
+  },
+  {
+    "id": 24,
+    "question": "Hvor mange kvinder på 30-39 år bor i Frederiksberg Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "147"
+            ],
+            "KØN": [
+              "2"
+            ],
+            "ALDER": {
+              "from": 30,
+              "to": 39
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 25,
+    "question": "Hvor mange indbyggere har Region Nordjylland?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "081"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 26,
+    "question": "Hvor mange personer bor der på Christiansø?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "411"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 27,
+    "question": "Hvor mange personer på 67 år og derover bor i Hørsholm Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "223"
+            ],
+            "ALDER": {
+              "from": 67,
+              "to": 125
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 28,
+    "question": "Hvordan har antallet af personer på 80 år og derover i Gentofte udviklet sig siden 1. kvartal 2020?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ],
+            "ALDER": {
+              "from": 80,
+              "to": 125
+            }
+          },
+          "time": [
+            "2020K1",
+            "latest"
+          ],
+          "aggregate": "sum_by_period"
+        }
+      ]
+    }
+  },
+  {
+    "id": 29,
+    "question": "Hvor mange indbyggere havde Rudersdal Kommune i 3. kvartal 2024?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ]
+          },
+          "time": [
+            "2024K3"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 30,
+    "question": "Hvor mange indbyggere er der i Høje-Taastrup Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "169"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 31,
+    "question": "Hvor mange indbyggere er der i Ringkøbing-Skjern Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "760"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 32,
+    "question": "Hvor mange indbyggere har Danmark ifølge den seneste månedlige befolkningsopgørelse?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1AM",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 33,
+    "question": "Hvor mange indvandrere bor der i Rudersdal Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1C",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "HERKOMST": [
+              "4"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
+          "table": "INDOPH1",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "OPHGR1": [
+              "0000"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "FOLK1C code 4 is the quarterly immigrant stock. INDOPH1 is the 1 January stock and is also accepted."
+  },
+  {
+    "id": 34,
+    "question": "Hvor mange personer med dansk oprindelse bor i Gentofte Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1C",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ],
+            "HERKOMST": [
+              "5"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 35,
+    "question": "Hvor mange børn og unge på 0-17 år bor der i Region Hovedstaden?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "084"
+            ],
+            "ALDER": {
+              "from": 0,
+              "to": 17
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 36,
+    "question": "Hvad er den gennemsnitlige disponible indkomst for personer i Rudersdal Kommune?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "INDKP106",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "ENHED": [
+              "118"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 37,
+    "question": "Hvem har den højeste gennemsnitlige disponible indkomst: Hørsholm eller Gentofte?",
+    "category": "comparison",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "INDKP106",
+          "variables": {
+            "OMRÅDE": [
+              "223",
+              "157"
+            ],
+            "ENHED": [
+              "118"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 38,
+    "question": "Hvor mange fuldtidsledige er der i Rudersdal Kommune i seneste måned?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "SAESONFAK": [
+              "24"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
+          "table": "AUF01",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "AUS08 code 24 is grossed-up actual counts. AUF01 is the preliminary gross count. Either official count is accepted."
+  },
+  {
+    "id": 39,
+    "question": "Hvad er ledighedsprocenten (fuldtidsledige) i Region Hovedstaden i seneste måned?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUP01",
+          "variables": {
+            "OMRÅDE": [
+              "084"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "084"
+            ],
+            "SAESONFAK": [
+              "22"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "084"
+            ],
+            "SAESONFAK": [
+              "9"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "AUP01 and AUS08 code 22 are the actual rate. AUS08 code 9 is the seasonally adjusted rate. Any of the three is accepted."
+  },
+  {
+    "id": 40,
+    "question": "Hvor mange fuldtidsledige kvinder er der i hele landet i seneste måned?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUF01",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "KØN": [
+              "K"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "AUS08 has no sex split, so the count is AUF01."
+  },
+  {
+    "id": 41,
+    "question": "Hvad er AKU-ledigheden (arbejdskraftundersøgelsen) i procent i seneste kvartal?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AKU101K",
+          "variables": {
+            "BESKSTATUS": [
+              "LPCT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 42,
+    "question": "Hvad er den gennemsnitlige månedsfortjeneste for lønmodtagere i Danmark?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "LONS20",
+          "variables": {
+            "LØNMÅL": [
+              "MDRSNIT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 43,
+    "question": "Hvor mange ledige stillinger var der i seneste kvartal?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "LSK11",
+          "variables": {
+            "ENHED": [
+              "LS"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 44,
+    "question": "Hvor mange modtager folkepension?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PEN114",
+          "variables": {
+            "YDELSESTYPE": [
+              "46"
+            ],
+            "MODTAG1": [
+              "80"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 45,
+    "question": "Hvad er Gini-koefficienten for Danmark i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "IFOR41",
+          "variables": {
+            "ULLIG": [
+              "70"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 46,
+    "question": "Hvor mange personer lever i familier med lavindkomst (relativ fattigdom)?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "IFOR12A",
+          "variables": {
+            "INDKN": [
+              "50"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Count of people under 50 percent of median income, not the 60 percent line and not the percentage."
+  },
+  {
+    "id": 47,
+    "question": "Hvad er mænds og kvinders gennemsnitlige indkomst før skat?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "INDKP105",
+          "variables": {
+            "ENHED": [
+              "118"
+            ],
+            "KOEN": [
+              "M",
+              "K"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "INDKP105 is income in total, average kroner. Both sexes have to appear."
+  },
+  {
+    "id": 48,
+    "question": "Hvor mange personer er i arbejdsstyrken ifølge AKU?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AKU100K",
+          "variables": {
+            "BESKSTATUS": [
+              "BESTOT",
+              "AKUL"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "Employed plus AKU-unemployed. The table unit is 1,000 persons, and that is the figure."
+  },
+  {
+    "id": 49,
+    "question": "Hvor mange kontanthjælpsmodtagere er der?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "KY21",
+          "variables": {},
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 50,
+    "question": "Hvor mange fuldtidsledige var der i hele landet i 2025 i gennemsnit?",
+    "category": "annual_aggregate",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "SAESONFAK": [
+              "24"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "month"
+          },
+          "aggregate": "mean"
+        },
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "SAESONFAK": [
+              "10"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "month"
+          },
+          "aggregate": "mean"
+        },
+        {
+          "table": "AUF01",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "month"
+          },
+          "aggregate": "mean"
+        }
+      ]
+    },
+    "note": "Mean of the 12 months of 2025. AUS08 code 24 (actual), code 10 (seasonally adjusted), or AUF01."
+  },
+  {
+    "id": 51,
+    "question": "Hvad er den EU-harmoniserede inflation (HICP) for Danmark i seneste måned?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS07",
+          "variables": {
+            "VAREGR": [
+              "000001"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Year-on-year change, not the index level."
+  },
+  {
+    "id": 52,
+    "question": "Hvad er forbrugerprisindekset i alt (2015=100) i seneste måned?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS01",
+          "variables": {
+            "VAREGR": [
+              "000000"
+            ],
+            "ENHED": [
+              "100"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "PRIS01's published index is not on a 2015=100 base. The expected figure is that index."
+  },
+  {
+    "id": 53,
+    "question": "Hvor meget er elprisen steget eller faldet det seneste år ifølge forbrugerprisindekset?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS01",
+          "variables": {
+            "VAREGR": [
+              "0451"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 54,
+    "question": "Hvad er den årlige stigning i huslejen ifølge forbrugerprisindekset?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS01",
+          "variables": {
+            "VAREGR": [
+              "041"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 55,
+    "question": "Hvad var den gennemsnitlige årlige inflation i Danmark i 2022?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS9",
+          "variables": {},
+          "time": [
+            "2022"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 56,
+    "question": "Hvad er forbrugerprisindekset for alkohol og tobak i seneste måned?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS01",
+          "variables": {
+            "VAREGR": [
+              "02"
+            ],
+            "ENHED": [
+              "100"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "The index level, with the same base caveat as the all-items index."
+  },
+  {
+    "id": 57,
+    "question": "Hvad er nettoprisindekset i seneste måned?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS04",
+          "variables": {
+            "ENHED": [
+              "100"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 58,
+    "question": "Hvad er byggeomkostningsindekset for boliger i seneste kvartal?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BYG43",
+          "variables": {
+            "HINDEKS": [
+              "01"
+            ],
+            "DINDEKS": [
+              "10000"
+            ],
+            "TAL": [
+              "100"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 59,
+    "question": "Hvor meget har prisen på brændstof (benzin og diesel) ændret sig det seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS01",
+          "variables": {
+            "VAREGR": [
+              "0722"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "0722 is fuels and lubricants for personal transport. Diesel alone is 07221 and is not the expected figure."
+  },
+  {
+    "id": 60,
+    "question": "Hvad var inflationen i januar 2023?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS01",
+          "variables": {
+            "VAREGR": [
+              "000000"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": [
+            "2023M01"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 61,
+    "question": "Hvor mange elbiler er der i bestanden af personbiler?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIL52",
+          "variables": {
+            "DRIV": [
+              "20225"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 62,
+    "question": "Hvor mange personbiler er der i Rudersdal Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIL710",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 63,
+    "question": "Hvor mange nye personbiler blev registreret i alt i 2025?",
+    "category": "annual_aggregate",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIL55",
+          "variables": {
+            "REGBIL": [
+              "4000101002"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "month"
+          },
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "Sum of the twelve months, not the latest month and not the seasonally adjusted series."
+  },
+  {
+    "id": 64,
+    "question": "Hvor mange blev dræbt i trafikuheld i Danmark i 2025?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "UHELDK1",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "UHELD": [
+              "1"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 65,
+    "question": "Hvor mange passagerer var der i Københavns Lufthavn i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FLYV31",
+          "variables": {
+            "LUFTHAVN": [
+              "10015"
+            ],
+            "PASSAGER": [
+              "7010"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "The table unit is 1,000 passengers."
+  },
+  {
+    "id": 66,
+    "question": "Hvor mange boliger er der i Gentofte Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BOL101",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ],
+            "BEBO": [
+              "1000",
+              "2000"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "Occupied plus unoccupied dwellings. Holiday homes (5000) are not included."
+  },
+  {
+    "id": 67,
+    "question": "Hvor mange enfamiliehuse blev solgt i seneste kvartal?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "EJ121",
+          "variables": {
+            "EJKAT20": [
+              "0111"
+            ],
+            "TAL": [
+              "204"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Only a seasonally adjusted count is published in EJ121."
+  },
+  {
+    "id": 68,
+    "question": "Hvor mange boliger blev påbegyndt i seneste kvartal?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BYGV33",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "BYGFASE": [
+              "2"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "BYGV33 is not corrected for late reports."
+  },
+  {
+    "id": 69,
+    "question": "Hvor mange passagerer kørte med tog i Danmark i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BANE21",
+          "variables": {
+            "ENHED": [
+              "0150"
+            ],
+            "TRANSPORT": [
+              "10010"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "The whole rail network. The unit is 1,000 passengers."
+  },
+  {
+    "id": 70,
+    "question": "Hvor mange ejerboliger er der i Danmark?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BOL101",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "BEBO": [
+              "1000"
+            ],
+            "UDLFORH": [
+              "EJ"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Occupied dwellings lived in by the owner."
+  },
+  {
+    "id": 71,
+    "question": "Hvad er den samlede fertilitet i Danmark i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FERT1",
+          "variables": {},
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Per 1,000 women."
+  },
+  {
+    "id": 72,
+    "question": "Hvor mange levendefødte var der i Rudersdal Kommune i 2025?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FODIE",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 73,
+    "question": "Hvor mange døde i Gentofte Kommune i seneste år?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOD207",
+          "variables": {
+            "OMRÅDE": [
+              "157"
+            ],
+            "KØN": [
+              "M",
+              "K"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "The table has no sex total, so the figure is men plus women."
+  },
+  {
+    "id": 74,
+    "question": "Hvad er middellevetiden i Hørsholm Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "HISBK",
+          "variables": {
+            "OMRÅDE": [
+              "223"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 75,
+    "question": "Hvad er gennemsnitsalderen for førstegangsfødende kvinder?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOD11",
+          "variables": {
+            "ALDER": [
+              "610"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 76,
+    "question": "Hvor mange elever går i grundskolen?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "SPECIAL1",
+          "variables": {},
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "SPECIAL1 covers municipal school types, not free primary schools."
+  },
+  {
+    "id": 77,
+    "question": "Hvor mange fuldførte en lang videregående uddannelse i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "UDDAKT70",
+          "variables": {
+            "UDDANNELSE": [
+              "H70"
+            ],
+            "FSTATUS": [
+              "F"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 78,
+    "question": "Hvor mange døde af kræft i Danmark i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "DODB1",
+          "variables": {
+            "ÅRSAG": [
+              "A02"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 79,
+    "question": "Hvor mange personer i Gentofte Kommune har en lang videregående uddannelse som højeste uddannelse?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "HFUDD11",
+          "variables": {
+            "BOPOMR": [
+              "157"
+            ],
+            "HFUDD": [
+              "H70"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 80,
+    "question": "Hvor mange provokerede aborter var der i Danmark i seneste år?",
+    "category": "edge",
+    "expect": {
+      "kind": "no_table"
+    },
+    "note": "The catalogue has no abortion table. A correct answer says so and states no figure."
+  },
+  {
+    "id": 81,
+    "question": "Hvor mange aktive firmaer er der i Danmark?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "GF11",
+          "variables": {
+            "MÆNGDE4": [
+              "AFI"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 82,
+    "question": "Hvor mange nye virksomheder blev etableret i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "DEMO11",
+          "variables": {
+            "FSTATUS": [
+              "NYE"
+            ],
+            "ENHED": [
+              "NYE1"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "New firms, all of them, not only those with employees. The latest published year."
+  },
+  {
+    "id": 83,
+    "question": "Hvor stor var Danmarks vareeksport i seneste måned?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "UHM",
+          "variables": {
+            "POST": [
+              "1.A.A"
+            ],
+            "INDUD": [
+              "2"
+            ],
+            "LAND": [
+              "W1"
+            ],
+            "ENHED": [
+              "93"
+            ],
+            "SÆSON": [
+              "1"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Goods export, not seasonally adjusted, million kroner."
+  },
+  {
+    "id": 84,
+    "question": "Hvor stor er den offentlige ØMU-gæld?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "EDP5",
+          "variables": {
+            "FUNKTION": [
+              "060"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Billion kroner. The table has only this one function."
+  },
+  {
+    "id": 85,
+    "question": "Hvor mange hotelovernatninger var der i Region Hovedstaden i 2025?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "HOTEL1",
+          "variables": {
+            "OMRÅDE": [
+              "084"
+            ],
+            "TAL": [
+              "1030"
+            ],
+            "PERIODE": [
+              "1"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 86,
+    "question": "Hvor mange er medlem af folkekirken?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "KM1",
+          "variables": {
+            "FKMED": [
+              "F"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 87,
+    "question": "Hvad var stemmeprocenten ved folketingsvalget i 2022?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FVPCT",
+          "variables": {
+            "VALRES": [
+              "STEMPCT"
+            ]
+          },
+          "time": [
+            "2022"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 88,
+    "question": "Hvor mange anmeldte voldsforbrydelser var der i 2025?",
+    "category": "annual_aggregate",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "STRAF10",
+          "variables": {
+            "OVERTRÆD": [
+              "12"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "quarter"
+          },
+          "aggregate": "sum"
+        }
+      ]
+    }
+  },
+  {
+    "id": 89,
+    "question": "Hvor mange svin er der i Danmark?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "SVIN",
+          "variables": {
+            "TYPE": [
+              "D29"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Pigs in total. The unit is 1,000 animals. Not the seasonally adjusted series."
+  },
+  {
+    "id": 90,
+    "question": "Hvor mange udlån var der fra folkebibliotekerne i seneste år?",
+    "category": "simple_value",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIB3A",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "OPGOER1": [
+              "14"
+            ],
+            "SAMLING": [
+              "35",
+              "39"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "Physical loans only, children's collection plus adult collection."
+  },
+  {
+    "id": 91,
+    "question": "Hvor mange bor der i Narnia?",
+    "category": "edge",
+    "expect": {
+      "kind": "no_table"
+    },
+    "note": "Narnia is not a place. No population figure."
+  },
+  {
+    "id": 92,
+    "question": "Hvor mange indbyggere havde Gentofte Kommune i 1. kvartal 2030?",
+    "category": "edge",
+    "expect": {
+      "kind": "not_published"
+    },
+    "note": "The quarter is in the future. Saying it is not published, with or without the latest real figure, is correct."
+  },
+  {
+    "id": 93,
+    "question": "Hvor mange bor der i Rudersdl Kommune?",
+    "category": "edge",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "230"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "The misspelling is Rudersdal. The figure is that municipality's latest population."
+  },
+  {
+    "id": 94,
+    "question": "Hvor mange indbyggere havde Hørsholm Kommune i 1. kvartal 2020?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "223"
+            ]
+          },
+          "time": [
+            "2020K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 95,
+    "question": "How many unemployed people are there in Denmark?",
+    "category": "edge",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "SAESONFAK": [
+              "24"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
+          "table": "AUS08",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "SAESONFAK": [
+              "10"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        },
+        {
+          "table": "AUF01",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "English wording. AUS08 code 24, AUS08 code 10 (seasonally adjusted headline), or AUF01."
+  },
+  {
+    "id": 96,
+    "question": "Hvordan går det med Danmark?",
+    "category": "edge",
+    "expect": {
+      "kind": "too_broad"
+    },
+    "note": "No single statistic should be presented as the answer."
+  },
+  {
+    "id": 97,
+    "question": "Hvad er det seneste tal i tabel FOLK3?",
+    "category": "edge",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK3",
+          "variables": {},
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 98,
+    "question": "Hvor mange bor der i Lyngby?",
+    "category": "edge",
+    "expect": {
+      "kind": "answer_or_clarify",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "173"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Lyngby-Taarbæk's population, or a clarification that names Lyngby-Taarbæk and states no other figure."
+  },
+  {
+    "id": 99,
+    "question": "Hvor mange nye personbiler blev registreret i marts 2025?",
+    "category": "period_phrase",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIL55",
+          "variables": {
+            "REGBIL": [
+              "4000101002"
+            ]
+          },
+          "time": [
+            "2025M03"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    }
+  },
+  {
+    "id": 100,
+    "question": "Hvor mange indbyggere havde Rudersdal Kommune i 1850?",
+    "category": "edge",
+    "expect": {
+      "kind": "not_published"
+    },
+    "note": "FOLK1A starts in 2008. The answer has to say the year is not in the table."
+  },
+  {
+    "id": 101,
+    "question": "Hvor mange børn bor der i København der lever med mere end 2 voksne?",
+    "category": "hard/ambiguous",
+    "expect": {
+      "kind": "approximate",
+      "checks": [
+        {
+          "table": "FAM133N",
+          "variables": {
+            "OMRÅDE": [
+              "101"
+            ],
+            "ALDER": {
+              "from": 0,
+              "to": 17
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum",
+          "sum_where": [
+            {
+              "ANTPERSH": "4",
+              "ANTBORNH": "1"
+            },
+            {
+              "ANTPERSH": "5",
+              "ANTBORNH": "1"
+            },
+            {
+              "ANTPERSH": "5",
+              "ANTBORNH": "2"
+            },
+            {
+              "ANTPERSH": "6-",
+              "ANTBORNH": "1"
+            },
+            {
+              "ANTPERSH": "6-",
+              "ANTBORNH": "2"
+            },
+            {
+              "ANTPERSH": "6-",
+              "ANTBORNH": "3"
+            }
+          ]
+        }
+      ]
+    },
+    "note": "No table has 'number of adults'. BRN13 only codes one or two adults (both parents, single mother, mother and partner, single father, father and partner). FAM133N crosses household size, top-coded at 6+, with children in the household, top-coded at 5+. The check sums children aged 0-17 in København on the latest 1 January where the fewest possible adults (persons minus children, counting 6+ as 6) is greater than 2: 4 persons/1 child, 5/1, 5/2, 6+/1, 6+/2, 6+/3. Cells such as 6+ persons and 4 children can be exactly two adults, so they are left out. That sum is a lower bound. Correct: state the lower bound and say it is incomplete, or say the exact count is not published and give no figure.",
+    "source": "owner"
+  },
+  {
+    "id": 102,
+    "question": "Gennemsnitindkomst for enlige mødre i Esbjerg.",
+    "category": "hard/ambiguous",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "INDKF111",
+          "variables": {
+            "OMRÅDE": [
+              "561"
+            ],
+            "ENHED": [
+              "115"
+            ],
+            "FAMTYP": [
+              "EKMB"
+            ],
+            "INDKOMSTTYPE": [
+              "105"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Single women with children are published at municipality level: INDKF111, Esbjerg (561), family type EKMB, unit 115 (average kroner for every family in the group), income type 105 (income in total, before tax), latest year. This is the family's income, not the mother's own wage, and it is not disposable income. Single fathers are EMMB and are a different figure.",
+    "source": "owner"
+  },
+  {
+    "id": 103,
+    "question": "Hvor mange hunde bor i Lynge?",
+    "category": "hard/ambiguous",
+    "expect": {
+      "kind": "not_available"
+    },
+    "note": "The catalogue has no dog table, and Lynge is a town in Allerød (municipality 201), not a municipality. Correct: say this is not in Statistikbanken and state no dog count.",
+    "source": "owner"
+  },
+  {
+    "id": 104,
+    "question": "Median indkomst i Danmark vs Sverige.",
+    "category": "hard/ambiguous",
+    "expect": {
+      "kind": "partial",
+      "checks": [
+        {
+          "table": "INDKP201",
+          "variables": {
+            "INDKOMSTTYPE": [
+              "105"
+            ],
+            "ENHED": [
+              "0055"
+            ],
+            "POPU": [
+              "5000"
+            ],
+            "PRISENHED": [
+              "006"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Denmark: INDKP201 median (unit 0055) of income in total before tax (105), everyone aged 15 and over (population 5000), nominal prices (006), latest year. Sweden is not in Statistikbanken. Correct: give that Danish median and say Sweden is not covered. A Swedish figure is wrong. The disposable median (type 100) is a different series.",
+    "source": "owner"
+  },
+  {
+    "id": 105,
+    "question": "Hvor mange folk bor der i Odense mellem 23 og 45 år?",
+    "category": "hard/ambiguous",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "461"
+            ],
+            "ALDER": {
+              "from": 23,
+              "to": 45
+            }
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "FOLK1A, Odense (461), ages 23 through 45 inclusive, both sexes, latest quarter, summed.",
+    "source": "owner"
+  }
+]
