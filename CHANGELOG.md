@@ -9,6 +9,10 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ## [Unreleased]
 
+### Security
+
+- Public mode exits at startup when `STATBANK_PROXY_SECRET` is unset, empty, or whitespace. The same truthy values as before (`1`, `true`, `yes`, `on`) turn public mode on. The message names the variable and does not include a value. Local mode does not require the variable.
+
 ### Added
 
 - A no-LLM example prints people aged 80 and over in Esbjerg from FOLK1A, with the period and a Danmarks Statistik citation: `uv run python examples/esbjerg_80plus.py`. The README leads with that command. A short muted demo of the Esbjerg and Viborg questions is in `demo/`.

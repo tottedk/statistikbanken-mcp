@@ -3013,10 +3013,15 @@ def answer_with_server(settings: Settings, question: str) -> TurnResult:
 
 
 def check_settings(settings: Settings) -> None:
-    """Refuse a public demo that would start without an xAI key."""
+    """Refuse a public demo that would start without an xAI key or a proxy secret."""
     if settings.public and not settings.api_key:
         raise SystemExit(
             "XAI_API_KEY is missing. Set it in the environment before starting. "
+            "Do not write it into a file."
+        )
+    if settings.public and not settings.proxy_secret.strip():
+        raise SystemExit(
+            "STATBANK_PROXY_SECRET is missing. Set it in the environment before starting. "
             "Do not write it into a file."
         )
 
