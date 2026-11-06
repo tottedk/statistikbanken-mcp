@@ -1198,8 +1198,70 @@ def test_axis_ticks_are_nice_numbers_covering_min_and_max() -> None:
         ]
     )
     axis = chart_axis(series)
-    assert axis == {"min": 1500, "max": 5500, "ticks": [1500, 2500, 3500, 4500, 5500]}
+    assert axis == {
+        "min": 1500,
+        "max": 5500,
+        "ticks": [1500, 2500, 3500, 4500, 5500],
+        "labels": [
+            {"period": "2015K1", "label": "2015 1. kvt."},
+            {"period": "2026K3", "label": "2026 3. kvt."},
+        ],
+    }
     assert "drawChart(data.chart, data.axis)" in PAGE
+
+
+def test_long_quarterly_axis_labels_are_years_not_mixed_quarters() -> None:
+    periods = [f"{year}K{quarter}" for year in range(2008, 2013) for quarter in (1, 2, 3, 4)]
+    facts = [_fact("Esbjerg", period, 1000 + index) for index, period in enumerate(periods)]
+    labels = chart_axis(chart_series(facts))["labels"]
+    assert labels == [
+        {"period": "2008K1", "label": "2008"},
+        {"period": "2009K1", "label": "2009"},
+        {"period": "2010K1", "label": "2010"},
+        {"period": "2011K1", "label": "2011"},
+        {"period": "2012K1", "label": "2012"},
+    ]
+    assert all("kvt" not in item["label"] for item in labels)
+
+    years = [str(year) for year in range(2000, 2021)]
+    yearly = chart_axis(chart_series([_fact("Esbjerg", period, 1) for period in years]))
+    assert [item["label"] for item in yearly["labels"]] == [
+        "2000",
+        "2004",
+        "2008",
+        "2012",
+        "2016",
+        "2020",
+    ]
+
+    months = [f"{year}M{month:02d}" for year in range(2008, 2013) for month in range(1, 13)]
+    monthly = chart_axis(chart_series([_fact("Esbjerg", period, 1) for period in months]))
+    assert [item["label"] for item in monthly["labels"]] == [
+        "2008",
+        "2009",
+        "2010",
+        "2011",
+        "2012",
+    ]
+    assert monthly["labels"][0]["period"] == "2008M01"
+    assert monthly["labels"][-1]["period"] == "2012M01"
+
+    ends = chart_axis(
+        chart_series([_population_fact(3524, "2015K1"), _population_fact(5045, "2026K3")])
+    )
+    assert ends["labels"] == [
+        {"period": "2015K1", "label": "2015 1. kvt."},
+        {"period": "2026K3", "label": "2026 3. kvt."},
+    ]
+
+
+def test_chart_draws_a_solid_line_without_a_dot_on_every_point() -> None:
+    chart = PAGE.split("function drawChart", 1)[1].split("function daDigits", 1)[0]
+    assert "polyline" in chart
+    assert 'stroke-width": "2"' in chart
+    assert "circle" not in chart
+    assert "axis.labels" in chart
+    assert "periods.length / 4" not in chart
 
 
 def test_exports_use_the_same_dimension_label_as_the_table() -> None:

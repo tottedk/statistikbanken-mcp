@@ -325,10 +325,10 @@ function drawChart(series, axis) {
     label.textContent = daTick(value);
     svg.append(label);
   }
-  const step = Math.ceil(periods.length / 4);
-  periods.forEach((period, index) => {
-    if (index % step && index !== periods.length - 1) return;
-    const last = index === periods.length - 1;
+  const marks = axis.labels || [];
+  marks.forEach((mark, index) => {
+    const period = mark.period;
+    const last = index === marks.length - 1;
     const first = index === 0;
     const label = svgEl("text", {
       x: xOf(period),
@@ -337,10 +337,10 @@ function drawChart(series, axis) {
       fill: "#4a453e",
       "font-size": "10"
     });
-    const shown = labelOf.get(period) || period;
+    const shown = mark.label || labelOf.get(period) || period;
     label.textContent = shown;
     const tip = svgEl("title", {});
-    tip.textContent = shown;
+    tip.textContent = labelOf.get(period) || shown;
     label.append(tip);
     svg.append(label);
   });
@@ -348,17 +348,9 @@ function drawChart(series, axis) {
     const color = COLORS[index % COLORS.length];
     const points = item.points.map((point) => xOf(point.period) + "," + yOf(point.value)).join(" ");
     svg.append(svgEl("polyline", {
-      points, fill: "none", stroke: color, "stroke-width": "2"
+      points, fill: "none", stroke: color, "stroke-width": "2",
+      "stroke-linejoin": "round", "stroke-linecap": "round"
     }));
-    for (const point of item.points) {
-      const dot = svgEl("circle", {
-        cx: xOf(point.period), cy: yOf(point.value), r: "3.5", fill: color
-      });
-      const tip = svgEl("title", {});
-      tip.textContent = (point.label || point.period) + ": " + daDigits(point.value);
-      dot.append(tip);
-      svg.append(dot);
-    }
   });
   const wrap = el("div", null, "chart");
   wrap.append(svg);
@@ -1144,6 +1136,66 @@ def chart_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return series
 
 
+_MAX_X_LABELS = 6
+
+
+def _chart_periods(series: list[dict[str, Any]]) -> list[str]:
+    found: set[str] = set()
+    periods: list[str] = []
+    for item in series:
+        for point in item.get("points") or []:
+            period = str(point.get("period") or "")
+            if period and period not in found:
+                found.add(period)
+                periods.append(period)
+    return sorted(periods)
+
+
+def _even_indexes(count: int, limit: int) -> list[int]:
+    if count <= limit:
+        return list(range(count))
+    last = count - 1
+    chosen: list[int] = []
+    for slot in range(limit):
+        index = round(slot * last / (limit - 1))
+        if not chosen or index != chosen[-1]:
+            chosen.append(index)
+    return chosen
+
+
+def _subyear_year(code: str) -> str | None:
+    text = code.strip()
+    for pattern in (_QUARTER_RE, _MONTH_RE, _HALF_RE):
+        match = pattern.fullmatch(text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def chart_x_labels(periods: list[str]) -> list[dict[str, str]]:
+    """Bottom-axis labels. A long quarterly or monthly series uses years."""
+    ordered = sorted({period for period in periods if period})
+    if not ordered:
+        return []
+    years: list[str] = []
+    anchor: dict[str, str] = {}
+    for period in ordered:
+        year = _subyear_year(period)
+        if year is None:
+            years = []
+            break
+        if year not in anchor:
+            anchor[year] = period
+            years.append(year)
+    if len(years) >= 2 and len(ordered) > _MAX_X_LABELS:
+        return [
+            {"period": anchor[years[index]], "label": years[index]}
+            for index in _even_indexes(len(years), _MAX_X_LABELS)
+        ]
+    indexes = _even_indexes(len(ordered), _MAX_X_LABELS)
+    return [{"period": ordered[index], "label": period_label(ordered[index])} for index in indexes]
+
+
 def chart_axis(series: list[dict[str, Any]]) -> dict[str, Any]:
     """Nice y-axis covering every charted value, with about five ticks."""
     values: list[float] = []
@@ -1156,7 +1208,12 @@ def chart_axis(series: list[dict[str, Any]]) -> dict[str, Any]:
     if not values:
         return {}
     low, high, ticks = nice_axis(min(values), max(values))
-    return {"min": low, "max": high, "ticks": ticks}
+    return {
+        "min": low,
+        "max": high,
+        "ticks": ticks,
+        "labels": chart_x_labels(_chart_periods(series)),
+    }
 
 
 def nice_axis(

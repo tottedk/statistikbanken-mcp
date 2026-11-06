@@ -13,6 +13,10 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 - Public mode exits at startup when `STATBANK_PROXY_SECRET` is unset, empty, or whitespace. The same truthy values as before (`1`, `true`, `yes`, `on`) turn public mode on. The message names the variable and does not include a value. Local mode does not require the variable.
 
+### Changed
+
+- The chart is a solid line, without a dot on every point. A long quarterly or monthly series labels the bottom axis with years at the first period of each chosen year, instead of a sparse mix such as `2008 1. kvt.` beside `2012 4. kvt.` A short series still uses the full period label.
+
 ### Added
 
 - A no-LLM example prints people aged 80 and over in Esbjerg from FOLK1A, with the period and a Danmarks Statistik citation: `uv run python examples/esbjerg_80plus.py`. The README leads with that command. A short muted demo of the Esbjerg and Viborg questions is in `demo/`.
