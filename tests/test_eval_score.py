@@ -224,8 +224,25 @@ def test_report_headline_counts_only_correct() -> None:
 
 def test_question_file_is_the_fixed_set() -> None:
     questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    assert [item["id"] for item in questions] == list(range(1, 106))
+    assert [item["id"] for item in questions] == list(range(1, 108))
     by_id = {item["id"]: item for item in questions}
+    growth = {
+        106: ("Hvor meget er befolkningen i danmark vokset siden 1989", "1989"),
+        107: ("Hvor meget er befolkningen i danmark vokset siden 1934", "1934"),
+    }
+    for question_id, (text, year) in growth.items():
+        item = by_id[question_id]
+        assert item["question"] == text
+        assert item["category"] == "time_series"
+        assert item.get("source") is None
+        expect = item["expect"]
+        assert expect["kind"] == "figures"
+        assert len(expect["checks"]) == 1
+        check = expect["checks"][0]
+        assert check["table"] == "BEFOLK2"
+        assert check["variables"] == {"KØN": ["TOT"], "ALDER": ["TOT"]}
+        assert check["time"] == [year, "latest"]
+        assert check["aggregate"] == "values"
     assert by_id[63]["expect"]["checks"][0]["aggregate"] == "sum"
     assert by_id[63]["expect"]["checks"][0]["time"]["year"] == "2025"
     owner = [item for item in questions if item.get("source") == "owner"]
