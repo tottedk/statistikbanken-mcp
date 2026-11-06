@@ -2439,5 +2439,59 @@
     },
     "note": "FOLK1A, Odense (461), ages 23 through 45 inclusive, both sexes, latest quarter, summed.",
     "source": "owner"
+  },
+  {
+    "id": 106,
+    "question": "Hvor meget er befolkningen i danmark vokset siden 1989",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1989",
+            "latest"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Denmark on 1 January, BEFOLK2, sex TOT and age TOT. The scored figures are the 1989 headcount and this table's latest 1 January headcount. People growth is the later figure minus the 1989 figure, and the percentage is that difference divided by the 1989 figure. The schema has no derived aggregate, so those two results are not frozen: an answer is correct when both stocks appear. On 6 November 2026 the latest code was 2026 and the stocks were 5,129,778 and 6,025,603, a difference of 895,825 people (17.46%). BEFOLK1 and FT (Hele landet) matched both stocks. FOLK1A starts at 2008K1. Its 2008K1 and 2026K1 matched BEFOLK2, and 2026K3 was 6,031,699, a later observation of the same population. That cross-table pair is not this check. HISB3 publishes the stock in thousands (1989: 5,130) and is not the people count."
+  },
+  {
+    "id": 107,
+    "question": "Hvor meget er befolkningen i danmark vokset siden 1934",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1934",
+            "latest"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Same BEFOLK2 selection as question 106, with 1934 instead of 1989. On 6 November 2026 the stocks were 3,650,500 on 1 January 1934 and 6,025,603 on 1 January 2026, a difference of 2,375,103 people (65.06%). FT has no 1934 (1930, then 1935). BEFOLK1 starts in 1971. FOLK1A starts at 2008K1. HISB3's 1934 stock is 3,651 thousand, rounded, not 3,650,500 people. The difference and percentage move when the latest 1 January stock moves, so they are not frozen."
   }
 ]
