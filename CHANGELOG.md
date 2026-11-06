@@ -9,6 +9,10 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ## [Unreleased]
 
+### Added
+
+- A no-LLM example prints people aged 80 and over in Esbjerg from FOLK1A, with the period and a Danmarks Statistik citation: `uv run python examples/esbjerg_80plus.py`. The README leads with that command. A short muted demo of the Esbjerg and Viborg questions is in `demo/`.
+
 ### Changed
 
 - A variable left out of `hent_data` is set to a top-level total (`I alt`, `Total`, `Hele landet`, or code TOT or IALT). A longer "i alt" label is used only when the API allows elimination. Time left out is the latest published period. Both are listed in `defaults`. Search ranks FOLK1A, AUS08, INDKP105, and STRAF10 first for population by municipality or age, registered unemployment, personal income, and crimes reported. The page shows a miss (`Mente du …`) in Basis and Avanceret, and keeps the note when a requested period is not published yet. The prompt's period example is built from today's date.
