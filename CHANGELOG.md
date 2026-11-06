@@ -11,7 +11,7 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ### Added
 
-- A no-LLM example prints people aged 80 and over in Esbjerg from FOLK1A, with the period and a Danmarks Statistik citation: `uv run python examples/esbjerg_80plus.py`. The README leads with that command. An earlier local demo recording and poster are in `demo/`.
+- A no-LLM example prints people aged 80 and over in Esbjerg from FOLK1A, with the period and a Danmarks Statistik citation: `uv run python examples/esbjerg_80plus.py`. The README leads with that command. A short muted demo of the Esbjerg and Viborg questions is in `demo/`.
 
 ### Changed
 

@@ -59,9 +59,9 @@ The same six questions are asserted from recorded responses in `tests/test_accep
 
 ## Demo
 
-[![Earlier recording: people aged 80 and over in Rudersdal and Hørsholm](demo/poster-v2.png)](demo/statistikbanken-demo-v2.mp4)
+[![People aged 80 and over in Esbjerg and Viborg, table FOLK1A](demo/poster-v2.png)](demo/statistikbanken-demo-v2.mp4)
 
-[Watch the demo](demo/statistikbanken-demo-v2.mp4) (about two minutes). The recording and the poster are an earlier local run. They ask about Rudersdal and Hørsholm, so the places on screen are not the Esbjerg and Viborg examples above. The page, the Basis/Avanceret switch, the FOLK1A source link, and the number guard are the same.
+[Watch the demo](demo/statistikbanken-demo-v2.mp4) (about two minutes, muted). Basis asks how many people over 80 live in Esbjerg: FOLK1A, 2026 Q3, 7,556. Avanceret shows people aged 80 and over in Esbjerg and Viborg since 2015 (Esbjerg 4,678 → 7,556, Viborg 4,126 → 6,420), the chart, the FOLK1A source link, and CSV, Excel, JSON, and PNG export. In that view the number guard hides the model's prose when a figure was not in the fetched rows, and the table of fetched rows stays. A question about Narnia gets no invented number.
 
 ## Tools
 
