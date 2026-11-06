@@ -192,12 +192,13 @@ docker run --rm -p 8080:8080 \
   -e STATBANK_PUBLIC=1 \
   -e STATBANK_XAI_MODEL=grok-4 \
   -e XAI_API_KEY \
+  -e STATBANK_PROXY_SECRET \
   statistikbanken-web
 ```
 
 The image is Python 3.12. It listens on `STATBANK_HOST` (the image sets `0.0.0.0`) and on `PORT` when that is set, otherwise `STATBANK_PORT` (8080). `GET /healthz` returns 200 and does not call the model or Statistikbanken.
 
-`STATBANK_PUBLIC=1` uses xAI only. The process exits at startup when `XAI_API_KEY` is missing. Pass the key in from the environment (`-e XAI_API_KEY` with no value copies it from the shell). Do not write `XAI_API_KEY` or `STATBANK_PROXY_SECRET` into a file, the image, or the repo. Set `STATBANK_XAI_MODEL` when you deploy. The default name `grok-4` may be retired.
+`STATBANK_PUBLIC=1` uses xAI only. The process exits at startup when `XAI_API_KEY` is missing, and when `STATBANK_PROXY_SECRET` is missing or blank. Pass each value in from the environment (`-e XAI_API_KEY` with no value copies it from the shell; do the same for `STATBANK_PROXY_SECRET`). Do not write `XAI_API_KEY` or `STATBANK_PROXY_SECRET` into a file, the image, or the repo. Set `STATBANK_XAI_MODEL` when you deploy. The default name `grok-4` may be retired.
 
 Public defaults, each still overridable: 40 questions a day (`STATBANK_DAILY_CAP`), 3 per minute per visitor (`STATBANK_RATE_PER_MINUTE`), 6 tool calls, and 300 characters. At most two questions run at once. The daily count is kept in memory and starts again at zero when the process restarts. That is not a spending cap. The hard cap is the prepaid xAI credit. `STATBANK_DAILY_CAP=0` stops the demo. `STATBANK_STATE_FILE`, if set, stores the date and the daily count only.
 

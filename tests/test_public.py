@@ -220,6 +220,7 @@ def test_public_mode_forces_xai_and_tighter_defaults(
 ) -> None:
     monkeypatch.setenv("STATBANK_PUBLIC", "1")
     monkeypatch.setenv("XAI_API_KEY", "dummy")
+    monkeypatch.setenv("STATBANK_PROXY_SECRET", "test-proxy-secret")
     monkeypatch.setenv("STATBANK_LLM", "ollama")
     monkeypatch.setenv("STATBANK_BASE_URL", "http://127.0.0.1:11434/v1")
     monkeypatch.setenv("STATBANK_MODEL", "qwen2.5")
@@ -269,6 +270,56 @@ def test_public_mode_exits_when_the_key_is_missing(
     with pytest.raises(SystemExit, match="XAI_API_KEY is missing") as caught:
         check_settings(settings)
     assert "Do not write it into a file" in str(caught.value)
+
+
+@pytest.mark.parametrize("flag", ("1", "true", "yes", "on"))
+@pytest.mark.parametrize(
+    "secret",
+    (None, "", " \t\r\n"),
+    ids=("missing", "empty", "whitespace"),
+)
+def test_public_mode_exits_when_the_proxy_secret_is_missing_or_blank(
+    clean_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    flag: str,
+    secret: str | None,
+) -> None:
+    monkeypatch.setenv("STATBANK_PUBLIC", flag)
+    monkeypatch.setenv("XAI_API_KEY", "dummy")
+    if secret is not None:
+        monkeypatch.setenv("STATBANK_PROXY_SECRET", secret)
+    settings = settings_from_env([])
+    assert settings.public is True
+    assert settings.proxy_secret == ""
+    with pytest.raises(SystemExit, match="STATBANK_PROXY_SECRET is missing") as caught:
+        check_settings(settings)
+    message = str(caught.value)
+    assert "STATBANK_PROXY_SECRET" in message
+    assert "dummy" not in message
+    assert "test-proxy-secret" not in message
+
+
+def test_public_mode_does_not_exit_for_a_proxy_secret(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("STATBANK_PUBLIC", "1")
+    monkeypatch.setenv("XAI_API_KEY", "dummy")
+    monkeypatch.setenv("STATBANK_PROXY_SECRET", "test-proxy-secret")
+    settings = settings_from_env([])
+    assert settings.public is True
+    assert settings.proxy_secret == "test-proxy-secret"
+    check_settings(settings)
+
+
+@pytest.mark.parametrize("flag", (None, "", "0", "false", "no", "off"))
+def test_local_mode_does_not_require_a_proxy_secret(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, flag: str | None
+) -> None:
+    if flag is not None:
+        monkeypatch.setenv("STATBANK_PUBLIC", flag)
+    settings = settings_from_env([])
+    assert settings.public is False
+    check_settings(settings)
 
 
 def test_healthz_skips_the_model_and_the_proxy_secret() -> None:
