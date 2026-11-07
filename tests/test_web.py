@@ -631,6 +631,17 @@ def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
     assert hidden.show_numbers is False
 
 
+def test_seasonally_adjusted_net_unemployment_keeps_those_definitions() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults
+
+    adjusted = apply_fetch_defaults(
+        "Hvor mange nettoledige var der i Danmark i august 2026, sæsonkorrigeret?",
+        {"table": "AUS07", "values": {"YD": ["TOT"], "SAESONFAK": ["24"], "Tid": ["2026M08"]}},
+    )
+    assert adjusted["values"]["YD"] == ["NET"]
+    assert adjusted["values"]["SAESONFAK"] == ["10"]
+
+
 def test_fetch_defaults_keep_the_preferred_table_and_the_headline_code() -> None:
     from statistikbanken_mcp.web import apply_fetch_defaults, preferred_table
 
@@ -1450,6 +1461,88 @@ def test_question_and_label_numbers_are_not_paired_with_a_place() -> None:
         "Viborg (10 år): 95.776 → 98.104.",
     ):
         assert guard_answer(decade, text, viborg) == text
+
+
+def test_vokset_med_keeps_a_true_difference_and_hides_a_false_one() -> None:
+    question = "Hvor meget er befolkningen i danmark vokset siden 1989"
+    facts = [
+        _population_fact(5129778, "1989"),
+        _population_fact(6025603, "2026"),
+    ]
+    kept = guard_answer(
+        question,
+        "Befolkningen er vokset med 895.825 personer siden 1989.",
+        facts,
+    )
+    assert "895.825" in kept
+    assert kept != UNVERIFIED_NUMBERS
+    hidden = guard_answer(question, "Befolkningen er vokset med 895.826 personer.", facts)
+    assert "895.826" not in hidden
+    level = guard_answer(question, "I 2026 var tallet 6.025.603.", facts)
+    assert "6.025.603" in level
+
+
+def test_flere_end_shows_both_stocks_and_the_difference() -> None:
+    question = (
+        "Hvor mange flere indbyggere har Esbjerg Kommune i seneste kvartal end 1. januar 2008?"
+    )
+    facts = [
+        _population_fact(114244, "2008K1", "Esbjerg"),
+        _population_fact(114824, "2026K3", "Esbjerg"),
+    ]
+    answer = guard_answer(question, "114.824", facts)
+    assert "114.244" in answer
+    assert "114.824" in answer
+    assert "580" in answer
+
+
+def test_a_missing_census_year_names_the_gap() -> None:
+    question = "Hvor mange boede der i Danmark ifølge folketællingen i 1934?"
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": "",
+            "result": (
+                "'1934' is 1934, which is not in table FT. "
+                "Neighbouring periods: 1930 and 1935. Available: 1769–2026."
+            ),
+        }
+    ]
+    answer = guard_answer(question, "Jeg fandt ingen tal.", [], calls)
+    assert answer != NO_DATA_ANSWER
+    assert "1930" in answer and "1935" in answer
+    assert "FT" in answer
+    assert "ingen tal i Statistikbanken" not in answer
+
+
+def test_a_table_that_starts_later_is_named() -> None:
+    question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
+    calls = [
+        {
+            "name": "tabelinfo",
+            "arguments": "",
+            "result": json.dumps(
+                {
+                    "id": "FOLK1A",
+                    "variables": [
+                        {
+                            "id": "Tid",
+                            "time": True,
+                            "time_span": {
+                                "first": {"id": "2008K1", "text": "2008K1"},
+                                "last": {"id": "2026K3", "text": "2026K3"},
+                                "count": 75,
+                            },
+                        }
+                    ],
+                }
+            ),
+        }
+    ]
+    answer = guard_answer(question, "Jeg fandt ingen tal.", [], calls)
+    assert "FOLK1A" in answer
+    assert "2008" in answer
+    assert "ingen tal i Statistikbanken" not in answer
 
 
 def test_correct_derived_figures_pass_and_invented_ones_do_not() -> None:

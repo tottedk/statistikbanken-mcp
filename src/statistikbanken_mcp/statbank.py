@@ -268,8 +268,18 @@ class StatbankClient:
         for index, table in enumerate(catalogue):
             score = _score_table(table, tokens, folded, named_ids)
             place_hit = places if str(table.get("id")) == "FOLK1A" else []
-            if place_hit:
+            years = _years_in_query(query)
+            population_query = any(
+                word in folded for word in ("befolkning", "indbyggere", "population", "people")
+            )
+            if places and years and place_hit and population_query:
+                # The named municipality stays on FOLK1A. first_period shows
+                # when that series starts after the year.
+                score = (score or 0) + 1200
+            elif place_hit:
                 score = (score or 0) + 250
+            elif years and not places:
+                score = (score or 0) + _coverage_adjustment(table, years)
             if score is None:
                 continue
             title = table.get("text") or ""
@@ -277,6 +287,7 @@ class StatbankClient:
                 "id": table.get("id"),
                 "title": title,
                 "unit": table.get("unit") or "",
+                "first_period": table.get("firstPeriod"),
                 "latest_period": table.get("latestPeriod"),
                 "variables": list(table.get("variables") or []),
             }
@@ -704,8 +715,27 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
                 "jobless",
             ),
         ),
-        # AUS08 is area x month. Age or sex belongs on a table that has those columns.
-        ("stilling", "aku", "alder", "køn", "koen", "sex", "age"),
+        # AUS08 is gross unemployment by area and month. Net is AUS07.
+        # A yearly average is the annual table AUL01, not this monthly series.
+        ("stilling", "aku", "alder", "køn", "koen", "sex", "age", "netto", "gennemsnit"),
+    ),
+    # AUS07 splits net (NET) and gross (TOT). AUS08 has no net series.
+    _TablePreference(
+        "AUS07",
+        (
+            ("netto", "nettoledige", "nettoledig"),
+            ("ledige", "ledighed", "fuldtidsledige", "fuldtidsledig"),
+        ),
+        ("procent", "pct"),
+    ),
+    # AUL01 is the published annual average of full-time unemployed.
+    _TablePreference(
+        "AUL01",
+        (
+            ("fuldtidsledige", "fuldtidsledig", "ledige", "ledighed"),
+            ("gennemsnit",),
+        ),
+        ("procent", "pct", "måned", "maaned", "kvartal", "sæson", "saeson"),
     ),
     _TablePreference(
         "AUF01",
@@ -846,6 +876,54 @@ def _pre_tax_adjustment(query: str, title: str, tokens: list[str]) -> int:
     if "disponibel" in folded:
         score -= 1 if breakdown else 40
     return score
+
+
+def _years_in_query(query: str) -> list[int]:
+    return [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", query)]
+
+
+def _period_start_year(value: object) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = re.match(r"(\d{4})", value)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _coverage_adjustment(table: dict[str, Any], years: list[int]) -> int:
+    """Prefer a table whose published span contains the year in the query.
+
+    A place match is handled separately and is not reordered here, so a
+    municipality question stays on the municipality table. The hit still
+    shows first_period when that table starts too late.
+    """
+    first = _period_start_year(table.get("firstPeriod"))
+    last = _period_start_year(table.get("latestPeriod"))
+    if first is None or last is None:
+        return 0
+    if any(first <= year <= last for year in years):
+        return 800
+    if all(year < first for year in years):
+        return -800
+    return 0
+
+
+def _neighbouring_note(variable: _Variable, year: int) -> str:
+    """Name the periods on either side when a year sits in a gap."""
+    earlier: str | None = None
+    later: str | None = None
+    for item in variable.values:
+        parsed = _parsed_period(item["id"])
+        if parsed is None:
+            continue
+        if parsed[0] < year:
+            earlier = item["id"]
+        elif parsed[0] > year and later is None:
+            later = item["id"]
+    if earlier and later:
+        return f" Neighbouring periods: {earlier} and {later}."
+    return ""
 
 
 def _score_table(
@@ -1848,8 +1926,8 @@ def _year_meaning(
         if unpublished:
             raise _not_published(token, str(year), table, variable)
         raise StatbankError(
-            f"{token.strip()!r} is {year}, which is not in table {table.id}. "
-            f"{_time_advice(variable, str(year))}"
+            f"{token.strip()!r} is {year}, which is not in table {table.id}."
+            f"{_neighbouring_note(variable, year)} {_time_advice(variable, str(year))}"
         )
     plan = _YearPlan(year=str(year), codes=tuple(codes), complete=_year_is_complete(codes))
     return list(codes), plan, str(year)

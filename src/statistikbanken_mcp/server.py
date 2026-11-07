@@ -96,7 +96,10 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
     by origin is FOLK1E, registered unemployment is AUS08, personal income is
     INDKP105, and crimes reported are STRAF10. A table id in the query stays
     first. `limit` is 1–25 and defaults to 10.
-    Each hit has id, title, unit, latest_period, and variables. The title is the
+    Each hit has id, title, unit, first_period, latest_period, and variables.
+    first_period is the table's earliest published period. A year before it is
+    not in that table; use a hit whose first_period covers the year.
+    The title is the
     table's own wording and can be narrower than the query. Read it, then
     tabelinfo, before treating the hit as the answer. If nothing matches, the
     tool returns an error that suggests a broader subject. Variable entries are

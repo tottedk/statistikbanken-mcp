@@ -30,6 +30,7 @@ async def _session() -> None:
                 "id": "FOLK1A",
                 "title": "Befolkningen den 1. i kvartalet",
                 "unit": "Antal",
+                "first_period": "2008K1",
                 "latest_period": "2026K3",
                 "variables": ["område", "køn", "alder", "civilstand", "tid"],
             }

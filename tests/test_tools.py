@@ -17,10 +17,30 @@ def test_find_tabel_befolkning_leads_with_folk1a() -> None:
         "id": "FOLK1A",
         "title": "Befolkningen den 1. i kvartalet",
         "unit": "Antal",
+        "first_period": "2008K1",
         "latest_period": "2026K3",
         "variables": ["område", "køn", "alder", "civilstand", "tid"],
     }
     assert len(hits) == 5
+
+
+def test_net_and_annual_unemployment_rank_their_own_tables() -> None:
+    net = [hit["id"] for hit in find_tabel("nettoledige Danmark sæsonkorrigeret", limit=5)]
+    assert net[0] == "AUS07"
+    annual = [hit["id"] for hit in find_tabel("fuldtidsledige Esbjerg gennemsnit 2025", limit=5)]
+    assert annual[0] == "AUL01"
+    gross = [hit["id"] for hit in find_tabel("bruttoledighed", limit=5)]
+    assert gross[0] == "AUS08"
+
+
+def test_a_year_before_folk1a_ranks_a_table_that_covers_it() -> None:
+    hits = find_tabel("befolkning siden 1934", limit=8)
+    assert hits[0]["id"] == "BEFOLK2"
+    assert hits[0]["first_period"] == "1901"
+    assert find_tabel("FOLK1A", limit=1)[0]["first_period"] == "2008K1"
+    place = find_tabel("befolkning Viborg siden 2000", limit=3)
+    assert place[0]["id"] == "FOLK1A"
+    assert place[0]["first_period"] == "2008K1"
 
 
 def test_find_tabel_matches_id_case_insensitively() -> None:

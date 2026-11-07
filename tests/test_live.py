@@ -409,7 +409,13 @@ def test_denmark_population_on_1_january_reaches_1934_and_1989(
         {"KØN": ["TOT"], "ALDER": ["TOT"], "Tid": ["1934", "1989"]},
     )
     by_year = {row["Tid"]: row["value"] for row in historical["rows"]}
-    assert by_year == {"1934": 3_650_500, "1989": 5_129_778}
+    assert by_year["1934"] == 3_650_500
+    assert by_year["1989"] == 5_129_778
+    stock_2026 = hent_data(
+        "BEFOLK2",
+        {"KØN": ["TOT"], "ALDER": ["TOT"], "Tid": ["2026"]},
+    )
+    assert stock_2026["rows"][0]["value"] == 6_025_603
     assert hent_data("BEFOLK1", {"Tid": ["1989"]})["rows"][0]["value"] == 5_129_778
     assert hent_data("FT", {"HOVEDDELE": ["000"], "Tid": ["1989"]})["rows"][0]["value"] == 5_129_778
     latest = hent_data("BEFOLK2", {"KØN": ["TOT"], "ALDER": ["TOT"]})
@@ -431,8 +437,9 @@ def test_denmark_population_on_1_january_reaches_1934_and_1989(
     for year in ("1934", "1989"):
         with pytest.raises(ToolError, match="not in table FOLK1A"):
             hent_data("FOLK1A", {"OMRÅDE": ["000"], "Tid": [year]})
-    with pytest.raises(ToolError, match="not in table FT"):
+    with pytest.raises(ToolError, match="not in table FT") as caught:
         hent_data("FT", {"HOVEDDELE": ["000"], "Tid": ["1934"]})
+    assert "1930" in str(caught.value) and "1935" in str(caught.value)
     for start in (by_year["1934"], by_year["1989"]):
         difference = end["value"] - start
         assert difference > 0

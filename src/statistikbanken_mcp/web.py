@@ -97,6 +97,16 @@ give that figure and say the other is not covered.
 steget, faldet, or ændret asks for the change: use the change unit,
 or the first and last value of one series.
 Do not answer with the index level alone.
+vokset, flere end, and siden ask for the change between two dates.
+Quote both values, the difference, and the percentage.
+Read first_period on a find_tabel hit. If the question names a year before
+that period, open a hit whose first_period covers the year before you stop.
+If a year is missing inside one table, say which table and name the
+neighbouring periods. Do not say the figure exists in no table.
+Nettoledige is the net count. Bruttoledige is the gross count.
+Sæsonkorrigeret is the seasonally adjusted count, not opregnede faktiske.
+A whole year asked as an average is the published annual figure,
+not a mean of the monthly actual series.
 A named year is the Tid code for that year, such as 2025.
 Do not pass an open >= range for one year."""
 
@@ -1561,7 +1571,12 @@ _TREND_MARKERS = (
     "over time",
     "since",
     "history",
+    "vokset",
+    "flere",
+    "færre",
+    "faerre",
 )
+_CHANGE_MARKERS = ("vokset", "flere", "faerre")
 _PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
 # The year in 2015K1, 2015H1, or a bare period such as 2024. The quarter digit is not a figure.
 _PERIOD_YEAR_RE = re.compile(
@@ -1617,6 +1632,125 @@ def _asks_for_trend(question: str) -> bool:
     return any(marker in folded for marker in _TREND_MARKERS)
 
 
+def _asks_for_change(question: str) -> bool:
+    """A growth or 'how many more' question, not every time series."""
+    folded = question.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
+    return any(marker in folded for marker in _CHANGE_MARKERS)
+
+
+def _period_sort_key(code: str) -> tuple[int, int, int, str]:
+    match = re.fullmatch(
+        r"(\d{4})(?:(K|Q)([1-4])|(H)([12])|(M)(\d{2}))?",
+        code.strip(),
+        re.IGNORECASE,
+    )
+    if match is None:
+        return (0, 0, 0, code)
+    year = int(match.group(1))
+    if match.group(2):
+        return (year, 1, int(match.group(3)), code)
+    if match.group(4):
+        return (year, 2, int(match.group(5)), code)
+    if match.group(6):
+        return (year, 3, int(match.group(7)), code)
+    return (year, 0, 0, code)
+
+
+def _comparison_line(facts: list[dict[str, Any]]) -> str | None:
+    """Both endpoints, the people difference, and the percentage. One series only."""
+    numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
+    if len(numeric) < 2:
+        return None
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for fact in numeric:
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("unit") or ""),
+            str(fact.get("detail") or ""),
+        )
+        groups.setdefault(key, []).append(fact)
+    if len(groups) != 1:
+        return None
+    series = next(iter(groups.values()))
+    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    first, last = ordered[0], ordered[-1]
+    if str(first.get("period") or "") == str(last.get("period") or ""):
+        return None
+    start, end = float(first["value"]), float(last["value"])
+    if start == 0:
+        return None
+    difference = abs(end - start)
+    percent = difference / abs(start) * 100
+    shown = f"{percent:.2f}".replace(".", ",")
+    return (
+        f"{_da_number(start)} ({period_label(str(first.get('period') or ''))}) og "
+        f"{_da_number(end)} ({period_label(str(last.get('period') or ''))}). "
+        f"Forskellen er {_da_number(difference)} ({shown} procent)."
+    )
+
+
+def _states_change(answer: str, facts: list[dict[str, Any]]) -> bool:
+    line = _comparison_line(facts)
+    if line is None:
+        return False
+    stated = _numbers_in(answer)
+    needed = _numbers_in(line)
+    # The two stocks and the difference. The percentage may be rounded.
+    if len(needed) < 3:
+        return False
+
+    def near(wanted: float) -> bool:
+        return any(abs(item - wanted) <= max(0.05, abs(wanted) * 0.001) for item in stated)
+
+    return all(near(wanted) for wanted in needed[:3])
+
+
+_NEIGHBOUR_RE = re.compile(
+    r"not in table (?P<table>[A-Za-z0-9]+)\. Neighbouring periods: "
+    r"(?P<before>\S+) and (?P<after>\S+)"
+)
+_SPAN_RE = re.compile(
+    r'"id"\s*:\s*"(?P<table>[A-Za-z0-9]+)".*?"first"\s*:\s*\{\s*"id"\s*:\s*"(?P<first>[^"]+)"',
+    re.DOTALL,
+)
+
+
+def _coverage_explanation(question: str, calls: list[dict[str, str]] | None) -> str:
+    """Say which table lacks the year. Do not claim that no table has any data."""
+    if not calls:
+        return ""
+    years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
+    for call in calls:
+        if call.get("name") != "hent_data":
+            continue
+        match = _NEIGHBOUR_RE.search(str(call.get("result") or ""))
+        if match is None:
+            continue
+        year = years[-1] if years else ""
+        return (
+            f"{match.group('table')} har ikke {year}. "
+            f"Nærmeste perioder i tabellen er {match.group('before')} og {match.group('after')}."
+        )
+    if not years:
+        return ""
+    requested = min(years)
+    late: list[str] = []
+    for call in calls:
+        if call.get("name") != "tabelinfo":
+            continue
+        match = _SPAN_RE.search(str(call.get("result") or ""))
+        if match is None:
+            continue
+        first = match.group("first")
+        start = re.match(r"(\d{4})", first)
+        if start and int(start.group(1)) > requested:
+            late.append(f"{match.group('table')} starter ved {first}")
+    if not late:
+        return ""
+    joined = " og ".join(dict.fromkeys(late))
+    return f"{joined}, så {requested} er ikke med i den tabel."
+
+
 def _closing_instruction(question: str) -> str:
     """Last instruction before the model writes. Small models follow the end."""
     if _looks_danish(question):
@@ -1667,12 +1801,15 @@ def guard_answer(
         note = _timeout_after_table(calls)
         if note:
             return note
-        if _is_page_message(answer):
-            return answer
+        gap = _coverage_explanation(question, calls)
         if _explicit_gap(answer) and not _log_unverified(answer, question, facts, calls):
             return answer
         if _log_unverified(answer, question, facts, calls):
             return NO_FETCHED_NUMBERS
+        if gap:
+            return gap
+        if _is_page_message(answer):
+            return answer
         if _household_exact_unpublished(question):
             return _UNPUBLISHED_HOUSEHOLD
         return NO_DATA_ANSWER
@@ -1687,9 +1824,16 @@ def guard_answer(
                 question,
             )
     if _log_unverified(answer, question, facts, calls):
+        change = _comparison_line(facts) if _asks_for_change(question) else None
+        if change:
+            return change
         if _single_fact(facts):
             return _summary_line(facts[0])
         return UNVERIFIED_NUMBERS
+    if _asks_for_change(question) and not _states_change(answer, facts):
+        change = _comparison_line(facts)
+        if change:
+            return f"{change}\n{answer}" if answer else change
     if _single_fact(facts):
         line = _summary_line(facts[0])
         return f"{line}\n\n{answer}" if answer else line
@@ -1922,8 +2066,13 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
     values = dict(updated.get("values") or {})
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
-    if table == "AUS08" and not re.search(r"procent|pct\b|%", folded):
-        _put_code(values, "SAESONFAK", ["24"])
+    if table in {"AUS07", "AUS08", "AUS09"} and not re.search(r"procent|pct\b|%", folded):
+        if re.search(r"sæsonkorriger|saesonkorriger|seasonally", folded):
+            _put_code(values, "SAESONFAK", ["10"])
+        else:
+            _put_code(values, "SAESONFAK", ["24"])
+    if table == "AUS07" and re.search(r"netto", folded) and "brutto" not in folded:
+        _put_code(values, "YD", ["NET"])
     if table == "PRIS01" and re.search(r"brændstof|braendstof|benzin|diesel", folded):
         codes = _codes(values, "VAREGR")
         if any(_FUEL_CHILD_RE.fullmatch(code) for code in codes):
@@ -2531,7 +2680,8 @@ def _near(number: float, allowed: set[float]) -> bool:
 
 _DERIVED_BEFORE = {
     "difference": re.compile(
-        r"(?:forskellen|forskel|difference|stigningen|stigning|faldet|fald)\b"
+        r"(?:forskellen|forskel|difference|stigningen|stigning|faldet|fald"
+        r"|vokset med|oegget med|øget med)\b"
         r"(?:[ \t]+\S+){0,3}[ \t]*$",
         re.IGNORECASE,
     ),

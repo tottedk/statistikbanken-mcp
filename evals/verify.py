@@ -28,6 +28,34 @@ class VerifierError(Exception):
     """The expected selection could not be read from the API."""
 
 
+def newest_table_id(tables: list[dict[str, Any]], spec: dict[str, Any]) -> str:
+    """Highest numeric id with this prefix whose title matches every required part."""
+    prefix = str(spec.get("prefix") or "")
+    required = [str(part).casefold() for part in spec.get("title") or []]
+    blocked = [str(part).casefold() for part in spec.get("not_title") or []]
+    best_id = ""
+    best_number = -1
+    for table in tables:
+        table_id = str(table.get("id") or "")
+        if not table_id.startswith(prefix):
+            continue
+        suffix = table_id[len(prefix) :]
+        if not suffix.isdigit():
+            continue
+        title = str(table.get("text") or table.get("title") or "").casefold()
+        if any(part not in title for part in required):
+            continue
+        if any(part in title for part in blocked):
+            continue
+        number = int(suffix)
+        if number > best_number:
+            best_number = number
+            best_id = table_id
+    if not best_id:
+        raise VerifierError(f"no table matches {prefix}")
+    return best_id
+
+
 def truths_for(question: dict[str, Any], *, client: ApiClient | None = None) -> list[Truth]:
     """One truth per acceptable selection. A failed alternative is skipped."""
     expect = question.get("expect") or {}
@@ -39,12 +67,22 @@ def truths_for(question: dict[str, Any], *, client: ApiClient | None = None) -> 
     errors: list[str] = []
     for check in checks:
         try:
-            found.append(evaluate_check(check, fetch_rows=api.rows, time_codes=api.time_codes))
+            resolved = _resolve_table(check, api)
+            found.append(evaluate_check(resolved, fetch_rows=api.rows, time_codes=api.time_codes))
         except VerifierError as exc:
             errors.append(str(exc))
     if checks and not found:
         raise VerifierError("; ".join(errors) or "no selection could be read")
     return found
+
+
+def _resolve_table(check: dict[str, Any], client: ApiClient) -> dict[str, Any]:
+    table = check.get("table")
+    if not isinstance(table, dict):
+        return check
+    resolved = dict(check)
+    resolved["table"] = client.newest_id(table)
+    return resolved
 
 
 def evaluate_check(check: dict[str, Any], *, fetch_rows: FetchRows, time_codes: TimeCodes) -> Truth:
@@ -184,6 +222,15 @@ class ApiClient:
 
     def __init__(self) -> None:
         self._info: dict[str, dict[str, Any]] = {}
+        self._tables: list[dict[str, Any]] | None = None
+
+    def newest_id(self, spec: dict[str, Any]) -> str:
+        if self._tables is None:
+            payload = json.loads(_post("tables", {"lang": "da", "format": "JSON"}).decode())
+            if not isinstance(payload, list):
+                raise VerifierError("table catalogue was not a list")
+            self._tables = [item for item in payload if isinstance(item, dict)]
+        return newest_table_id(self._tables, spec)
 
     def time_codes(self, table: str) -> tuple[str, list[str]]:
         info = self._tableinfo(table)

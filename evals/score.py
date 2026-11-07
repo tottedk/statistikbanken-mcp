@@ -271,6 +271,8 @@ def classify(question: dict[str, Any], result: dict[str, Any], truths: list[Trut
         return _score_too_broad(question, result)
     if kind in {"no_table", "not_available"}:
         return _score_gap(question, result)
+    if kind == "coverage_gap":
+        return _score_coverage_gap(question, result, truths)
     return "edge_behaviour_wrong"
 
 
@@ -385,6 +387,31 @@ def _score_too_broad(question: dict[str, Any], result: dict[str, Any]) -> str:
         return "edge_behaviour_wrong"
     if _statistics(str(result.get("answer") or ""), str(question.get("question") or "")):
         return "edge_behaviour_wrong"
+    return "correct"
+
+
+def _score_coverage_gap(
+    question: dict[str, Any], result: dict[str, Any], truths: list[Truth]
+) -> str:
+    """An explanation of a missing period. The generic no-data sentence is not enough."""
+    answer = str(result.get("answer") or "")
+    if _is_placeholder(answer) or _is_no_data(answer):
+        return "edge_behaviour_wrong"
+    text = _visible(result).casefold()
+    required = [
+        str(phrase).casefold() for phrase in (question.get("expect") or {}).get("require_any") or []
+    ]
+    if required and not any(phrase in text for phrase in required):
+        return "edge_behaviour_wrong"
+    stated = _statistics(answer, str(question.get("question") or ""))
+    if not stated or not truths:
+        return "correct"
+    allowed = [value for truth in truths for value in truth.values]
+    if len(allowed) >= 2:
+        allowed.append(abs(allowed[0] - allowed[-1]))
+    for number in stated:
+        if not any(close(number, value) for value in allowed):
+            return "edge_behaviour_wrong"
     return "correct"
 
 
