@@ -422,6 +422,10 @@ def _score_coverage_gap(
     ]
     if required and not any(phrase in text for phrase in required):
         return "edge_behaviour_wrong"
+    for group in (question.get("expect") or {}).get("require_all") or []:
+        phrases = [str(phrase).casefold() for phrase in group]
+        if phrases and not any(phrase in text for phrase in phrases):
+            return "edge_behaviour_wrong"
     if _denies_fetched_period(text, truths):
         return "edge_behaviour_wrong"
     stated = _statistics(_without_period_labels(answer), str(question.get("question") or ""))

@@ -825,7 +825,12 @@ async def run_turn(
                 call.arguments = apply_fetch_defaults(question, call.arguments)
                 if ranked and call.arguments.get("table"):
                     call.arguments["table"] = preferred_table(ranked, str(call.arguments["table"]))
-            result = await _invoke(runner, call)
+            blocked = (
+                net_series_block(question, call.arguments)
+                if call.name == "hent_data" and isinstance(call.arguments, dict)
+                else ""
+            )
+            result = blocked or await _invoke(runner, call)
             if (
                 call.name == "hent_data"
                 and isinstance(call.arguments, dict)
@@ -1770,6 +1775,14 @@ def _without_false_omissions(answer: str, facts: list[dict[str, Any]]) -> str:
     return " ".join(kept)
 
 
+def _with_boundary_note(question: str, facts: list[dict[str, Any]], text: str) -> str:
+    """Keep the coverage caveat when the comparison line replaces the prose."""
+    note = _reform_note(question, facts)
+    if note and note.casefold() not in text.casefold():
+        return f"{text}\n{note}" if text else note
+    return text
+
+
 def _reform_note(question: str, facts: list[dict[str, Any]]) -> str:
     """A municipality series that starts in 2008 is the post-2007 boundary."""
     years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
@@ -1917,7 +1930,7 @@ def guard_answer(
     if _log_unverified(answer, question, facts, calls):
         change = _comparison_line(facts) if _asks_for_change(question) else None
         if change:
-            return change
+            return _with_boundary_note(question, facts, change)
         if _single_fact(facts):
             return _summary_line(facts[0])
         return UNVERIFIED_NUMBERS
@@ -1929,7 +1942,9 @@ def guard_answer(
         if not _states_change(answer, facts):
             change = _comparison_line(facts)
             if change:
-                return f"{change}\n{answer}" if answer else change
+                return _with_boundary_note(
+                    question, facts, f"{change}\n{answer}" if answer else change
+                )
     if _single_fact(facts):
         line = _summary_line(facts[0])
         return f"{line}\n\n{answer}" if answer else line
@@ -2146,6 +2161,34 @@ def _timeout_after_table(calls: list[dict[str, str]] | None) -> str:
     return f"Opslaget i {table} tog for lang tid. Prøv igen."
 
 
+def _asks_net_unemployment(question: str) -> bool:
+    """Net unemployment, not the gross total and not a sentence that only says brutto."""
+    folded = question.casefold()
+    if "netto" not in folded or not re.search(r"ledig", folded):
+        return False
+    return "brutto" not in folded or folded.index("netto") < folded.index("brutto")
+
+
+def _national_area(values: dict[str, Any]) -> bool:
+    codes = _codes(values, "OMRÅDE")
+    if not codes:
+        return True
+    return {code.strip().casefold() for code in codes} <= {"000", "hele landet"}
+
+
+def net_series_block(question: str, arguments: dict[str, Any]) -> str:
+    """Refuse a gross table when the question asked for net and a place."""
+    if not _asks_net_unemployment(question):
+        return ""
+    table = str(arguments.get("table") or "").upper()
+    if table not in {"AUS08", "AUS09", "AUF01", "AUF02"}:
+        return ""
+    return (
+        f"{table} has no net series. Nettoledige are not the gross total on this table. "
+        "The national net count is AUS07, YD NET. This table cannot split a municipality into net."
+    )
+
+
 def _annual_unemployment_average(question: str) -> bool:
     """A named year asked as an average of full-time unemployed, not the net series."""
     folded = question.casefold()
@@ -2186,6 +2229,17 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
     values = dict(updated.get("values") or {})
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
+    if (
+        _asks_net_unemployment(question)
+        and table in {"AUS08", "AUS09", "AUF01", "AUF02"}
+        and _national_area(values)
+    ):
+        # The area table is gross only. National net is a different series.
+        table = "AUS07"
+        updated["table"] = table
+        for key in list(values):
+            if str(key).upper() == "OMRÅDE":
+                del values[key]
     if _annual_unemployment_average(question) and table in {"AUS08", "AUS09", "AUF01", "AUF02"}:
         table = "AUL01"
         updated["table"] = table

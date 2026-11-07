@@ -1582,6 +1582,51 @@ def test_a_fetched_period_is_not_called_missing() -> None:
     assert "2026" in answer
 
 
+def test_a_replaced_comparison_keeps_the_boundary_caveat() -> None:
+    """Q110: unverified prose was replaced by the endpoints and the caveat disappeared."""
+    question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
+    facts = [
+        _population_fact(92084, "2008K1", "Viborg"),
+        _population_fact(98104, "2026K3", "Viborg"),
+    ]
+    prose = "I 2000 boede der 80.000. I 2008K1 var befolkningen 92.084."
+    answer = guard_answer(question, prose, facts)
+    assert "92.084" in answer and "98.104" in answer and "6.020" in answer
+    assert "2007" in answer
+    assert "ikke med" in answer
+    assert "80.000" not in answer
+
+
+def test_net_seasonal_unemployment_is_not_the_gross_area_table() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults
+
+    question = "Hvor mange nettoledige var der i Danmark i august 2026, sæsonkorrigeret?"
+    fetched = apply_fetch_defaults(
+        question,
+        {
+            "table": "AUS08",
+            "values": {"OMRÅDE": ["000"], "Tid": ["2026M08"], "SAESONFAK": ["10"]},
+        },
+    )
+    assert fetched["table"] == "AUS07"
+    assert fetched["values"]["YD"] == ["NET"]
+    assert fetched["values"]["SAESONFAK"] == ["10"]
+    assert "OMRÅDE" not in {str(key).upper() for key in fetched["values"]}
+    local_question = "Hvor mange nettoledige var der i Esbjerg i august 2026, sæsonkorrigeret?"
+    local = apply_fetch_defaults(
+        local_question,
+        {
+            "table": "AUS08",
+            "values": {"OMRÅDE": ["Esbjerg"], "Tid": ["2026M08"], "SAESONFAK": ["10"]},
+        },
+    )
+    assert local["table"] == "AUS08"
+    from statistikbanken_mcp.web import net_series_block
+
+    blocked = net_series_block(local_question, local)
+    assert "no net series" in blocked
+
+
 def test_a_long_fetch_keeps_the_last_period_for_the_model() -> None:
     from statistikbanken_mcp.web import MODEL_RESULT_LIMIT, _model_result
 

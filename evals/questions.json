@@ -2555,6 +2555,10 @@
     "expect": {
       "kind": "coverage_gap",
       "require_any": ["2008", "2007", "starter", "reform"],
+      "require_all": [
+        ["2007", "kommunalreform", "kommunegræn"],
+        ["ikke med", "før 2008", "foer 2008"]
+      ],
       "checks": [
         {
           "table": "FOLK1A",

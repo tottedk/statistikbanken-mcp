@@ -273,6 +273,20 @@ def test_a_contradiction_about_a_fetched_period_is_not_accepted() -> None:
         "2000 er ikke med i denne serie."
     )
     assert classify(question, _result(hidden), truths) == "edge_behaviour_wrong"
+    bare = "92.084 (2008 1. kvt.) og 98.104 (2026 3. kvt.). Forskellen er 6.020 (6,54 procent)."
+    strict = {
+        "question": question["question"],
+        "expect": {
+            "kind": "coverage_gap",
+            "require_any": ["2008", "2007", "starter", "reform"],
+            "require_all": [
+                ["2007", "kommunalreform", "kommunegræn"],
+                ["ikke med", "før 2008", "foer 2008"],
+            ],
+        },
+    }
+    assert classify(strict, _result(bare), truths) == "edge_behaviour_wrong"
+    assert classify(strict, _result(shown), truths) == "correct"
 
 
 def test_coverage_gap_requires_an_explanation() -> None:
@@ -334,6 +348,8 @@ def test_question_file_is_the_fixed_set() -> None:
         assert f"scratch {scratch_id}" in by_id[question_id]["note"].casefold()
     assert by_id[109]["expect"]["kind"] == "coverage_gap"
     assert by_id[110]["expect"]["kind"] == "coverage_gap"
+    assert by_id[110]["expect"]["require_all"][0][0] == "2007"
+    assert "ikke med" in by_id[110]["expect"]["require_all"][1]
     assert by_id[112]["expect"]["checks"][0]["table"] == "AUS07"
     assert by_id[112]["expect"]["checks"][0]["variables"]["YD"] == ["NET"]
     assert by_id[112]["expect"]["checks"][0]["variables"]["SAESONFAK"] == ["10"]
