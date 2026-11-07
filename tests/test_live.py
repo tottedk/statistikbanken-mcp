@@ -447,6 +447,56 @@ def test_denmark_population_on_1_january_reaches_1934_and_1989(
         assert 0 < percent < 100
 
 
+def test_population_change_1995_to_2001_and_the_tenth_urban_area(
+    live_client: StatbankClient,
+) -> None:
+    """Known stocks, the municipality, and the BY3 urban-area rank. 7 Nov 2026."""
+    from statistikbanken_mcp.web import rank_urban_areas
+
+    for table, values in (
+        (
+            "BEFOLK1",
+            {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"], "Tid": ["1995", "2001"]},
+        ),
+        ("BEFOLK2", {"KØN": ["TOT"], "ALDER": ["TOT"], "Tid": ["1995", "2001"]}),
+    ):
+        by_year = {row["Tid"]: row["value"] for row in hent_data(table, values)["rows"]}
+        assert by_year["1995"] == 5_215_718
+        assert by_year["2001"] == 5_349_212
+    esbjerg = hent_data(
+        "FOLK1A",
+        {
+            "OMRÅDE": ["561"],
+            "KØN": ["TOT"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": ["2026K3"],
+        },
+    )
+    assert esbjerg["rows"][0]["value"] == 114_824
+    by = hent_data("BY3", {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"], "Tid": ["2026"]})
+    ranked = rank_urban_areas(
+        [
+            (str(row.get("BYER") or ""), float(row["value"]))
+            for row in by["rows"]
+            if isinstance(row.get("value"), int | float) and not isinstance(row.get("value"), bool)
+        ]
+    )
+    assert [(name, int(value)) for name, value in ranked[:10]] == [
+        ("Hovedstadsområdet", 1_408_575),
+        ("Aarhus", 305_227),
+        ("Odense", 187_558),
+        ("Aalborg", 122_550),
+        ("Esbjerg", 71_371),
+        ("Horsens", 65_037),
+        ("Randers", 64_764),
+        ("Kolding", 63_664),
+        ("Vejle", 62_153),
+        ("Roskilde", 53_897),
+    ]
+    assert int(next(value for name, value in ranked if name == "Esbjerg")) != 114_824
+
+
 def test_stdio_client_calls_each_tool() -> None:
     asyncio.run(_stdio_session())
 

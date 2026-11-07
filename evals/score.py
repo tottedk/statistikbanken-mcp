@@ -127,6 +127,7 @@ class Truth:
     table: str
     values: list[float]
     periods: list[str]
+    names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -259,7 +260,7 @@ def classify(question: dict[str, Any], result: dict[str, Any], truths: list[Trut
         return "timeout_error"
     kind = str((question.get("expect") or {}).get("kind") or "figures")
     if kind == "figures":
-        return _score_figures(result, truths)
+        return _score_figures(question, result, truths)
     if kind == "partial":
         return _score_partial(result, truths)
     if kind == "approximate":
@@ -277,12 +278,50 @@ def classify(question: dict[str, Any], result: dict[str, Any], truths: list[Trut
     return "edge_behaviour_wrong"
 
 
-def _score_figures(result: dict[str, Any], truths: list[Truth]) -> str:
+def _figure_match(truth: Truth, stated: list[float], answer: str) -> bool:
+    """Stocks, and for a rank the place names in order and the geography type."""
+    if not covers(truth.values, stated):
+        return False
+    if not truth.names:
+        return True
+    return _names_in_order(truth.names, answer) and _names_urban_area(answer)
+
+
+def _names_in_order(names: tuple[str, ...], answer: str) -> bool:
+    folded = answer.casefold()
+    cursor = 0
+    for name in names:
+        index = folded.find(name.casefold(), cursor)
+        if index < 0:
+            return False
+        cursor = index + len(name)
+    return True
+
+
+def _names_urban_area(answer: str) -> bool:
+    folded = answer.casefold()
+    return "byområde" in folded or "byomraade" in folded
+
+
+def _phrases_ok(question: dict[str, Any], result: dict[str, Any]) -> bool:
+    """Each require_all group needs one of its phrases. Groups are AND."""
+    text = _visible(result).casefold()
+    for group in (question.get("expect") or {}).get("require_all") or []:
+        phrases = [str(phrase).casefold() for phrase in group]
+        if phrases and not any(phrase in text for phrase in phrases):
+            return False
+    return True
+
+
+def _score_figures(question: dict[str, Any], result: dict[str, Any], truths: list[Truth]) -> str:
     if not truths:
         return "timeout_error"
     stated = _stated(result)
     facts = _fact_values(result)
-    if any(covers(truth.values, stated) for truth in truths):
+    answer = str(result.get("answer") or "")
+    if any(_figure_match(truth, stated, answer) for truth in truths):
+        if not _phrases_ok(question, result):
+            return "edge_behaviour_wrong"
         return "correct"
     hidden = _is_placeholder(str(result.get("answer") or "")) or result.get("show_numbers") is False
     if hidden and any(covers(truth.values, facts) for truth in truths):

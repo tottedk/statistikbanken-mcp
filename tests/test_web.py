@@ -2273,3 +2273,145 @@ def test_real_server_schemas_become_llm_tools() -> None:
         parameters = tool["function"]["parameters"]
         assert parameters["type"] == "object"
         assert "properties" in parameters
+
+
+def _population_ends() -> list[dict]:
+    first = _population_fact(5_215_718, "1995", "Hele landet")
+    first["table"] = "BEFOLK1"
+    first["detail"] = "KØN: I alt, ALDER: Alder i alt"
+    last = _population_fact(5_349_212, "2001", "Hele landet")
+    last["table"] = "BEFOLK1"
+    last["detail"] = "KØN: I alt, ALDER: Alder i alt"
+    return [first, last]
+
+
+def test_steg_between_two_years_states_both_ends_and_the_change() -> None:
+    """A rise between two named years is the change, not the latest stock."""
+    facts = _population_ends()
+    questions = (
+        "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+        "Hvor meget voksede Danmarks befolkning fra 1995 til 2001?",
+        "Hvor mange flere indbyggere var der i Danmark i 2001 end i 1995?",
+        "Hvad var befolkningstilvæksten i Danmark mellem 1995 og 2001, både i personer og procent?",
+        "Hvor meget steg befolkningen i Danmark i perioden 1995–2001?",
+        "Hvor stor var forskellen på Danmarks befolkning i 1995 og 2001?",
+    )
+    for question in questions:
+        answer = guard_answer(question, "5.349.212", facts)
+        assert "5.215.718" in answer, question
+        assert "5.349.212" in answer, question
+        assert "133.494" in answer, question
+        assert "2,56" in answer, question
+        assert "1995" in answer and "2001" in answer, question
+
+
+def test_all_ages_population_label_names_the_measure() -> None:
+    esbjerg = "OMRÅDE: Esbjerg, KØN: I alt, ALDER: Alder i alt"
+    assert display_label(esbjerg, "FOLK1A") == "Befolkning, Esbjerg kommune, alder i alt"
+    assert display_label("ALDER: Alder i alt", "BEFOLK1") == "Befolkning, alder i alt"
+    region = "OMRÅDE: Region Hovedstaden, ALDER: Alder i alt"
+    assert display_label(region, "FOLK1A") == "Befolkning, Region Hovedstaden, alder i alt"
+    assert display_label("OMRÅDE: Esbjerg, KØN: I alt, ALDER: 80+", "FOLK1A") == "Esbjerg, 80+"
+    assert display_label("ALDER: Alder i alt", "AUS07") == "Alder i alt"
+
+
+def test_ambiguous_esbjerg_stock_says_it_is_the_municipality() -> None:
+    fact = _population_fact(114_824, "2026K3", "Esbjerg")
+    fact["detail"] = "OMRÅDE: Esbjerg, KØN: I alt, ALDER: Alder i alt"
+    answer = guard_answer("Hvor meget mange mennesker bor der i esbjerg", "114.824", [fact])
+    assert "114.824" in answer
+    assert "Befolkning" in answer
+    assert "Esbjerg kommune" in answer
+    assert "alder i alt" in answer
+    assert "byområde" in answer.casefold()
+    named = guard_answer("Hvor mange bor der i Esbjerg Kommune?", "114.824", [fact])
+    assert "Esbjerg kommune" in named
+    assert "byområde" not in named.casefold()
+
+
+def test_city_rank_does_not_dump_mixed_geography() -> None:
+    question = "Hvilken by er danmarks tiende største"
+    mixed = [
+        _population_fact(6_031_699, "2026K3", "Hele landet"),
+        _population_fact(1_949_336, "2026K3", "Region Hovedstaden"),
+        _population_fact(670_389, "2026K3", "København"),
+        _population_fact(105_947, "2026K3", "Frederiksberg"),
+    ]
+    answer = guard_answer(question, "København er størst", mixed)
+    assert "6.031.699" not in answer
+    assert "1.949.336" not in answer
+    assert "byområde" in answer.casefold()
+
+
+def _urban_facts() -> list[dict]:
+    rows = (
+        ("101-01100 København (del af Hovedstadsområdet)", 100_000),
+        ("147-01100 Frederiksberg (del af Hovedstadsområdet)", 50_000),
+        ("000 Hovedstadsområdet", 0),
+        ("000 Landdistrikter", 999_999),
+        ("751-11045 Aarhus", 140_000),
+        ("461-10677 Odense", 130_000),
+        ("851-10938 Aalborg", 120_000),
+        ("561-11196 Esbjerg", 110_000),
+        ("615-10615 Horsens", 100_000),
+        ("730-10691 Randers", 90_000),
+        ("621-10588 Kolding", 80_000),
+        ("630-10722 Vejle", 70_000),
+        ("265-10850 Roskilde", 53_897),
+        ("740-10820 Silkeborg", 50_000),
+    )
+    facts = []
+    for name, value in rows:
+        facts.append(
+            {
+                "table": "BY3",
+                "period": "2026",
+                "unit": "Antal",
+                "value": value,
+                "detail": f"BYER: {name}, FOLKARTAET: Folketal",
+                "unpublished": False,
+            }
+        )
+    return facts
+
+
+def test_tenth_city_is_the_tenth_urban_area() -> None:
+    facts = _urban_facts()
+    tenth = guard_answer("Hvilken by er danmarks tiende største", "København", facts)
+    assert "Roskilde" in tenth
+    assert "53.897" in tenth
+    assert "byområde" in tenth.casefold()
+    assert "del af Hovedstadsområdet" not in tenth
+    assert "6.031.699" not in tenth
+    listed = guard_answer(
+        "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+        "København",
+        facts,
+    )
+    assert listed.index("Hovedstadsområdet") < listed.index("Aarhus")
+    assert listed.index("Aarhus") < listed.index("Roskilde")
+    assert "53.897" in listed
+    assert "del af Hovedstadsområdet" not in listed
+    assert "Landdistrikter" not in listed
+
+
+def test_city_question_fetches_urban_areas_not_municipalities() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults, apply_search_context
+
+    question = "Hvilken by er danmarks tiende største"
+    fetched = apply_fetch_defaults(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["000"], "Tid": ["2026K3"]}},
+    )
+    assert fetched["table"] == "BY3"
+    assert fetched["values"]["FOLKARTAET"] == ["FOLKETAL"]
+    assert fetched["values"]["BYER"] == ["*"]
+    assert "OMRÅDE" not in fetched["values"]
+    searched = apply_search_context(question, {"query": "største by Danmark"})
+    assert "byområde" in str(searched["query"]).casefold()
+    local = apply_fetch_defaults(
+        "Hvor mange bor der i Esbjerg?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}},
+    )
+    assert local["table"] == "FOLK1A"
+    assert "byområder" in SYSTEM_PROMPT
