@@ -239,6 +239,28 @@ def test_newest_projection_vintage_is_the_highest_matching_id() -> None:
     assert newest_table_id(tables, spec) == "FRDK126"
 
 
+def test_a_contradiction_about_a_fetched_period_is_not_accepted() -> None:
+    question = {
+        "question": "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+        "expect": {
+            "kind": "coverage_gap",
+            "require_any": ["2008", "2007", "starter", "reform"],
+        },
+    }
+    truths = [Truth("FOLK1A", [92084.0, 98104.0], ["2008K1", "2026K3"])]
+    denied = (
+        "92.084 (2008K1) og 98.104 (2026K3). Forskellen er 6.020. "
+        "Serien starter i 2008. Seneste tal (2026K3) er ikke med."
+    )
+    assert classify(question, _result(denied), truths) == "edge_behaviour_wrong"
+    consistent = (
+        "92.084 (2008K1) og 98.104 (2026K3). Forskellen er 6.020 (6,54 procent). "
+        "Viborg i FOLK1A starter i 2008K1, kommunegrænsen efter kommunalreformen i 2007. "
+        "2000 er ikke med i denne serie."
+    )
+    assert classify(question, _result(consistent), truths) == "correct"
+
+
 def test_coverage_gap_requires_an_explanation() -> None:
     question = {
         "question": "Hvor mange boede der i Danmark ifølge folketællingen i 1934?",

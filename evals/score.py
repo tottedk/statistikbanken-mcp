@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import statistics
 from dataclasses import dataclass
 from typing import Any
@@ -403,16 +404,33 @@ def _score_coverage_gap(
     ]
     if required and not any(phrase in text for phrase in required):
         return "edge_behaviour_wrong"
+    if _denies_fetched_period(text, truths):
+        return "edge_behaviour_wrong"
     stated = _statistics(answer, str(question.get("question") or ""))
     if not stated or not truths:
         return "correct"
-    allowed = [value for truth in truths for value in truth.values]
-    if len(allowed) >= 2:
-        allowed.append(abs(allowed[0] - allowed[-1]))
+    stocks = [value for truth in truths for value in truth.values]
+    allowed = list(stocks)
+    if len(stocks) >= 2 and stocks[0]:
+        difference = abs(stocks[-1] - stocks[0])
+        allowed.append(difference)
+        allowed.append(difference / abs(stocks[0]) * 100)
     for number in stated:
         if not any(close(number, value) for value in allowed):
             return "edge_behaviour_wrong"
     return "correct"
+
+
+def _denies_fetched_period(text: str, truths: list[Truth]) -> bool:
+    """A sentence that says a period we scored is missing from the answer."""
+    periods = [period for truth in truths for period in truth.periods]
+    for sentence in re.split(r"\n+|(?<=[.!?])\s+", text):
+        if not re.search(r"ikke med|afkortede|afkortet", sentence, re.IGNORECASE):
+            continue
+        folded = sentence.casefold()
+        if any(period.casefold() in folded for period in periods):
+            return True
+    return False
 
 
 def _score_gap(question: dict[str, Any], result: dict[str, Any]) -> str:

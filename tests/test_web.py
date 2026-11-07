@@ -631,6 +631,34 @@ def test_wrong_municipality_is_not_presented_as_the_answer() -> None:
     assert hidden.show_numbers is False
 
 
+def test_a_yearly_average_uses_the_annual_unemployment_table() -> None:
+    from statistikbanken_mcp.server import find_tabel
+    from statistikbanken_mcp.web import apply_fetch_defaults, apply_search_context
+
+    question = "Hvor mange fuldtidsledige var der i gennemsnit i Esbjerg Kommune i 2025?"
+    search = apply_search_context(
+        question,
+        {"query": "fuldtidsledige Esbjerg Kommune", "limit": 8},
+    )
+    assert "gennemsnit" in str(search["query"]).casefold()
+    assert find_tabel(str(search["query"]), limit=5)[0]["id"] == "AUL01"
+    fetched = apply_fetch_defaults(
+        question,
+        {
+            "table": "AUS08",
+            "values": {"OMRÅDE": ["561"], "SAESONFAK": ["24"], "Tid": ["2025"]},
+        },
+    )
+    assert fetched["table"] == "AUL01"
+    assert "SAESONFAK" not in {str(key).upper() for key in fetched["values"]}
+    monthly = apply_fetch_defaults(
+        "Hvor mange fuldtidsledige er der i Esbjerg i seneste måned?",
+        {"table": "AUS08", "values": {"OMRÅDE": ["561"], "SAESONFAK": ["10"]}},
+    )
+    assert monthly["table"] == "AUS08"
+    assert monthly["values"]["SAESONFAK"] == ["24"]
+
+
 def test_seasonally_adjusted_net_unemployment_keeps_those_definitions() -> None:
     from statistikbanken_mcp.web import apply_fetch_defaults
 
@@ -1513,6 +1541,45 @@ def test_a_missing_census_year_names_the_gap() -> None:
     assert "1930" in answer and "1935" in answer
     assert "FT" in answer
     assert "ingen tal i Statistikbanken" not in answer
+
+
+def test_a_census_gap_survives_an_invented_figure() -> None:
+    """The model quoted a census stand-in. The neighbour explanation still has to appear."""
+    question = "Hvor mange boede der i Danmark ifølge folketællingen i 1934?"
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": "",
+            "result": (
+                "'1934' is 1934, which is not in table FT. "
+                "Neighbouring periods: 1930 and 1935. Available: 1769–2026."
+            ),
+        }
+    ]
+    prose = "Folketællingen i 1934 var 3.550.656. Nærmeste år er 1930."
+    answer = guard_answer(question, prose, [], calls)
+    assert answer != NO_FETCHED_NUMBERS
+    assert "3.550.656" not in answer
+    assert "1930" in answer and "1935" in answer
+    assert "FT" in answer
+    assert "ingen tal" not in answer.casefold()
+
+
+def test_a_fetched_period_is_not_called_missing() -> None:
+    question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
+    facts = [
+        _population_fact(92084, "2008K1", "Viborg"),
+        _population_fact(98104, "2026K3", "Viborg"),
+    ]
+    prose = (
+        "Befolkningstallene begynder i 2008K1. "
+        "Seneste tal (2026K3) er ikke med i det afkortede svar fra værktøjet."
+    )
+    answer = guard_answer(question, prose, facts)
+    assert "92.084" in answer and "98.104" in answer
+    assert "ikke med i det afkortede" not in answer
+    assert "2007" in answer
+    assert "2026" in answer
 
 
 def test_a_table_that_starts_later_is_named() -> None:
