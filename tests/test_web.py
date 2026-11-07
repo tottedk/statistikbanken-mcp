@@ -1582,6 +1582,62 @@ def test_a_fetched_period_is_not_called_missing() -> None:
     assert "2026" in answer
 
 
+def test_a_long_fetch_keeps_the_last_period_for_the_model() -> None:
+    from statistikbanken_mcp.web import MODEL_RESULT_LIMIT, _model_result
+
+    rows = []
+    for year in range(2008, 2027):
+        for quarter in range(1, 5):
+            if year == 2026 and quarter == 4:
+                break
+            rows.append(
+                {
+                    "OMRÅDE": "Viborg",
+                    "KØN": "I alt",
+                    "ALDER": "Alder i alt",
+                    "CIVILSTAND": "I alt",
+                    "Tid": f"{year}K{quarter}",
+                    "value": 92084,
+                }
+            )
+    payload = json.dumps({"table": "FOLK1A", "rows": rows}, ensure_ascii=False, indent=2)
+    assert len(payload) > MODEL_RESULT_LIMIT
+    shown = _model_result("hent_data", payload)
+    assert len(shown) <= MODEL_RESULT_LIMIT
+    assert "2026K3" in shown
+    assert "2008K1" in shown
+    assert "rows_omitted" in shown
+
+
+def test_a_long_series_still_quotes_the_latest_endpoint() -> None:
+    """The Q110 answer: 75 quarters were fetched, and the model said 2026K3 was not shown."""
+    question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
+    facts = []
+    for year in range(2008, 2027):
+        for quarter in range(1, 5):
+            if year == 2026 and quarter == 4:
+                break
+            if (year, quarter) == (2008, 1):
+                value = 92084
+            elif (year, quarter) == (2026, 3):
+                value = 98104
+            else:
+                value = 93000
+            facts.append(_population_fact(value, f"{year}K{quarter}", "Viborg"))
+    assert len(facts) == 75
+    prose = (
+        "Befolkningstallene for den nuværende Viborg Kommune findes ikke før 2008K1 "
+        "i Statistikbanken. I 2008K1 var befolkningen 92.084. "
+        "Seneste tal (2026K3) er ikke vist i resultatet, men rækkerne starter fra 2008K1."
+    )
+    answer = guard_answer(question, prose, facts)
+    assert "98.104" in answer
+    assert "6.020" in answer
+    assert "2007" in answer
+    assert "ikke vist" not in answer
+    assert "2000" in answer
+
+
 def test_a_table_that_starts_later_is_named() -> None:
     question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
     calls = [

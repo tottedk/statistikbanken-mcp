@@ -259,6 +259,20 @@ def test_a_contradiction_about_a_fetched_period_is_not_accepted() -> None:
         "2000 er ikke med i denne serie."
     )
     assert classify(question, _result(consistent), truths) == "correct"
+    shown = (
+        "92.084 (2008 1. kvt.) og 98.104 (2026 3. kvt.). "
+        "Forskellen er 6.020 (6,54 procent). "
+        "Viborg i FOLK1A starter 2008 1. kvt., kommunegrænsen efter kommunalreformen i 2007. "
+        "2000 er ikke med i denne serie."
+    )
+    assert classify(question, _result(shown), truths) == "correct"
+    hidden = (
+        "I 2008K1 var befolkningen 92.084. "
+        "Seneste tal (2026K3) er ikke vist i resultatet. "
+        "Viborg i FOLK1A starter 2008 1. kvt., kommunegrænsen efter kommunalreformen i 2007. "
+        "2000 er ikke med i denne serie."
+    )
+    assert classify(question, _result(hidden), truths) == "edge_behaviour_wrong"
 
 
 def test_coverage_gap_requires_an_explanation() -> None:

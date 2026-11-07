@@ -391,6 +391,24 @@ def _score_too_broad(question: dict[str, Any], result: dict[str, Any]) -> str:
     return "correct"
 
 
+def _without_period_labels(text: str) -> str:
+    """Drop quarter labels so '1. kvt.' is not a second statistic."""
+    text = re.sub(r"\b(?:19|20)\d{2}[KkQq][1-4]\b", " ", text)
+    text = re.sub(
+        r"\b(?:19|20)\d{2}\s+[1-4]\s*\.\s*kvt\.?",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\b[1-4]\s*\.\s*kvartal\s+(?:19|20)\d{2}\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
+
+
 def _score_coverage_gap(
     question: dict[str, Any], result: dict[str, Any], truths: list[Truth]
 ) -> str:
@@ -406,7 +424,7 @@ def _score_coverage_gap(
         return "edge_behaviour_wrong"
     if _denies_fetched_period(text, truths):
         return "edge_behaviour_wrong"
-    stated = _statistics(answer, str(question.get("question") or ""))
+    stated = _statistics(_without_period_labels(answer), str(question.get("question") or ""))
     if not stated or not truths:
         return "correct"
     stocks = [value for truth in truths for value in truth.values]
@@ -425,7 +443,7 @@ def _denies_fetched_period(text: str, truths: list[Truth]) -> bool:
     """A sentence that says a period we scored is missing from the answer."""
     periods = [period for truth in truths for period in truth.periods]
     for sentence in re.split(r"\n+|(?<=[.!?])\s+", text):
-        if not re.search(r"ikke med|afkortede|afkortet", sentence, re.IGNORECASE):
+        if not re.search(r"ikke med|ikke vist|afkortede|afkortet", sentence, re.IGNORECASE):
             continue
         folded = sentence.casefold()
         if any(period.casefold() in folded for period in periods):

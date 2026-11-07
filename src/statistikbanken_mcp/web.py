@@ -849,7 +849,7 @@ async def run_turn(
                 {
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": _short(result, MODEL_RESULT_LIMIT),
+                    "content": _model_result(call.name, result),
                 }
             )
         if used >= max_tool_calls:
@@ -1691,20 +1691,45 @@ def _comparison_line(facts: list[dict[str, Any]]) -> str | None:
     )
 
 
+def _series_endpoints(
+    facts: list[dict[str, Any]],
+) -> tuple[float, float, float] | None:
+    """Start, end, and absolute difference for one series. Period digits are not values."""
+    numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
+    if len(numeric) < 2:
+        return None
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for fact in numeric:
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("unit") or ""),
+            str(fact.get("detail") or ""),
+        )
+        groups.setdefault(key, []).append(fact)
+    if len(groups) != 1:
+        return None
+    series = next(iter(groups.values()))
+    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    first, last = ordered[0], ordered[-1]
+    if str(first.get("period") or "") == str(last.get("period") or ""):
+        return None
+    start, end = float(first["value"]), float(last["value"])
+    if start == 0:
+        return None
+    return start, end, abs(end - start)
+
+
 def _states_change(answer: str, facts: list[dict[str, Any]]) -> bool:
-    line = _comparison_line(facts)
-    if line is None:
+    change = _series_endpoints(facts)
+    if change is None:
         return False
     stated = _numbers_in(answer)
-    needed = _numbers_in(line)
-    # The two stocks and the difference. The percentage may be rounded.
-    if len(needed) < 3:
-        return False
 
-    def near(wanted: float) -> bool:
+    def has(wanted: float) -> bool:
         return any(abs(item - wanted) <= max(0.05, abs(wanted) * 0.001) for item in stated)
 
-    return all(near(wanted) for wanted in needed[:3])
+    start, end, difference = change
+    return has(start) and has(end) and has(difference)
 
 
 _NEIGHBOUR_RE = re.compile(
@@ -1717,7 +1742,10 @@ _SPAN_RE = re.compile(
 )
 
 
-_OMISSION_RE = re.compile(r"ikke med|afkortede|afkortet", re.IGNORECASE)
+_OMISSION_RE = re.compile(
+    r"ikke med|ikke vist|afkortede|afkortet|not shown",
+    re.IGNORECASE,
+)
 
 
 def _without_false_omissions(answer: str, facts: list[dict[str, Any]]) -> str:
@@ -2979,6 +3007,35 @@ def _short(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "…"
+
+
+def _model_result(name: str, result: str) -> str:
+    """Keep the last row when a long fetch is shortened for the model."""
+    if len(result) <= MODEL_RESULT_LIMIT:
+        return result
+    if name != "hent_data":
+        return _short(result, MODEL_RESULT_LIMIT)
+    try:
+        payload = json.loads(result)
+    except json.JSONDecodeError:
+        return _short(result, MODEL_RESULT_LIMIT)
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or len(rows) < 3:
+        return _short(result, MODEL_RESULT_LIMIT)
+    omitted = len(rows) - 2
+    shown = dict(payload)
+    shown["rows"] = [rows[0], rows[-1]]
+    shown["rows_omitted"] = omitted
+    first = rows[0].get("Tid") if isinstance(rows[0], dict) else ""
+    last = rows[-1].get("Tid") if isinstance(rows[-1], dict) else ""
+    shown["rows_note"] = (
+        f"{omitted} rows omitted from this view. "
+        f"First period {first}, last period {last}. Both values are included."
+    )
+    text = json.dumps(shown, ensure_ascii=False)
+    if len(text) <= MODEL_RESULT_LIMIT:
+        return text
+    return _short(text, MODEL_RESULT_LIMIT)
 
 
 class Limiter:
