@@ -157,7 +157,7 @@ Other MCP servers wrap Statistikbanken too, including Datavej. This one is three
 
 ## Evaluation
 
-`evals/questions.json` holds 100 questions from 1 November 2026, plus five owner questions (101–105). The runner uses the same path as the web page (`answer_with_server` with `--llm xai`). It does not open a port. It is not part of `uv run pytest` or CI. A full run calls xAI and costs money.
+`evals/questions.json` holds 100 questions from 1 November 2026, five owner questions (101–105), two population-growth questions (106–107), and twelve probes from 7 November 2026 (108–119, scratch ids 201–212). The runner uses the same path as the web page (`answer_with_server` with `--llm xai`). It does not open a port. It is not part of `uv run pytest` or CI. A full run calls xAI and costs money.
 
 ```bash
 uv run python -m evals.run

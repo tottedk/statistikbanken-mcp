@@ -400,6 +400,53 @@ def test_danish_periods_and_projection_label_live(live_client: StatbankClient) -
     assert isinstance(row["value"], int)
 
 
+def test_denmark_population_on_1_january_reaches_1934_and_1989(
+    live_client: StatbankClient,
+) -> None:
+    """BEFOLK2 counts people. FOLK1A and FT do not publish 1934."""
+    historical = hent_data(
+        "BEFOLK2",
+        {"KØN": ["TOT"], "ALDER": ["TOT"], "Tid": ["1934", "1989"]},
+    )
+    by_year = {row["Tid"]: row["value"] for row in historical["rows"]}
+    assert by_year["1934"] == 3_650_500
+    assert by_year["1989"] == 5_129_778
+    stock_2026 = hent_data(
+        "BEFOLK2",
+        {"KØN": ["TOT"], "ALDER": ["TOT"], "Tid": ["2026"]},
+    )
+    assert stock_2026["rows"][0]["value"] == 6_025_603
+    assert hent_data("BEFOLK1", {"Tid": ["1989"]})["rows"][0]["value"] == 5_129_778
+    assert hent_data("FT", {"HOVEDDELE": ["000"], "Tid": ["1989"]})["rows"][0]["value"] == 5_129_778
+    latest = hent_data("BEFOLK2", {"KØN": ["TOT"], "ALDER": ["TOT"]})
+    assert len(latest["rows"]) == 1
+    end = latest["rows"][0]
+    assert isinstance(end["value"], int)
+    assert end["value"] > by_year["1989"] > by_year["1934"]
+    january = hent_data(
+        "FOLK1A",
+        {
+            "OMRÅDE": ["000"],
+            "KØN": ["TOT"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": [f"{end['Tid']}K1"],
+        },
+    )
+    assert january["rows"][0]["value"] == end["value"]
+    for year in ("1934", "1989"):
+        with pytest.raises(ToolError, match="not in table FOLK1A"):
+            hent_data("FOLK1A", {"OMRÅDE": ["000"], "Tid": [year]})
+    with pytest.raises(ToolError, match="not in table FT") as caught:
+        hent_data("FT", {"HOVEDDELE": ["000"], "Tid": ["1934"]})
+    assert "1930" in str(caught.value) and "1935" in str(caught.value)
+    for start in (by_year["1934"], by_year["1989"]):
+        difference = end["value"] - start
+        assert difference > 0
+        percent = difference / start * 100
+        assert 0 < percent < 100
+
+
 def test_stdio_client_calls_each_tool() -> None:
     asyncio.run(_stdio_session())
 

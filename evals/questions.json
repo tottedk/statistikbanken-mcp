@@ -1193,10 +1193,34 @@
             "grain": "month"
           },
           "aggregate": "mean"
+        },
+        {
+          "table": "AUL01",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "AKASSE": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
         }
       ]
     },
-    "note": "Mean of the 12 months of 2025. AUS08 code 24 (actual), code 10 (seasonally adjusted), or AUF01."
+    "note": "Mean of the 12 months of 2025 on AUS08 code 24 (actual), code 10 (seasonally adjusted), or AUF01. AUL01 is the published annual average of gross full-time unemployed and is also accepted."
   },
   {
     "id": 51,
@@ -2439,5 +2463,306 @@
     },
     "note": "FOLK1A, Odense (461), ages 23 through 45 inclusive, both sexes, latest quarter, summed.",
     "source": "owner"
+  },
+  {
+    "id": 106,
+    "question": "Hvor meget er befolkningen i danmark vokset siden 1989",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1989",
+            "latest"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Denmark on 1 January, BEFOLK2, sex TOT and age TOT. The scored figures are the 1989 headcount and this table's latest 1 January headcount. People growth is the later figure minus the 1989 figure, and the percentage is that difference divided by the 1989 figure. The schema has no derived aggregate, so those two results are not frozen: an answer is correct when both stocks appear. On 6 November 2026 the latest code was 2026 and the stocks were 5,129,778 and 6,025,603, a difference of 895,825 people (17.46%). BEFOLK1 and FT (Hele landet) matched both stocks. FOLK1A starts at 2008K1. Its 2008K1 and 2026K1 matched BEFOLK2, and 2026K3 was 6,031,699, a later observation of the same population. That cross-table pair is not this check. HISB3 publishes the stock in thousands (1989: 5,130) and is not the people count."
+  },
+  {
+    "id": 107,
+    "question": "Hvor meget er befolkningen i danmark vokset siden 1934",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1934",
+            "latest"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Same BEFOLK2 selection as question 106, with 1934 instead of 1989. On 6 November 2026 the stocks were 3,650,500 on 1 January 1934 and 6,025,603 on 1 January 2026, a difference of 2,375,103 people (65.06%). FT has no 1934 (1930, then 1935). BEFOLK1 starts in 1971. FOLK1A starts at 2008K1. HISB3's 1934 stock is 3,651 thousand, rounded, not 3,650,500 people. The difference and percentage move when the latest 1 January stock moves, so they are not frozen."
+  },
+  {
+    "id": 108,
+    "question": "Hvor mange indbyggere havde Danmark 1. januar 1925?",
+    "category": "historical",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": ["TOT"],
+            "ALDER": ["TOT"]
+          },
+          "time": ["1925"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 201 from 7 November 2026. BEFOLK2, 1 January 1925, both sexes, all ages. The FT census of 1925 is a different date."
+  },
+  {
+    "id": 109,
+    "question": "Hvor mange boede der i Danmark ifølge folketællingen i 1934?",
+    "category": "historical",
+    "expect": {
+      "kind": "coverage_gap",
+      "require_any": ["1930", "1935", "nærmeste", "naermeste", "folketælling", "folketælling", "tælling"]
+    },
+    "note": "Scratch 202. FT has no 1934. Neighbours are 1930 and 1935. The generic no-data sentence is not an explanation. BEFOLK2 1 January 1934 may be quoted only when it is labelled as 1 January, not as the census."
+  },
+  {
+    "id": 110,
+    "question": "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+    "category": "geography",
+    "expect": {
+      "kind": "coverage_gap",
+      "require_any": ["2008", "2007", "starter", "reform"],
+      "require_all": [
+        ["2007", "kommunalreform", "kommunegræn"],
+        ["ikke med", "før 2008", "foer 2008"]
+      ],
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": ["791"],
+            "KØN": ["TOT"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"]
+          },
+          "time": ["2008K1", "latest"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 203. FOLK1A's Viborg series starts at 2008K1. Correct: say that, or give 2008K1 and the latest quarter with that caveat. A 2000 population with no caveat is wrong. This is the table's start, not a ban on comparing other series."
+  },
+  {
+    "id": 111,
+    "question": "Hvor mange flere indbyggere har Esbjerg Kommune i seneste kvartal end 1. januar 2008?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": ["561"],
+            "KØN": ["TOT"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"]
+          },
+          "time": ["2008K1", "latest"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 204. Both stocks have to appear. On 7 November 2026 the latest quarter was 2026K3: 114,244 and 114,824, difference 580. latest is not frozen as 2026K3 because the question says seneste kvartal."
+  },
+  {
+    "id": 112,
+    "question": "Hvor mange nettoledige var der i Danmark i august 2026, sæsonkorrigeret?",
+    "category": "concept",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUS07",
+          "variables": {
+            "YD": ["NET"],
+            "SAESONFAK": ["10"]
+          },
+          "time": ["2026M08"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 205. AUS07 YD NET is nettoledige. SAESONFAK 10 is sæsonkorrigeret. TOT is bruttoledige. Code 24 is opregnede faktiske. AUS08 has no net series. Checked 7 November 2026: 82,778.2."
+  },
+  {
+    "id": 113,
+    "question": "Hvor mange indbyggere forventes Danmark at have i 2040 ifølge befolkningsfremskrivningen?",
+    "category": "concept",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": {
+            "prefix": "FRDK",
+            "title": ["befolkningsfremskrivning", "hele landet"],
+            "not_title": ["nøgletal", "nogletal"]
+          },
+          "variables": {},
+          "time": ["2040"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 206. The oracle is the newest FRDK table titled Befolkningsfremskrivning for hele landet, not a frozen FRDK125. On 7 November 2026 that was FRDK126, 6,231,908, and the answer has to say it is a projection."
+  },
+  {
+    "id": 114,
+    "question": "Hvad var Danmarks BNP i løbende priser i 2024?",
+    "category": "units",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "NAN1",
+          "variables": {
+            "TRANSAKT": ["B1GQK"],
+            "PRISENHED": ["V_M"]
+          },
+          "time": ["2024"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 207. NAN1, current prices, billion kroner. Chained prices are a different unit."
+  },
+  {
+    "id": 115,
+    "question": "Hvad var den reale vækst i Danmarks BNP i 2024?",
+    "category": "units",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "NAN1",
+          "variables": {
+            "TRANSAKT": ["B1GQK"],
+            "PRISENHED": ["L_V"]
+          },
+          "time": ["2024"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 208. Real growth in percent, not the level in kroner."
+  },
+  {
+    "id": 116,
+    "question": "Hvor mange fuldtidsledige var der i gennemsnit i Esbjerg Kommune i 2025?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUL01",
+          "variables": {
+            "OMRÅDE": ["561"],
+            "YDELSESTYPE": ["TOT"],
+            "AKASSE": ["TOT"],
+            "ALDER": ["TOT"],
+            "KØN": ["TOT"]
+          },
+          "time": ["2025"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 209. AUL01 is the published annual average. YDELSESTYPE TOT is bruttoledige. Checked 7 November 2026: 1,417. The mean of AUS08 monthly actuals is a different series."
+  },
+  {
+    "id": 117,
+    "question": "Hvor mange indbyggere havde Viborg Kommune 1. januar 2026?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": ["791"],
+            "KØN": ["TOT"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"]
+          },
+          "time": ["2026K1"],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 210. FOLK1A 2026K1 is 1 January. 2026K3 is a later quarter."
+  },
+  {
+    "id": 118,
+    "question": "Hvor mange kvinder bor der i Viborg Kommune?",
+    "category": "totals",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": ["791"],
+            "KØN": ["2"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Scratch 211. Women, latest quarter. On 7 November 2026 that was 2026K3 and 48,728."
+  },
+  {
+    "id": 119,
+    "question": "Hvor mange personer på 65 år og derover bor der i Esbjerg Kommune?",
+    "category": "totals",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": ["561"],
+            "ALDER": {"from": 65, "to": 125}
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "Scratch 212. Ages 65 through 125, both sexes, latest quarter. On 7 November 2026 that was 26,821."
   }
 ]

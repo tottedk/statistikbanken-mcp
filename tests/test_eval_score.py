@@ -222,10 +222,140 @@ def test_report_headline_counts_only_correct() -> None:
     assert "Q63" in report
 
 
+def test_newest_projection_vintage_is_the_highest_matching_id() -> None:
+    from evals.verify import newest_table_id
+
+    tables = [
+        {"id": "FRDK125", "text": "Befolkningsfremskrivning 2025 for hele landet"},
+        {"id": "FRDK126", "text": "Befolkningsfremskrivning 2026 for hele landet"},
+        {"id": "FRDK226", "text": "Nøgletal 2026: Fremskrivning af befolkningens bevægelser"},
+        {"id": "FRKM126", "text": "Befolkningsfremskrivning 2026"},
+    ]
+    spec = {
+        "prefix": "FRDK",
+        "title": ["befolkningsfremskrivning", "hele landet"],
+        "not_title": ["nøgletal"],
+    }
+    assert newest_table_id(tables, spec) == "FRDK126"
+
+
+def test_a_contradiction_about_a_fetched_period_is_not_accepted() -> None:
+    question = {
+        "question": "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+        "expect": {
+            "kind": "coverage_gap",
+            "require_any": ["2008", "2007", "starter", "reform"],
+        },
+    }
+    truths = [Truth("FOLK1A", [92084.0, 98104.0], ["2008K1", "2026K3"])]
+    denied = (
+        "92.084 (2008K1) og 98.104 (2026K3). Forskellen er 6.020. "
+        "Serien starter i 2008. Seneste tal (2026K3) er ikke med."
+    )
+    assert classify(question, _result(denied), truths) == "edge_behaviour_wrong"
+    consistent = (
+        "92.084 (2008K1) og 98.104 (2026K3). Forskellen er 6.020 (6,54 procent). "
+        "Viborg i FOLK1A starter i 2008K1, kommunegrænsen efter kommunalreformen i 2007. "
+        "2000 er ikke med i denne serie."
+    )
+    assert classify(question, _result(consistent), truths) == "correct"
+    shown = (
+        "92.084 (2008 1. kvt.) og 98.104 (2026 3. kvt.). "
+        "Forskellen er 6.020 (6,54 procent). "
+        "Viborg i FOLK1A starter 2008 1. kvt., kommunegrænsen efter kommunalreformen i 2007. "
+        "2000 er ikke med i denne serie."
+    )
+    assert classify(question, _result(shown), truths) == "correct"
+    hidden = (
+        "I 2008K1 var befolkningen 92.084. "
+        "Seneste tal (2026K3) er ikke vist i resultatet. "
+        "Viborg i FOLK1A starter 2008 1. kvt., kommunegrænsen efter kommunalreformen i 2007. "
+        "2000 er ikke med i denne serie."
+    )
+    assert classify(question, _result(hidden), truths) == "edge_behaviour_wrong"
+    bare = "92.084 (2008 1. kvt.) og 98.104 (2026 3. kvt.). Forskellen er 6.020 (6,54 procent)."
+    strict = {
+        "question": question["question"],
+        "expect": {
+            "kind": "coverage_gap",
+            "require_any": ["2008", "2007", "starter", "reform"],
+            "require_all": [
+                ["2007", "kommunalreform", "kommunegræn"],
+                ["ikke med", "før 2008", "foer 2008"],
+            ],
+        },
+    }
+    assert classify(strict, _result(bare), truths) == "edge_behaviour_wrong"
+    assert classify(strict, _result(shown), truths) == "correct"
+
+
+def test_coverage_gap_requires_an_explanation() -> None:
+    question = {
+        "question": "Hvor mange boede der i Danmark ifølge folketællingen i 1934?",
+        "expect": {
+            "kind": "coverage_gap",
+            "require_any": ["1930", "1935", "nærmeste", "folketælling"],
+        },
+    }
+    assert classify(question, _result(NO_DATA_ANSWER), []) == "edge_behaviour_wrong"
+    explained = "FT har ikke 1934. Nærmeste perioder i tabellen er 1930 og 1935."
+    assert classify(question, _result(explained), []) == "correct"
+
+
 def test_question_file_is_the_fixed_set() -> None:
     questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    assert [item["id"] for item in questions] == list(range(1, 106))
+    assert [item["id"] for item in questions] == list(range(1, 120))
     by_id = {item["id"]: item for item in questions}
+    growth = {
+        106: ("Hvor meget er befolkningen i danmark vokset siden 1989", "1989"),
+        107: ("Hvor meget er befolkningen i danmark vokset siden 1934", "1934"),
+    }
+    for question_id, (text, year) in growth.items():
+        item = by_id[question_id]
+        assert item["question"] == text
+        assert item["category"] == "time_series"
+        assert item.get("source") is None
+        expect = item["expect"]
+        assert expect["kind"] == "figures"
+        assert len(expect["checks"]) == 1
+        check = expect["checks"][0]
+        assert check["table"] == "BEFOLK2"
+        assert check["variables"] == {"KØN": ["TOT"], "ALDER": ["TOT"]}
+        assert check["time"] == [year, "latest"]
+        assert check["aggregate"] == "values"
+    probes = {
+        108: "Hvor mange indbyggere havde Danmark 1. januar 1925?",
+        109: "Hvor mange boede der i Danmark ifølge folketællingen i 1934?",
+        110: "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+        111: (
+            "Hvor mange flere indbyggere har Esbjerg Kommune i seneste kvartal end 1. januar 2008?"
+        ),
+        112: "Hvor mange nettoledige var der i Danmark i august 2026, sæsonkorrigeret?",
+        113: (
+            "Hvor mange indbyggere forventes Danmark at have i 2040 "
+            "ifølge befolkningsfremskrivningen?"
+        ),
+        114: "Hvad var Danmarks BNP i løbende priser i 2024?",
+        115: "Hvad var den reale vækst i Danmarks BNP i 2024?",
+        116: "Hvor mange fuldtidsledige var der i gennemsnit i Esbjerg Kommune i 2025?",
+        117: "Hvor mange indbyggere havde Viborg Kommune 1. januar 2026?",
+        118: "Hvor mange kvinder bor der i Viborg Kommune?",
+        119: "Hvor mange personer på 65 år og derover bor der i Esbjerg Kommune?",
+    }
+    for question_id, text in probes.items():
+        assert by_id[question_id]["question"] == text
+        scratch_id = question_id - 108 + 201
+        assert f"scratch {scratch_id}" in by_id[question_id]["note"].casefold()
+    assert by_id[109]["expect"]["kind"] == "coverage_gap"
+    assert by_id[110]["expect"]["kind"] == "coverage_gap"
+    assert by_id[110]["expect"]["require_all"][0][0] == "2007"
+    assert "ikke med" in by_id[110]["expect"]["require_all"][1]
+    assert by_id[112]["expect"]["checks"][0]["table"] == "AUS07"
+    assert by_id[112]["expect"]["checks"][0]["variables"]["YD"] == ["NET"]
+    assert by_id[112]["expect"]["checks"][0]["variables"]["SAESONFAK"] == ["10"]
+    assert by_id[113]["expect"]["checks"][0]["table"]["prefix"] == "FRDK"
+    assert by_id[116]["expect"]["checks"][0]["table"] == "AUL01"
+    assert any(check["table"] == "AUL01" for check in by_id[50]["expect"]["checks"])
     assert by_id[63]["expect"]["checks"][0]["aggregate"] == "sum"
     assert by_id[63]["expect"]["checks"][0]["time"]["year"] == "2025"
     owner = [item for item in questions if item.get("source") == "owner"]

@@ -97,6 +97,16 @@ give that figure and say the other is not covered.
 steget, faldet, or ændret asks for the change: use the change unit,
 or the first and last value of one series.
 Do not answer with the index level alone.
+vokset, flere end, and siden ask for the change between two dates.
+Quote both values, the difference, and the percentage.
+Read first_period on a find_tabel hit. If the question names a year before
+that period, open a hit whose first_period covers the year before you stop.
+If a year is missing inside one table, say which table and name the
+neighbouring periods. Do not say the figure exists in no table.
+Nettoledige is the net count. Bruttoledige is the gross count.
+Sæsonkorrigeret is the seasonally adjusted count, not opregnede faktiske.
+A whole year asked as an average is the published annual figure,
+not a mean of the monthly actual series.
 A named year is the Tid code for that year, such as 2025.
 Do not pass an open >= range for one year."""
 
@@ -808,12 +818,19 @@ async def run_turn(
         for call in reply.tool_calls:
             if used >= max_tool_calls:
                 break
+            if call.name == "find_tabel" and isinstance(call.arguments, dict):
+                call.arguments = apply_search_context(question, call.arguments)
             if call.name == "hent_data" and isinstance(call.arguments, dict):
                 call.arguments = apply_age_intent(question, call.arguments)
                 call.arguments = apply_fetch_defaults(question, call.arguments)
                 if ranked and call.arguments.get("table"):
                     call.arguments["table"] = preferred_table(ranked, str(call.arguments["table"]))
-            result = await _invoke(runner, call)
+            blocked = (
+                net_series_block(question, call.arguments)
+                if call.name == "hent_data" and isinstance(call.arguments, dict)
+                else ""
+            )
+            result = blocked or await _invoke(runner, call)
             if (
                 call.name == "hent_data"
                 and isinstance(call.arguments, dict)
@@ -837,7 +854,7 @@ async def run_turn(
                 {
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": _short(result, MODEL_RESULT_LIMIT),
+                    "content": _model_result(call.name, result),
                 }
             )
         if used >= max_tool_calls:
@@ -1561,7 +1578,12 @@ _TREND_MARKERS = (
     "over time",
     "since",
     "history",
+    "vokset",
+    "flere",
+    "færre",
+    "faerre",
 )
+_CHANGE_MARKERS = ("vokset", "flere", "faerre")
 _PERIOD_RE = re.compile(r"\b(?:19|20)\d{2}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2]))\b", re.IGNORECASE)
 # The year in 2015K1, 2015H1, or a bare period such as 2024. The quarter digit is not a figure.
 _PERIOD_YEAR_RE = re.compile(
@@ -1617,6 +1639,219 @@ def _asks_for_trend(question: str) -> bool:
     return any(marker in folded for marker in _TREND_MARKERS)
 
 
+def _asks_for_change(question: str) -> bool:
+    """A growth or 'how many more' question, not every time series."""
+    folded = question.casefold().replace("æ", "ae").replace("ø", "o").replace("å", "aa")
+    return any(marker in folded for marker in _CHANGE_MARKERS)
+
+
+def _period_sort_key(code: str) -> tuple[int, int, int, str]:
+    match = re.fullmatch(
+        r"(\d{4})(?:(K|Q)([1-4])|(H)([12])|(M)(\d{2}))?",
+        code.strip(),
+        re.IGNORECASE,
+    )
+    if match is None:
+        return (0, 0, 0, code)
+    year = int(match.group(1))
+    if match.group(2):
+        return (year, 1, int(match.group(3)), code)
+    if match.group(4):
+        return (year, 2, int(match.group(5)), code)
+    if match.group(6):
+        return (year, 3, int(match.group(7)), code)
+    return (year, 0, 0, code)
+
+
+def _comparison_line(facts: list[dict[str, Any]]) -> str | None:
+    """Both endpoints, the people difference, and the percentage. One series only."""
+    numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
+    if len(numeric) < 2:
+        return None
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for fact in numeric:
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("unit") or ""),
+            str(fact.get("detail") or ""),
+        )
+        groups.setdefault(key, []).append(fact)
+    if len(groups) != 1:
+        return None
+    series = next(iter(groups.values()))
+    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    first, last = ordered[0], ordered[-1]
+    if str(first.get("period") or "") == str(last.get("period") or ""):
+        return None
+    start, end = float(first["value"]), float(last["value"])
+    if start == 0:
+        return None
+    difference = abs(end - start)
+    percent = difference / abs(start) * 100
+    shown = f"{percent:.2f}".replace(".", ",")
+    return (
+        f"{_da_number(start)} ({period_label(str(first.get('period') or ''))}) og "
+        f"{_da_number(end)} ({period_label(str(last.get('period') or ''))}). "
+        f"Forskellen er {_da_number(difference)} ({shown} procent)."
+    )
+
+
+def _series_endpoints(
+    facts: list[dict[str, Any]],
+) -> tuple[float, float, float] | None:
+    """Start, end, and absolute difference for one series. Period digits are not values."""
+    numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
+    if len(numeric) < 2:
+        return None
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for fact in numeric:
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("unit") or ""),
+            str(fact.get("detail") or ""),
+        )
+        groups.setdefault(key, []).append(fact)
+    if len(groups) != 1:
+        return None
+    series = next(iter(groups.values()))
+    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    first, last = ordered[0], ordered[-1]
+    if str(first.get("period") or "") == str(last.get("period") or ""):
+        return None
+    start, end = float(first["value"]), float(last["value"])
+    if start == 0:
+        return None
+    return start, end, abs(end - start)
+
+
+def _states_change(answer: str, facts: list[dict[str, Any]]) -> bool:
+    change = _series_endpoints(facts)
+    if change is None:
+        return False
+    stated = _numbers_in(answer)
+
+    def has(wanted: float) -> bool:
+        return any(abs(item - wanted) <= max(0.05, abs(wanted) * 0.001) for item in stated)
+
+    start, end, difference = change
+    return has(start) and has(end) and has(difference)
+
+
+_NEIGHBOUR_RE = re.compile(
+    r"not in table (?P<table>[A-Za-z0-9]+)\. Neighbouring periods: "
+    r"(?P<before>\S+) and (?P<after>\S+)"
+)
+_SPAN_RE = re.compile(
+    r'"id"\s*:\s*"(?P<table>[A-Za-z0-9]+)".*?"first"\s*:\s*\{\s*"id"\s*:\s*"(?P<first>[^"]+)"',
+    re.DOTALL,
+)
+
+
+_OMISSION_RE = re.compile(
+    r"ikke med|ikke vist|afkortede|afkortet|not shown",
+    re.IGNORECASE,
+)
+
+
+def _without_false_omissions(answer: str, facts: list[dict[str, Any]]) -> str:
+    """Drop a claim that a period we fetched is missing from the tool result."""
+    mentioned = []
+    for fact in facts:
+        code = str(fact.get("period") or "")
+        if not code:
+            continue
+        mentioned.append(code)
+        mentioned.append(period_label(code))
+    kept: list[str] = []
+    for sentence in re.split(r"\n+|(?<=[.!?])\s+", answer):
+        piece = sentence.strip()
+        if not piece:
+            continue
+        denies = _OMISSION_RE.search(piece) is not None
+        names_fetched = any(item.casefold() in piece.casefold() for item in mentioned)
+        if denies and names_fetched:
+            continue
+        kept.append(piece)
+    return " ".join(kept)
+
+
+def _with_boundary_note(question: str, facts: list[dict[str, Any]], text: str) -> str:
+    """Keep the coverage caveat when the comparison line replaces the prose."""
+    note = _reform_note(question, facts)
+    if note and note.casefold() not in text.casefold():
+        return f"{text}\n{note}" if text else note
+    return text
+
+
+def _reform_note(question: str, facts: list[dict[str, Any]]) -> str:
+    """A municipality series that starts in 2008 is the post-2007 boundary."""
+    years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
+    numeric = [fact for fact in facts if _single_value(fact)]
+    if not years or not numeric:
+        return ""
+    earliest = min(numeric, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    period = str(earliest.get("period") or "")
+    start = re.match(r"(\d{4})", period)
+    if start is None or int(start.group(1)) <= min(years):
+        return ""
+    if int(start.group(1)) != 2008:
+        return ""
+    table = str(earliest.get("table") or "")
+    if not table.upper().startswith(("FOLK", "BEFOLK")):
+        return ""
+    place = ""
+    for part in str(earliest.get("detail") or "").split(", "):
+        name, sep, value = part.partition(": ")
+        if not sep or _fold_place(name) not in _AREA_FIELDS:
+            continue
+        if _fold_place(value) in {"hele landet", "i alt"}:
+            continue
+        place = value
+    if not place:
+        return ""
+    return (
+        f"{place} i {table} starter {period_label(period)}, "
+        f"kommunegrænsen efter kommunalreformen i 2007. "
+        f"{min(years)} er ikke med i denne serie."
+    )
+
+
+def _coverage_explanation(question: str, calls: list[dict[str, str]] | None) -> str:
+    """Say which table lacks the year. Do not claim that no table has any data."""
+    if not calls:
+        return ""
+    years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
+    for call in calls:
+        if call.get("name") != "hent_data":
+            continue
+        match = _NEIGHBOUR_RE.search(str(call.get("result") or ""))
+        if match is None:
+            continue
+        year = years[-1] if years else ""
+        return (
+            f"{match.group('table')} har ikke {year}. "
+            f"Nærmeste perioder i tabellen er {match.group('before')} og {match.group('after')}."
+        )
+    if not years:
+        return ""
+    requested = min(years)
+    late: list[str] = []
+    for call in calls:
+        if call.get("name") != "tabelinfo":
+            continue
+        match = _SPAN_RE.search(str(call.get("result") or ""))
+        if match is None:
+            continue
+        first = match.group("first")
+        start = re.match(r"(\d{4})", first)
+        if start and int(start.group(1)) > requested:
+            late.append(f"{match.group('table')} starter ved {first}")
+    if not late:
+        return ""
+    joined = " og ".join(dict.fromkeys(late))
+    return f"{joined}, så {requested} er ikke med i den tabel."
+
+
 def _closing_instruction(question: str) -> str:
     """Last instruction before the model writes. Small models follow the end."""
     if _looks_danish(question):
@@ -1667,12 +1902,18 @@ def guard_answer(
         note = _timeout_after_table(calls)
         if note:
             return note
-        if _is_page_message(answer):
-            return answer
+        gap = _coverage_explanation(question, calls)
+        if gap and _log_unverified(answer, question, facts, calls):
+            # The model's extra figures are dropped. The tool's own gap stays.
+            return gap
         if _explicit_gap(answer) and not _log_unverified(answer, question, facts, calls):
             return answer
         if _log_unverified(answer, question, facts, calls):
             return NO_FETCHED_NUMBERS
+        if gap:
+            return gap
+        if _is_page_message(answer):
+            return answer
         if _household_exact_unpublished(question):
             return _UNPUBLISHED_HOUSEHOLD
         return NO_DATA_ANSWER
@@ -1687,9 +1928,23 @@ def guard_answer(
                 question,
             )
     if _log_unverified(answer, question, facts, calls):
+        change = _comparison_line(facts) if _asks_for_change(question) else None
+        if change:
+            return _with_boundary_note(question, facts, change)
         if _single_fact(facts):
             return _summary_line(facts[0])
         return UNVERIFIED_NUMBERS
+    if _asks_for_change(question):
+        answer = _without_false_omissions(answer, facts)
+        note = _reform_note(question, facts)
+        if note and note.casefold() not in answer.casefold():
+            answer = f"{answer}\n{note}".strip() if answer else note
+        if not _states_change(answer, facts):
+            change = _comparison_line(facts)
+            if change:
+                return _with_boundary_note(
+                    question, facts, f"{change}\n{answer}" if answer else change
+                )
     if _single_fact(facts):
         line = _summary_line(facts[0])
         return f"{line}\n\n{answer}" if answer else line
@@ -1906,6 +2161,58 @@ def _timeout_after_table(calls: list[dict[str, str]] | None) -> str:
     return f"Opslaget i {table} tog for lang tid. Prøv igen."
 
 
+def _asks_net_unemployment(question: str) -> bool:
+    """Net unemployment, not the gross total and not a sentence that only says brutto."""
+    folded = question.casefold()
+    if "netto" not in folded or not re.search(r"ledig", folded):
+        return False
+    return "brutto" not in folded or folded.index("netto") < folded.index("brutto")
+
+
+def _national_area(values: dict[str, Any]) -> bool:
+    codes = _codes(values, "OMRÅDE")
+    if not codes:
+        return True
+    return {code.strip().casefold() for code in codes} <= {"000", "hele landet"}
+
+
+def net_series_block(question: str, arguments: dict[str, Any]) -> str:
+    """Refuse a gross table when the question asked for net and a place."""
+    if not _asks_net_unemployment(question):
+        return ""
+    table = str(arguments.get("table") or "").upper()
+    if table not in {"AUS08", "AUS09", "AUF01", "AUF02"}:
+        return ""
+    return (
+        f"{table} has no net series. Nettoledige are not the gross total on this table. "
+        "The national net count is AUS07, YD NET. This table cannot split a municipality into net."
+    )
+
+
+def _annual_unemployment_average(question: str) -> bool:
+    """A named year asked as an average of full-time unemployed, not the net series."""
+    folded = question.casefold()
+    if "netto" in folded or "gennemsnit" not in folded:
+        return False
+    if not re.search(r"fuldtidsledig|ledige|ledighed", folded):
+        return False
+    return re.search(r"\b(?:19|20)\d{2}\b", question) is not None
+
+
+def apply_search_context(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Keep the question's 'gennemsnit' when the model searches unemployment without it."""
+    updated = dict(arguments)
+    if not _annual_unemployment_average(question):
+        return updated
+    query = str(updated.get("query") or "")
+    if re.search(r"gennemsnit", query, re.IGNORECASE):
+        return updated
+    if not re.search(r"ledig|fuldtid", f"{query} {question}", re.IGNORECASE):
+        return updated
+    updated["query"] = f"{query} gennemsnit".strip()
+    return updated
+
+
 def preferred_table(ranked: str, requested: str) -> str:
     """If search ranked the headline table, do not switch to its sibling."""
     ranked_id = ranked.strip().upper()
@@ -1922,8 +2229,30 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
     values = dict(updated.get("values") or {})
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
-    if table == "AUS08" and not re.search(r"procent|pct\b|%", folded):
-        _put_code(values, "SAESONFAK", ["24"])
+    if (
+        _asks_net_unemployment(question)
+        and table in {"AUS08", "AUS09", "AUF01", "AUF02"}
+        and _national_area(values)
+    ):
+        # The area table is gross only. National net is a different series.
+        table = "AUS07"
+        updated["table"] = table
+        for key in list(values):
+            if str(key).upper() == "OMRÅDE":
+                del values[key]
+    if _annual_unemployment_average(question) and table in {"AUS08", "AUS09", "AUF01", "AUF02"}:
+        table = "AUL01"
+        updated["table"] = table
+        for key in list(values):
+            if str(key).upper() == "SAESONFAK":
+                del values[key]
+    if table in {"AUS07", "AUS08", "AUS09"} and not re.search(r"procent|pct\b|%", folded):
+        if re.search(r"sæsonkorriger|saesonkorriger|seasonally", folded):
+            _put_code(values, "SAESONFAK", ["10"])
+        else:
+            _put_code(values, "SAESONFAK", ["24"])
+    if table == "AUS07" and re.search(r"netto", folded) and "brutto" not in folded:
+        _put_code(values, "YD", ["NET"])
     if table == "PRIS01" and re.search(r"brændstof|braendstof|benzin|diesel", folded):
         codes = _codes(values, "VAREGR")
         if any(_FUEL_CHILD_RE.fullmatch(code) for code in codes):
@@ -2531,7 +2860,8 @@ def _near(number: float, allowed: set[float]) -> bool:
 
 _DERIVED_BEFORE = {
     "difference": re.compile(
-        r"(?:forskellen|forskel|difference|stigningen|stigning|faldet|fald)\b"
+        r"(?:forskellen|forskel|difference|stigningen|stigning|faldet|fald"
+        r"|vokset med|oegget med|øget med)\b"
         r"(?:[ \t]+\S+){0,3}[ \t]*$",
         re.IGNORECASE,
     ),
@@ -2731,6 +3061,35 @@ def _short(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "…"
+
+
+def _model_result(name: str, result: str) -> str:
+    """Keep the last row when a long fetch is shortened for the model."""
+    if len(result) <= MODEL_RESULT_LIMIT:
+        return result
+    if name != "hent_data":
+        return _short(result, MODEL_RESULT_LIMIT)
+    try:
+        payload = json.loads(result)
+    except json.JSONDecodeError:
+        return _short(result, MODEL_RESULT_LIMIT)
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or len(rows) < 3:
+        return _short(result, MODEL_RESULT_LIMIT)
+    omitted = len(rows) - 2
+    shown = dict(payload)
+    shown["rows"] = [rows[0], rows[-1]]
+    shown["rows_omitted"] = omitted
+    first = rows[0].get("Tid") if isinstance(rows[0], dict) else ""
+    last = rows[-1].get("Tid") if isinstance(rows[-1], dict) else ""
+    shown["rows_note"] = (
+        f"{omitted} rows omitted from this view. "
+        f"First period {first}, last period {last}. Both values are included."
+    )
+    text = json.dumps(shown, ensure_ascii=False)
+    if len(text) <= MODEL_RESULT_LIMIT:
+        return text
+    return _short(text, MODEL_RESULT_LIMIT)
 
 
 class Limiter:
