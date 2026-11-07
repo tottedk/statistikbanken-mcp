@@ -16,6 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from evals.score import Truth
+from statistikbanken_mcp.web import rank_urban_areas
 
 API = "https://api.statbank.dk/v1"
 USER_AGENT = "statistikbanken-mcp-eval/0.1"
@@ -68,7 +69,12 @@ def truths_for(question: dict[str, Any], *, client: ApiClient | None = None) -> 
     for check in checks:
         try:
             resolved = _resolve_table(check, api)
-            found.append(evaluate_check(resolved, fetch_rows=api.rows, time_codes=api.time_codes))
+            if str(check.get("aggregate") or "") == "urban_rank":
+                found.append(_urban_truth(resolved, api))
+            else:
+                found.append(
+                    evaluate_check(resolved, fetch_rows=api.rows, time_codes=api.time_codes)
+                )
         except VerifierError as exc:
             errors.append(str(exc))
     if checks and not found:
@@ -115,12 +121,107 @@ def evaluate_check(check: dict[str, Any], *, fetch_rows: FetchRows, time_codes: 
             raise VerifierError(f"{table} returned no numbers")
         values = [sum(numbers) / len(numbers)]
         periods = _answer_periods(check, requested)
+    elif aggregate == "urban_rank":
+        return _rank_truth(table, rows, requested, check)
     else:
         values = numbers
         periods = list(requested)
     if not values:
         raise VerifierError(f"{table} returned no numbers for the expected selection")
+    values = _with_change(values, rows, time_id, requested, check.get("also") or [])
     return Truth(table=table, values=[float(value) for value in values], periods=periods)
+
+
+def _with_change(
+    values: list[float],
+    rows: list[dict[str, Any]],
+    time_id: str,
+    requested: list[str],
+    also: Any,
+) -> list[float]:
+    """Append the difference and percent when the question asks for the change."""
+    wanted = {str(item) for item in also} if isinstance(also, list) else set()
+    if not wanted or len(requested) != 2:
+        return values
+    found: dict[str, float] = {}
+    for row in rows:
+        period = ""
+        for key, value in row.items():
+            if str(key).casefold() in {time_id.casefold(), "tid"}:
+                period = str(value)
+                break
+        number = row.get("value")
+        if period and isinstance(number, int | float) and not isinstance(number, bool):
+            found[period.casefold()] = float(number)
+    first = found.get(requested[0].casefold())
+    second = found.get(requested[1].casefold())
+    if first is None or second is None or first == 0:
+        return values
+    difference = abs(second - first)
+    extra: list[float] = []
+    if "difference" in wanted:
+        extra.append(difference)
+    if "percent" in wanted:
+        extra.append(difference / abs(first) * 100)
+    return [*values, *extra]
+
+
+def _rank_truth(
+    table: str,
+    rows: list[dict[str, Any]],
+    requested: list[str],
+    check: dict[str, Any],
+) -> Truth:
+    pairs: list[tuple[str, float]] = []
+    for row in rows:
+        label = ""
+        for key, value in row.items():
+            if str(key).casefold() == "byer":
+                label = str(value)
+                break
+        number = row.get("value")
+        if label and isinstance(number, int | float) and not isinstance(number, bool):
+            pairs.append((label, float(number)))
+    ranked = rank_urban_areas(pairs)
+    spec = check.get("rank", 1)
+    if isinstance(spec, list) and len(spec) == 2:
+        start, end = int(spec[0]), int(spec[1])
+        chosen = ranked[start - 1 : end]
+        if len(chosen) != end - start + 1:
+            raise VerifierError(f"{table} does not have urban ranks {start} to {end}")
+    else:
+        index = int(spec) - 1
+        if index < 0 or index >= len(ranked):
+            raise VerifierError(f"{table} does not have urban rank {spec}")
+        chosen = [ranked[index]]
+    return Truth(
+        table=table,
+        values=[value for _name, value in chosen],
+        periods=list(requested),
+        names=tuple(name for name, _value in chosen),
+    )
+
+
+def _urban_truth(check: dict[str, Any], client: ApiClient) -> Truth:
+    """Rank byområder by their names. The data call itself returns codes."""
+    table = str(check["table"])
+    names: dict[str, str] = {}
+    for variable in client._tableinfo(table).get("variables") or []:
+        if str(variable.get("id") or "").casefold() != "byer":
+            continue
+        for item in variable.get("values") or []:
+            if item.get("id") is not None:
+                names[str(item["id"])] = str(item.get("text") or item["id"])
+
+    def fetch_rows(fetched: str, variables: dict[str, list[str]]) -> list[dict[str, Any]]:
+        rows = client.rows(fetched, variables)
+        for row in rows:
+            for key in list(row):
+                if str(key).casefold() == "byer":
+                    row[key] = names.get(str(row[key]), str(row[key]))
+        return rows
+
+    return evaluate_check(check, fetch_rows=fetch_rows, time_codes=client.time_codes)
 
 
 def _answer_periods(check: dict[str, Any], requested: list[str]) -> list[str]:

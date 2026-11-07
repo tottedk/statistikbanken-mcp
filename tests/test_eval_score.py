@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from evals.score import Truth, classify, cost_usd, parse_numbers, prices_from_env, render_report
-from evals.verify import evaluate_check
+from evals.verify import VerifierError, evaluate_check
 
 from statistikbanken_mcp.web import NO_DATA_ANSWER, NO_FETCHED_NUMBERS, UNVERIFIED_NUMBERS
 
@@ -304,7 +305,7 @@ def test_coverage_gap_requires_an_explanation() -> None:
 
 def test_question_file_is_the_fixed_set() -> None:
     questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    assert [item["id"] for item in questions] == list(range(1, 120))
+    assert [item["id"] for item in questions] == list(range(1, 131))
     by_id = {item["id"]: item for item in questions}
     growth = {
         106: ("Hvor meget er befolkningen i danmark vokset siden 1989", "1989"),
@@ -379,6 +380,50 @@ def test_question_file_is_the_fixed_set() -> None:
         check["variables"].get("SAESONFAK") == ["10"] for check in by_id[50]["expect"]["checks"]
     )
     assert any(check["table"] == "INDOPH1" for check in by_id[33]["expect"]["checks"])
+    change_1995 = {
+        120: "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+        121: "Hvor meget voksede Danmarks befolkning fra 1995 til 2001?",
+        122: "Hvor mange flere indbyggere var der i Danmark i 2001 end i 1995?",
+        123: (
+            "Hvad var befolkningstilvæksten i Danmark mellem 1995 og 2001, "
+            "både i personer og procent?"
+        ),
+        124: "Hvor meget steg befolkningen i Danmark i perioden 1995–2001?",
+        125: "Hvor stor var forskellen på Danmarks befolkning i 1995 og 2001?",
+    }
+    for question_id, text in change_1995.items():
+        item = by_id[question_id]
+        assert item["question"] == text
+        assert item["expect"]["kind"] == "figures"
+        assert len(item["expect"]["checks"]) == 2
+        for check in item["expect"]["checks"]:
+            assert check["time"] == ["1995", "2001"]
+            assert check["also"] == ["difference", "percent"]
+            assert check["variables"]["KØN"] == ["TOT"]
+            assert check["variables"]["ALDER"] == ["TOT"]
+        assert item["expect"]["checks"][0]["table"] == "BEFOLK1"
+        assert item["expect"]["checks"][1]["table"] == "BEFOLK2"
+    esbjerg = by_id[126]
+    assert esbjerg["question"] == "Hvor meget mange mennesker bor der i esbjerg"
+    assert esbjerg["expect"]["checks"][0]["table"] == "FOLK1A"
+    assert esbjerg["expect"]["checks"][0]["variables"]["OMRÅDE"] == ["561"]
+    assert "befolkning" in esbjerg["expect"]["require_all"][0]
+    assert "kommune" in esbjerg["expect"]["require_all"][1]
+    cities = {
+        127: "Hvilken by er danmarks tiende største",
+        128: "Hvilken by ligger på tiendepladsen i Danmark målt på indbyggertal?",
+        129: "Hvad hedder Danmarks tiendestørste by, og hvor mange indbyggere har den?",
+        130: "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+    }
+    for question_id, text in cities.items():
+        item = by_id[question_id]
+        assert item["question"] == text
+        check = item["expect"]["checks"][0]
+        assert check["table"] == "BY3"
+        assert check["aggregate"] == "urban_rank"
+        assert check["variables"]["FOLKARTAET"] == ["FOLKETAL"]
+    assert by_id[127]["expect"]["checks"][0]["rank"] == 10
+    assert by_id[130]["expect"]["checks"][0]["rank"] == [1, 10]
 
 
 def test_a_transient_group_is_retried_once_and_the_leaf_is_recorded(monkeypatch) -> None:
@@ -457,3 +502,133 @@ def test_a_transient_group_is_retried_once_and_the_leaf_is_recorded(monkeypatch)
     plain = _run_one(settings, question)
     assert calls["n"] == 1
     assert "ValueError" in (plain["error"] or "")
+
+
+def test_change_check_adds_the_difference_and_percent() -> None:
+    """1995 and 2001 are not enough. The requested change has to be in the truth."""
+
+    def time_codes(_table: str) -> tuple[str, list[str]]:
+        return "Tid", ["1995", "2001"]
+
+    def fetch_rows(_table: str, _variables: dict) -> list[dict]:
+        return [
+            {"Tid": "1995", "value": 5_215_718},
+            {"Tid": "2001", "value": 5_349_212},
+        ]
+
+    truth = evaluate_check(
+        {
+            "table": "BEFOLK1",
+            "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+            "time": ["1995", "2001"],
+            "aggregate": "values",
+            "also": ["difference", "percent"],
+        },
+        fetch_rows=fetch_rows,
+        time_codes=time_codes,
+    )
+    assert truth.values[:2] == [5_215_718, 5_349_212]
+    assert truth.values[2] == 133_494
+    assert abs(truth.values[3] - (133_494 / 5_215_718 * 100)) < 1e-9
+    question = {
+        "question": "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+        "expect": {"kind": "figures"},
+    }
+    only_end = _result("5.349.212 (BEFOLK1, 2001, Antal, Alder i alt)")
+    assert classify(question, only_end, [truth]) != "correct"
+    full = _result("5.215.718 (1995) og 5.349.212 (2001). Forskellen er 133.494 (2,56 procent).")
+    assert classify(question, full, [truth]) == "correct"
+
+
+def test_a_city_number_without_the_urban_area_is_not_correct() -> None:
+    question = {
+        "question": "Hvilken by er danmarks tiende største",
+        "expect": {
+            "kind": "figures",
+            "require_all": [["Roskilde"], ["byområde", "byomraade"]],
+        },
+    }
+    truth = [Truth("BY3", [53897.0], ["2026"])]
+    dumped = _result("6.031.699 (FOLK1A, Hele landet). 53.897")
+    assert classify(question, dumped, truth) != "correct"
+    named = _result("Roskilde er den 10. største by med 53.897 indbyggere (byområde).")
+    assert classify(question, named, truth) == "correct"
+
+
+def test_rank_names_have_to_appear_in_order() -> None:
+    question = {"question": "Hvilke ti byer", "expect": {"kind": "figures"}}
+    try:
+        truth = [Truth("BY3", [150.0, 140.0], ["2026"], ("Hovedstadsområdet", "Aarhus"))]
+    except TypeError:
+        raise AssertionError("Truth does not carry the ranked names") from None
+    swapped = _result("Aarhus 140 og Hovedstadsområdet 150 (byområde).")
+    assert classify(question, swapped, truth) != "correct"
+    ordered = _result("1. Hovedstadsområdet: 150\n2. Aarhus: 140\nDet er byområder.")
+    assert classify(question, ordered, truth) == "correct"
+
+
+def test_urban_rank_check_is_the_tenth_city_not_every_row() -> None:
+    rows = [
+        {"BYER": "101-01100 København (del af Hovedstadsområdet)", "Tid": "2026", "value": 100},
+        {"BYER": "147-01100 Frederiksberg (del af Hovedstadsområdet)", "Tid": "2026", "value": 50},
+        {"BYER": "000 Hovedstadsområdet", "Tid": "2026", "value": 0},
+        {"BYER": "000 Landdistrikter", "Tid": "2026", "value": 999},
+        {"BYER": "751-11045 Aarhus", "Tid": "2026", "value": 90},
+        {"BYER": "461-10677 Odense", "Tid": "2026", "value": 80},
+        {"BYER": "851-10938 Aalborg", "Tid": "2026", "value": 70},
+        {"BYER": "561-11196 Esbjerg", "Tid": "2026", "value": 60},
+        {"BYER": "615-10615 Horsens", "Tid": "2026", "value": 50},
+        {"BYER": "730-10691 Randers", "Tid": "2026", "value": 40},
+        {"BYER": "621-10588 Kolding", "Tid": "2026", "value": 30},
+        {"BYER": "630-10722 Vejle", "Tid": "2026", "value": 20},
+        {"BYER": "265-10850 Roskilde", "Tid": "2026", "value": 15},
+        {"BYER": "740-10820 Silkeborg", "Tid": "2026", "value": 10},
+    ]
+
+    def time_codes(_table: str) -> tuple[str, list[str]]:
+        return "Tid", ["2026"]
+
+    def fetch_rows(_table: str, _variables: dict) -> list[dict]:
+        return rows
+
+    truth = evaluate_check(
+        {
+            "table": "BY3",
+            "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+            "time": ["2026"],
+            "aggregate": "urban_rank",
+            "rank": 10,
+        },
+        fetch_rows=fetch_rows,
+        time_codes=time_codes,
+    )
+    assert truth.names == ("Roskilde",)
+    assert truth.values == [15]
+    listed = evaluate_check(
+        {
+            "table": "BY3",
+            "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+            "time": ["2026"],
+            "aggregate": "urban_rank",
+            "rank": [1, 10],
+        },
+        fetch_rows=fetch_rows,
+        time_codes=time_codes,
+    )
+    assert listed.names[0] == "Hovedstadsområdet"
+    assert listed.names[9] == "Roskilde"
+    assert listed.values[0] == 150
+    assert "Landdistrikter" not in listed.names
+    assert all("del af" not in name for name in listed.names)
+    with pytest.raises(VerifierError):
+        evaluate_check(
+            {
+                "table": "BY3",
+                "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+                "time": ["2026"],
+                "aggregate": "urban_rank",
+                "rank": 99,
+            },
+            fetch_rows=fetch_rows,
+            time_codes=time_codes,
+        )

@@ -2764,5 +2764,250 @@
       ]
     },
     "note": "Scratch 212. Ages 65 through 125, both sexes, latest quarter. On 7 November 2026 that was 26,821."
+  },
+  {
+    "id": 120,
+    "question": "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK1",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        },
+        {
+          "table": "BEFOLK2",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        }
+      ]
+    },
+    "note": "Checked 7 November 2026 on BEFOLK1 and BEFOLK2, sex and age totals: 1995 is 5,215,718 and 2001 is 5,349,212. Difference 133,494, about 2.56 percent. Both stocks and the derived change are required."
+  },
+  {
+    "id": 121,
+    "question": "Hvor meget voksede Danmarks befolkning fra 1995 til 2001?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK1",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        },
+        {
+          "table": "BEFOLK2",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        }
+      ]
+    },
+    "note": "Same 1995 and 2001 stocks as question 120."
+  },
+  {
+    "id": 122,
+    "question": "Hvor mange flere indbyggere var der i Danmark i 2001 end i 1995?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK1",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        },
+        {
+          "table": "BEFOLK2",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        }
+      ]
+    },
+    "note": "Same 1995 and 2001 stocks as question 120. The difference is the requested answer."
+  },
+  {
+    "id": 123,
+    "question": "Hvad var befolkningstilvæksten i Danmark mellem 1995 og 2001, både i personer og procent?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK1",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        },
+        {
+          "table": "BEFOLK2",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        }
+      ]
+    },
+    "note": "Same 1995 and 2001 stocks as question 120. Persons and percent are both required."
+  },
+  {
+    "id": 124,
+    "question": "Hvor meget steg befolkningen i Danmark i perioden 1995–2001?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK1",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        },
+        {
+          "table": "BEFOLK2",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        }
+      ]
+    },
+    "note": "Same 1995 and 2001 stocks as question 120."
+  },
+  {
+    "id": 125,
+    "question": "Hvor stor var forskellen på Danmarks befolkning i 1995 og 2001?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK1",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        },
+        {
+          "table": "BEFOLK2",
+          "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
+          "time": ["1995", "2001"],
+          "aggregate": "values",
+          "also": ["difference", "percent"]
+        }
+      ]
+    },
+    "note": "Same 1995 and 2001 stocks as question 120."
+  },
+  {
+    "id": 126,
+    "question": "Hvor meget mange mennesker bor der i esbjerg",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "require_all": [["befolkning"], ["kommune"], ["alder i alt", "alle aldre"]],
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": ["561"],
+            "KØN": ["TOT"],
+            "ALDER": ["IALT"],
+            "CIVILSTAND": ["TOT"]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "Malformed question. The figure is Esbjerg municipality, all ages, not the urban area. The answer has to name the population measure and say kommune. FOLK1A 2026K3 was 114,824 on 7 November 2026; the scorer reads the latest quarter from the API."
+  },
+  {
+    "id": 127,
+    "question": "Hvilken by er danmarks tiende største",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 10
+        }
+      ]
+    },
+    "note": "Comparable geography is BY3 byområder, folketal. Parts of Hovedstadsområdet are one urban area because the parent cell is 0. Landdistrikter are not cities. The name and population are read at score time. On 7 November 2026, Tid 2026, the 10th was Roskilde with 53,897 and Hovedstadsområdet summed to 1,408,575."
+  },
+  {
+    "id": 128,
+    "question": "Hvilken by ligger på tiendepladsen i Danmark målt på indbyggertal?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 10
+        }
+      ]
+    },
+    "note": "Same urban-area rank as question 127."
+  },
+  {
+    "id": 129,
+    "question": "Hvad hedder Danmarks tiendestørste by, og hvor mange indbyggere har den?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 10
+        }
+      ]
+    },
+    "note": "Same urban-area rank as question 127. The name and the population are both required."
+  },
+  {
+    "id": 130,
+    "question": "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"]},
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": [1, 10]
+        }
+      ]
+    },
+    "note": "Same BY3 definition as question 127. The ten names have to appear in descending order, with their populations."
   }
 ]
