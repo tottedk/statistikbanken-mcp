@@ -281,6 +281,16 @@ def test_ambiguous_time_sum_is_rejected_before_any_number(
     assert not any(str(call["path"]).endswith("/data") for call in calls)
 
 
+def test_a_comma_between_year_bounds_is_a_closed_range(
+    calls: list[dict[str, object]],
+) -> None:
+    hent_data("FOLK1A", {"OMRÅDE": ["000"], "Tid": [">=1995,<=2001"]})
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    tid = next(item["values"] for item in sent["variables"] if item["code"] == "Tid")
+    assert tid == [">=1995<=2001"]
+
+
 def test_two_period_sum_is_not_a_time_range(calls: list[dict[str, object]]) -> None:
     with pytest.raises(ToolError, match="not every period") as caught:
         hent_data(

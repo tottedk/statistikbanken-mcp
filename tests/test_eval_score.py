@@ -396,9 +396,10 @@ def test_question_file_is_the_fixed_set() -> None:
         assert item["question"] == text
         assert item["expect"]["kind"] == "figures"
         assert len(item["expect"]["checks"]) == 2
+        wants_percent = "procent" in text.casefold()
         for check in item["expect"]["checks"]:
             assert check["time"] == ["1995", "2001"]
-            assert check["also"] == ["difference", "percent"]
+            assert check["also"] == (["difference", "percent"] if wants_percent else ["difference"])
             assert check["variables"]["KØN"] == ["TOT"]
             assert check["variables"]["ALDER"] == ["TOT"]
         assert item["expect"]["checks"][0]["table"] == "BEFOLK1"

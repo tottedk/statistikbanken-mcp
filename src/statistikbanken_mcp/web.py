@@ -1056,24 +1056,27 @@ def display_label(detail: str, table: str = "") -> str:
     """'Esbjerg, 80+' rather than 'OMRÅDE: Esbjerg, KØN: I alt, ALDER: 80+'."""
     if not detail:
         return table
-    values = []
+    fields: list[tuple[str, str]] = []
     for part in detail.split(", "):
-        _name, sep, value = part.partition(": ")
+        name, sep, value = part.partition(": ")
         text = value if sep else part
         if text and text.casefold() not in _TOTAL_LABELS:
-            values.append(text)
-    if not values:
+            fields.append((name if sep else "", text))
+    if not fields:
         return table
     if table.upper().startswith(_POPULATION_TABLES) and any(
-        item.casefold() in _ALL_AGES_LABELS for item in values
+        text.casefold() in _ALL_AGES_LABELS for _name, text in fields
     ):
-        shown = [
-            f"{item} kommune" if _municipality_name(item) else item
-            for item in values
-            if item.casefold() not in _ALL_AGES_LABELS
-        ]
+        shown = []
+        for name, text in fields:
+            if text.casefold() in _ALL_AGES_LABELS:
+                continue
+            if _fold_place(name) in _AREA_FIELDS and _municipality_name(text):
+                shown.append(f"{text} kommune")
+            else:
+                shown.append(text)
         return ", ".join(["Befolkning", *shown, "alder i alt"])
-    return ", ".join(values)
+    return ", ".join(text for _name, text in fields)
 
 
 def _municipality_name(text: str) -> bool:
@@ -1812,8 +1815,55 @@ def _period_sort_key(code: str) -> tuple[int, int, int, str]:
     return (year, 0, 0, code)
 
 
-def _comparison_line(facts: list[dict[str, Any]]) -> str | None:
-    """Both endpoints, the people difference, and the percentage. One series only."""
+def _named_year_span(question: str) -> tuple[int, int] | None:
+    """Two different years in the question. One year, as in 'siden 2000', is open-ended."""
+    years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
+    if len(set(years)) < 2:
+        return None
+    return min(years), max(years)
+
+
+def _period_year(period: str) -> int | None:
+    match = re.match(r"(\d{4})", period.strip())
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _row_in_year(rows: list[dict[str, Any]], year: int, *, last: bool) -> dict[str, Any] | None:
+    chosen = [row for row in rows if _period_year(str(row.get("period") or "")) == year]
+    if not chosen:
+        return None
+    exact = [row for row in chosen if re.fullmatch(r"\d{4}", str(row.get("period") or "").strip())]
+    pool = exact or chosen
+    pool.sort(key=lambda row: _period_sort_key(str(row.get("period") or "")))
+    return pool[-1 if last else 0]
+
+
+def _series_bounds(
+    question: str, series: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, Any]] | str | None:
+    """The rows the question named. A missing end year is reported, not replaced."""
+    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    span = _named_year_span(question)
+    if span is None:
+        first, last = ordered[0], ordered[-1]
+        if str(first.get("period") or "") == str(last.get("period") or ""):
+            return None
+        return first, last
+    start_year, end_year = span
+    start = _row_in_year(ordered, start_year, last=False)
+    end = _row_in_year(ordered, end_year, last=True)
+    missing = [str(year) for year, row in ((start_year, start), (end_year, end)) if row is None]
+    if missing:
+        return f"{' og '.join(missing)} er ikke med i de hentede tal."
+    assert start is not None and end is not None
+    if str(start.get("period") or "") == str(end.get("period") or ""):
+        return None
+    return start, end
+
+
+def _one_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
     if len(numeric) < 2:
         return None
@@ -1827,11 +1877,20 @@ def _comparison_line(facts: list[dict[str, Any]]) -> str | None:
         groups.setdefault(key, []).append(fact)
     if len(groups) != 1:
         return None
-    series = next(iter(groups.values()))
-    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
-    first, last = ordered[0], ordered[-1]
-    if str(first.get("period") or "") == str(last.get("period") or ""):
+    return next(iter(groups.values()))
+
+
+def _comparison_line(question: str, facts: list[dict[str, Any]]) -> str | None:
+    """Both requested endpoints, the difference, and the percentage. One series only."""
+    series = _one_series(facts)
+    if series is None:
         return None
+    bounds = _series_bounds(question, series)
+    if isinstance(bounds, str):
+        return bounds
+    if bounds is None:
+        return None
+    first, last = bounds
     start, end = float(first["value"]), float(last["value"])
     if start == 0:
         return None
@@ -1846,35 +1905,25 @@ def _comparison_line(facts: list[dict[str, Any]]) -> str | None:
 
 
 def _series_endpoints(
+    question: str,
     facts: list[dict[str, Any]],
 ) -> tuple[float, float, float] | None:
     """Start, end, and absolute difference for one series. Period digits are not values."""
-    numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
-    if len(numeric) < 2:
+    series = _one_series(facts)
+    if series is None:
         return None
-    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for fact in numeric:
-        key = (
-            str(fact.get("table") or ""),
-            str(fact.get("unit") or ""),
-            str(fact.get("detail") or ""),
-        )
-        groups.setdefault(key, []).append(fact)
-    if len(groups) != 1:
+    bounds = _series_bounds(question, series)
+    if not isinstance(bounds, tuple):
         return None
-    series = next(iter(groups.values()))
-    ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
-    first, last = ordered[0], ordered[-1]
-    if str(first.get("period") or "") == str(last.get("period") or ""):
-        return None
+    first, last = bounds
     start, end = float(first["value"]), float(last["value"])
     if start == 0:
         return None
     return start, end, abs(end - start)
 
 
-def _states_change(answer: str, facts: list[dict[str, Any]]) -> bool:
-    change = _series_endpoints(facts)
+def _states_change(question: str, answer: str, facts: list[dict[str, Any]]) -> bool:
+    change = _series_endpoints(question, facts)
     if change is None:
         return False
     stated = _numbers_in(answer)
@@ -1977,9 +2026,11 @@ def _coverage_explanation(question: str, calls: list[dict[str, str]] | None) -> 
         if match is None:
             continue
         year = years[-1] if years else ""
+        before = match.group("before").strip(".,;")
+        after = match.group("after").strip(".,;")
         return (
             f"{match.group('table')} har ikke {year}. "
-            f"Nærmeste perioder i tabellen er {match.group('before')} og {match.group('after')}."
+            f"Nærmeste perioder i tabellen er {before} og {after}."
         )
     if not years:
         return ""
@@ -2088,7 +2139,7 @@ def guard_answer(
                 ),
             )
     if _log_unverified(answer, question, facts, calls):
-        change = _comparison_line(facts) if _asks_for_change(question) else None
+        change = _comparison_line(question, facts) if _asks_for_change(question) else None
         if change:
             return _with_boundary_note(question, facts, change)
         if _single_fact(facts):
@@ -2099,8 +2150,8 @@ def guard_answer(
         note = _reform_note(question, facts)
         if note and note.casefold() not in answer.casefold():
             answer = f"{answer}\n{note}".strip() if answer else note
-        if not _states_change(answer, facts):
-            change = _comparison_line(facts)
+        if not _states_change(question, answer, facts):
+            change = _comparison_line(question, facts)
             if change:
                 return _with_boundary_note(
                     question, facts, f"{change}\n{answer}" if answer else change
@@ -2245,7 +2296,7 @@ def _summary_line(fact: dict[str, Any]) -> str:
         str(fact.get("unit") or ""),
     ]
     detail = display_label(str(fact.get("detail") or ""), str(fact.get("table") or ""))
-    if detail:
+    if detail and detail != str(fact.get("table") or ""):
         bits.append(detail)
     if fact.get("projection"):
         bits.append("fremskrivning")
@@ -2359,9 +2410,31 @@ def _annual_unemployment_average(question: str) -> bool:
     return re.search(r"\b(?:19|20)\d{2}\b", question) is not None
 
 
+def _municipality_in_question(question: str) -> str | None:
+    """The municipality in a population question, such as Viborg in 'Viborg Kommune'."""
+    folded = question.casefold()
+    if not any(word in folded for word in ("befolk", "indbygg", "vokset", "voksede")):
+        return None
+    match = re.search(
+        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+kommune",
+        question,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return match.group(1)
+
+
 def apply_search_context(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Keep words the question already used when the model searches without them."""
     updated = dict(arguments)
+    place = _municipality_in_question(question)
+    if place:
+        query = str(updated.get("query") or "")
+        folded = query.casefold()
+        if "befolk" not in folded and place.casefold() not in folded:
+            updated["query"] = f"befolkning {place} kommune"
+        return updated
     if _asks_city_rank(question):
         query = str(updated.get("query") or "")
         if "byomr" not in query.casefold():
@@ -2413,6 +2486,21 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
     values = dict(updated.get("values") or {})
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
+    place = _municipality_in_question(question)
+    if place and table not in {"FOLK1A", "FOLK1AM"}:
+        # A municipality population series is FOLK1A. Another table is not that series.
+        kept: dict[str, Any] = {"OMRÅDE": [place]}
+        tid = _codes(values, "Tid")
+        if tid:
+            kept["Tid"] = tid
+        for key, raw in values.items():
+            if str(key).casefold() in {"alder", "køn", "kon", "civilstand"}:
+                kept[key] = raw
+        updated["table"] = "FOLK1A"
+        updated["values"] = kept
+        updated.pop("sum_from", None)
+        updated.pop("sum_range", None)
+        return updated
     if _asks_city_rank(question) and table in _CITY_TABLES:
         # A town rank is byområder, not municipalities or the whole country.
         updated["table"] = "BY3"

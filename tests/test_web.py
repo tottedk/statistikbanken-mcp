@@ -2313,6 +2313,8 @@ def test_all_ages_population_label_names_the_measure() -> None:
     assert display_label(region, "FOLK1A") == "Befolkning, Region Hovedstaden, alder i alt"
     assert display_label("OMRÅDE: Esbjerg, KØN: I alt, ALDER: 80+", "FOLK1A") == "Esbjerg, 80+"
     assert display_label("ALDER: Alder i alt", "AUS07") == "Alder i alt"
+    women = "OMRÅDE: Viborg, KØN: Kvinder, ALDER: Alder i alt"
+    assert display_label(women, "FOLK1A") == "Befolkning, Viborg kommune, Kvinder, alder i alt"
 
 
 def test_ambiguous_esbjerg_stock_says_it_is_the_municipality() -> None:
@@ -2415,3 +2417,88 @@ def test_city_question_fetches_urban_areas_not_municipalities() -> None:
     )
     assert local["table"] == "FOLK1A"
     assert "byområder" in SYSTEM_PROMPT
+
+
+def test_a_closed_year_span_is_not_compared_with_the_latest_row() -> None:
+    """1995–2001 stays those two years when the fetch continues to 2026."""
+    question = "Hvor meget steg befolkningen i Danmark i perioden 1995–2001?"
+    facts = [
+        *_population_ends(),
+        _population_fact(6_025_603, "2026", "Hele landet"),
+    ]
+    facts[-1]["table"] = "BEFOLK1"
+    facts[-1]["detail"] = "KØN: I alt, ALDER: Alder i alt"
+    answer = guard_answer(question, "5.349.212", facts)
+    assert "133.494" in answer
+    assert "2001" in answer
+    assert "2026" not in answer
+    assert "809.885" not in answer
+    missing = [fact for fact in facts if fact["period"] != "2001"]
+    gap = guard_answer(question, "5.215.718", missing)
+    assert "2001" in gap
+    assert "ikke med" in gap.casefold()
+    assert "809.885" not in gap
+    assert "6.025.603" not in gap
+
+
+def test_a_census_gap_does_not_end_with_two_full_stops() -> None:
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": "{}",
+            "result": (
+                "1934 is 1934, which is not in table FT. Neighbouring periods: 1930 and 1935."
+            ),
+        }
+    ]
+    answer = guard_answer(
+        "Hvor mange boede der i Danmark ifølge folketællingen i 1934?",
+        "3.650.500",
+        [],
+        calls,
+    )
+    assert answer.endswith("1935.")
+    assert not answer.endswith("..")
+    assert "FT" in answer
+
+
+def test_a_projection_label_names_the_table_once() -> None:
+    fact = {
+        "table": "FRDK126",
+        "period": "2040",
+        "unit": "Antal",
+        "value": 6_231_908,
+        "detail": "",
+        "projection": True,
+        "url": "https://www.statistikbanken.dk/FRDK126",
+    }
+    answer = guard_answer(
+        "Hvor mange indbyggere forventes Danmark at have i 2040 ifølge befolkningsfremskrivningen?",
+        "6.231.908",
+        [fact],
+    )
+    assert answer.count("FRDK126") == 1
+    assert "fremskrivning" in answer
+
+
+def test_municipality_population_history_reaches_folk1a() -> None:
+    from statistikbanken_mcp.server import find_tabel
+    from statistikbanken_mcp.web import apply_fetch_defaults, apply_search_context
+
+    question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
+    searched = apply_search_context(question, {"query": "før 2008"})
+    hits = find_tabel(str(searched["query"]), limit=3)
+    assert hits[0]["id"] == "FOLK1A"
+    assert hits[0]["first_period"] == "2008K1"
+    fetched = apply_fetch_defaults(
+        question,
+        {"table": "NRHB", "values": {"Tid": [">=2000"]}},
+    )
+    assert fetched["table"] == "FOLK1A"
+    assert fetched["values"]["OMRÅDE"] == ["Viborg"]
+    assert fetched["values"]["Tid"] == [">=2000"]
+    kept = apply_fetch_defaults(
+        "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+        {"table": "BEFOLK1", "values": {"Tid": ["1995", "2001"]}},
+    )
+    assert kept["table"] == "BEFOLK1"

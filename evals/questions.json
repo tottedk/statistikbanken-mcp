@@ -2777,14 +2777,14 @@
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         },
         {
           "table": "BEFOLK2",
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         }
       ]
     },
@@ -2802,14 +2802,14 @@
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         },
         {
           "table": "BEFOLK2",
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         }
       ]
     },
@@ -2827,14 +2827,14 @@
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         },
         {
           "table": "BEFOLK2",
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         }
       ]
     },
@@ -2877,14 +2877,14 @@
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         },
         {
           "table": "BEFOLK2",
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         }
       ]
     },
@@ -2902,14 +2902,14 @@
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"], "CIVILSTAND": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         },
         {
           "table": "BEFOLK2",
           "variables": {"KØN": ["TOT"], "ALDER": ["TOT"]},
           "time": ["1995", "2001"],
           "aggregate": "values",
-          "also": ["difference", "percent"]
+          "also": ["difference"]
         }
       ]
     },
