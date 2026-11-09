@@ -816,6 +816,7 @@ async def run_turn(
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
             answer = reply.content.strip() or _fallback_answer(calls, capped=not allow_tools)
+            facts, calls = await _complete_municipality_history(runner, question, facts, calls)
             return _turn(question, answer, facts, calls)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
@@ -853,6 +854,7 @@ async def run_turn(
             used += 1
             calls.append(_trace(call, result))
             facts.extend(_facts_from(call.name, result))
+            facts = _dedupe_facts(facts)
             messages.append(
                 {
                     "role": "tool",
@@ -863,7 +865,37 @@ async def run_turn(
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
             answer = final.content.strip() or _fallback_answer(calls, capped=True)
+            facts, calls = await _complete_municipality_history(runner, question, facts, calls)
             return _turn(question, answer, facts, calls)
+
+
+async def _complete_municipality_history(
+    runner: ToolRunner,
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Fetch FOLK1A when a municipality change before 2008 never reached hent_data."""
+    if facts or _january_year(question):
+        return facts, calls
+    place = _municipality_in_question(question)
+    if not place:
+        return facts, calls
+    folded = question.casefold()
+    if "siden" not in folded and not _asks_for_change(question):
+        return facts, calls
+    years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
+    if not years or min(years) >= 2008:
+        return facts, calls
+    arguments = apply_fetch_defaults(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": [place], "Tid": [">=2008K1"]}},
+    )
+    call = ToolCall(id="server:folk1a", name="hent_data", arguments=arguments, raw={})
+    result = await _invoke(runner, call)
+    calls.append(_trace(call, result))
+    facts.extend(_facts_from("hent_data", result))
+    return _dedupe_facts(facts), calls
 
 
 def _assistant_message(reply: ChatReply) -> dict[str, Any]:
@@ -921,6 +953,25 @@ def _fallback_answer(calls: list[dict[str, str]], *, capped: bool) -> str:
     if not calls:
         return "Jeg fandt ingen tal at svare ud fra."
     return "Modellen gav ikke et svar. Prøv at omformulere spørgsmålet."
+
+
+def _dedupe_facts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per table, period, and dimensions. A second fetch must not double it."""
+    seen: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str, str, str]] = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        key = (
+            str(fact.get("table") or ""),
+            str(fact.get("period") or ""),
+            str(fact.get("unit") or ""),
+            str(fact.get("detail") or ""),
+        )
+        if key not in seen:
+            order.append(key)
+        seen[key] = fact
+    return [seen[key] for key in order]
 
 
 def _facts_from(name: str, result: str) -> list[dict[str, Any]]:
@@ -1537,7 +1588,7 @@ def _turn(
         return TurnResult(
             answer=refusal, facts=[], calls=calls, chart=[], csv="", show_numbers=False
         )
-    kept = facts
+    kept = _dedupe_facts(facts)
     chart = chart_series(kept)
     return TurnResult(
         answer=guard_answer(question, answer, kept, calls),
@@ -2098,6 +2149,7 @@ def guard_answer(
     become the answer. A note that the requested period is not published yet
     is kept with that line.
     """
+    facts = _dedupe_facts(facts)
     if not facts:
         note = _timeout_after_table(calls)
         if note:
@@ -2129,7 +2181,7 @@ def guard_answer(
             "De hentede tal er ikke en sammenlignelig byrækkefølge."
         )
     if not _asks_for_trend(question):
-        lines = _latest_lines(facts)
+        lines = _selected_lines(question, facts)
         if lines:
             return _with_municipality_note(
                 question,
@@ -2153,9 +2205,9 @@ def guard_answer(
         if not _states_change(question, answer, facts):
             change = _comparison_line(question, facts)
             if change:
-                return _with_boundary_note(
-                    question, facts, f"{change}\n{answer}" if answer else change
-                )
+                prose = answer if _numbers_in(answer) else ""
+                text = f"{change}\n{prose}".strip() if prose else change
+                return _with_boundary_note(question, facts, text)
     if _single_fact(facts):
         line = _summary_line(facts[0])
         return f"{line}\n\n{answer}" if answer else line
@@ -2258,6 +2310,35 @@ def _with_unpublished_note(text: str, answer: str) -> str:
     if not note or note in text:
         return text
     return f"{text}\n{note}" if text else note
+
+
+_JANUARY_RE = re.compile(
+    r"(?<!\d)1\s*\.?\s*januar\w*\s+((?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+
+
+def _january_year(question: str) -> int | None:
+    """The year in '1. januar 2026'. A bare 'januar' or '15. januar' is not that date."""
+    if _asks_for_trend(question):
+        return None
+    match = _JANUARY_RE.search(question)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _selected_lines(question: str, facts: list[dict[str, Any]]) -> list[str]:
+    year = _january_year(question)
+    if year is None:
+        return _latest_lines(facts)
+    codes = {str(year), f"{year}K1", f"{year}Q1"}
+    chosen = [
+        fact for fact in facts if _single_value(fact) and str(fact.get("period") or "") in codes
+    ]
+    if not chosen:
+        return [f"1. januar {year} er ikke med i de hentede tal."]
+    return [_summary_line(fact) for fact in chosen]
 
 
 def _latest_lines(facts: list[dict[str, Any]]) -> list[str]:
@@ -2487,7 +2568,8 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
     place = _municipality_in_question(question)
-    if place and table not in {"FOLK1A", "FOLK1AM"}:
+    january = _january_year(question)
+    if place and table not in {"FOLK1A", "FOLK1AM"} and not (january and table == "BEFOLK3"):
         # A municipality population series is FOLK1A. Another table is not that series.
         kept: dict[str, Any] = {"OMRÅDE": [place]}
         tid = _codes(values, "Tid")
@@ -2542,6 +2624,11 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
     year = _single_total_year(question)
     if year is not None:
         _put_code(values, "Tid", [year])
+    january = _january_year(question)
+    if january and table in {"FOLK1A", "FOLK1AM"}:
+        _put_code(values, "Tid", [f"{january}K1"])
+    elif january and table == "BEFOLK3":
+        _put_code(values, "Tid", [str(january)])
     if values:
         updated["values"] = values
     return updated

@@ -2397,6 +2397,142 @@ def test_tenth_city_is_the_tenth_urban_area() -> None:
     assert "Landdistrikter" not in listed
 
 
+def _verified_urban_facts() -> list[dict]:
+    """BY3 folketal 2026, checked 7 Nov 2026. Parts sum to Hovedstadsområdet."""
+    rows = (
+        ("101-01100 København (del af Hovedstadsområdet)", 1_000_000),
+        ("147-01100 Frederiksberg (del af Hovedstadsområdet)", 408_575),
+        ("751-11045 Aarhus", 305_227),
+        ("461-10677 Odense", 187_558),
+        ("851-10938 Aalborg", 122_550),
+        ("561-11196 Esbjerg", 71_371),
+        ("615-10615 Horsens", 65_037),
+        ("730-10691 Randers", 64_764),
+        ("621-10588 Kolding", 63_664),
+        ("630-10722 Vejle", 62_153),
+        ("265-10850 Roskilde", 53_897),
+        ("740-10820 Silkeborg", 53_058),
+    )
+    facts = []
+    for name, value in rows:
+        facts.append(
+            {
+                "table": "BY3",
+                "period": "2026",
+                "unit": "Antal",
+                "value": value,
+                "detail": f"BYER: {name}, FOLKARTAET: Folketal",
+                "unpublished": False,
+            }
+        )
+    return facts
+
+
+def test_a_repeated_urban_fetch_is_ranked_once() -> None:
+    """Two identical hent_data calls must not double the capital or the rank."""
+    facts = _verified_urban_facts() + _verified_urban_facts()
+    tenth = guard_answer(
+        "Hvilken by ligger på tiendepladsen i Danmark målt på indbyggertal?",
+        "Horsens",
+        facts,
+    )
+    assert "Roskilde" in tenth
+    assert "53.897" in tenth
+    assert "65.037" not in tenth
+    assert "2.817.150" not in tenth
+    listed = guard_answer(
+        "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+        "Horsens",
+        facts,
+    )
+    assert "1.408.575" in listed
+    assert "2.817.150" not in listed
+    assert listed.count("Aarhus") == 1
+    assert "Roskilde" in listed
+
+
+def test_first_of_january_is_the_first_quarter_not_the_latest() -> None:
+    question = "Hvor mange indbyggere havde Viborg Kommune 1. januar 2026?"
+    facts = []
+    for period, value in (("2026K1", 97_874), ("2026K2", 98_014), ("2026K3", 98_104)):
+        fact = _population_fact(value, period, "Viborg")
+        fact["detail"] = "OMRÅDE: Viborg, KØN: I alt, ALDER: Alder i alt"
+        facts.append(fact)
+    answer = guard_answer(question, "98.104", facts)
+    assert "97.874" in answer
+    assert "2026 1. kvt." in answer
+    assert "98.104" not in answer
+    latest = guard_answer("Hvor mange indbyggere har Viborg Kommune?", "98.104", facts)
+    assert "98.104" in latest
+    assert "97.874" not in latest
+    from statistikbanken_mcp.web import apply_fetch_defaults
+
+    kept = apply_fetch_defaults(
+        question,
+        {"table": "BEFOLK3", "values": {"OMRÅDE": ["791"], "Tid": ["2026"]}},
+    )
+    assert kept["table"] == "BEFOLK3"
+    assert kept["values"]["Tid"] == ["2026"]
+    quarter = apply_fetch_defaults(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["Viborg"], "Tid": ["2026"]}},
+    )
+    assert quarter["table"] == "FOLK1A"
+    assert quarter["values"]["Tid"] == ["2026K1"]
+
+
+def test_municipality_history_is_fetched_when_the_model_does_not() -> None:
+    payload = {
+        "table": "FOLK1A",
+        "unit": "Antal",
+        "rows": [
+            {
+                "OMRÅDE": "Viborg",
+                "ALDER": "Alder i alt",
+                "Tid": "2008K1",
+                "value": 92084,
+            },
+            {
+                "OMRÅDE": "Viborg",
+                "ALDER": "Alder i alt",
+                "Tid": "2026K3",
+                "value": 98104,
+            },
+        ],
+    }
+    tools = FakeTools(
+        {
+            "find_tabel": json.dumps(
+                [{"id": "FOLK1A", "first_period": "2008K1", "text": "Befolkningen"}]
+            ),
+            "hent_data": json.dumps(payload),
+        }
+    )
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "befolkning kommune 2000"}, "c1")]),
+            ChatReply("Jeg fandt ingen tal.", []),
+        ]
+    )
+    result = asyncio.run(
+        run_turn(
+            model,
+            tools,
+            "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+            max_tool_calls=6,
+        )
+    )
+    assert "92.084" in result.answer
+    assert "98.104" in result.answer
+    assert "6.020" in result.answer
+    assert "2007" in result.answer
+    assert result.answer != NO_FETCHED_NUMBERS
+    assert any(
+        name == "hent_data" and arguments.get("table") == "FOLK1A"
+        for name, arguments in tools.calls
+    )
+
+
 def test_city_question_fetches_urban_areas_not_municipalities() -> None:
     from statistikbanken_mcp.web import apply_fetch_defaults, apply_search_context
 
