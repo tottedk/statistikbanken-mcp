@@ -1565,7 +1565,12 @@ def _resolve_values(table: _Table, variable: _Variable, raw_values: Any) -> list
         if not token:
             raise StatbankError(f"Variable {variable.id} contains an empty value code.")
         if _is_expression(token):
-            canonical = token
+            canonical = _join_closed_range(token)
+            if "," in canonical and variable.time:
+                raise StatbankError(
+                    f"Unknown value '{token}' for variable {variable.id} on table {table.id}. "
+                    "A year span is >=1995<=2001 with no comma."
+                )
         else:
             canonical = _canonical_value(table, variable, token)
         if canonical not in seen:
@@ -2226,6 +2231,24 @@ def _close_values(variable: _Variable, token: str) -> str:
         return ""
     shown = [f"{item['text']} ({item['id']})" for item in items]
     return "Did you mean " + ", ".join(shown) + "?"
+
+
+_CLOSED_RANGE = re.compile(
+    r"^(>=\s*\d{4}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2])|H[12])?)"
+    r"\s*,\s*"
+    r"(<=\s*\d{4}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2])|H[12])?)$",
+    re.IGNORECASE,
+)
+
+
+def _join_closed_range(token: str) -> str:
+    """'>=1995,<=2001' is the closed range '>=1995<=2001'."""
+    match = _CLOSED_RANGE.fullmatch(token.strip())
+    if match is None:
+        return token.strip()
+    start = re.sub(r"\s+", "", match.group(1))
+    end = re.sub(r"\s+", "", match.group(2))
+    return f"{start}{end}"
 
 
 def _is_expression(token: str) -> bool:

@@ -2273,3 +2273,368 @@ def test_real_server_schemas_become_llm_tools() -> None:
         parameters = tool["function"]["parameters"]
         assert parameters["type"] == "object"
         assert "properties" in parameters
+
+
+def _population_ends() -> list[dict]:
+    first = _population_fact(5_215_718, "1995", "Hele landet")
+    first["table"] = "BEFOLK1"
+    first["detail"] = "KØN: I alt, ALDER: Alder i alt"
+    last = _population_fact(5_349_212, "2001", "Hele landet")
+    last["table"] = "BEFOLK1"
+    last["detail"] = "KØN: I alt, ALDER: Alder i alt"
+    return [first, last]
+
+
+def test_steg_between_two_years_states_both_ends_and_the_change() -> None:
+    """A rise between two named years is the change, not the latest stock."""
+    facts = _population_ends()
+    questions = (
+        "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+        "Hvor meget voksede Danmarks befolkning fra 1995 til 2001?",
+        "Hvor mange flere indbyggere var der i Danmark i 2001 end i 1995?",
+        "Hvad var befolkningstilvæksten i Danmark mellem 1995 og 2001, både i personer og procent?",
+        "Hvor meget steg befolkningen i Danmark i perioden 1995–2001?",
+        "Hvor stor var forskellen på Danmarks befolkning i 1995 og 2001?",
+    )
+    for question in questions:
+        answer = guard_answer(question, "5.349.212", facts)
+        assert "5.215.718" in answer, question
+        assert "5.349.212" in answer, question
+        assert "133.494" in answer, question
+        assert "2,56" in answer, question
+        assert "1995" in answer and "2001" in answer, question
+
+
+def test_all_ages_population_label_names_the_measure() -> None:
+    esbjerg = "OMRÅDE: Esbjerg, KØN: I alt, ALDER: Alder i alt"
+    assert display_label(esbjerg, "FOLK1A") == "Befolkning, Esbjerg kommune, alder i alt"
+    assert display_label("ALDER: Alder i alt", "BEFOLK1") == "Befolkning, alder i alt"
+    region = "OMRÅDE: Region Hovedstaden, ALDER: Alder i alt"
+    assert display_label(region, "FOLK1A") == "Befolkning, Region Hovedstaden, alder i alt"
+    assert display_label("OMRÅDE: Esbjerg, KØN: I alt, ALDER: 80+", "FOLK1A") == "Esbjerg, 80+"
+    assert display_label("ALDER: Alder i alt", "AUS07") == "Alder i alt"
+    women = "OMRÅDE: Viborg, KØN: Kvinder, ALDER: Alder i alt"
+    assert display_label(women, "FOLK1A") == "Befolkning, Viborg kommune, Kvinder, alder i alt"
+
+
+def test_ambiguous_esbjerg_stock_says_it_is_the_municipality() -> None:
+    fact = _population_fact(114_824, "2026K3", "Esbjerg")
+    fact["detail"] = "OMRÅDE: Esbjerg, KØN: I alt, ALDER: Alder i alt"
+    answer = guard_answer("Hvor meget mange mennesker bor der i esbjerg", "114.824", [fact])
+    assert "114.824" in answer
+    assert "Befolkning" in answer
+    assert "Esbjerg kommune" in answer
+    assert "alder i alt" in answer
+    assert "byområde" in answer.casefold()
+    named = guard_answer("Hvor mange bor der i Esbjerg Kommune?", "114.824", [fact])
+    assert "Esbjerg kommune" in named
+    assert "byområde" not in named.casefold()
+
+
+def test_city_rank_does_not_dump_mixed_geography() -> None:
+    question = "Hvilken by er danmarks tiende største"
+    mixed = [
+        _population_fact(6_031_699, "2026K3", "Hele landet"),
+        _population_fact(1_949_336, "2026K3", "Region Hovedstaden"),
+        _population_fact(670_389, "2026K3", "København"),
+        _population_fact(105_947, "2026K3", "Frederiksberg"),
+    ]
+    answer = guard_answer(question, "København er størst", mixed)
+    assert "6.031.699" not in answer
+    assert "1.949.336" not in answer
+    assert "byområde" in answer.casefold()
+
+
+def _urban_facts() -> list[dict]:
+    rows = (
+        ("101-01100 København (del af Hovedstadsområdet)", 100_000),
+        ("147-01100 Frederiksberg (del af Hovedstadsområdet)", 50_000),
+        ("000 Hovedstadsområdet", 0),
+        ("000 Landdistrikter", 999_999),
+        ("751-11045 Aarhus", 140_000),
+        ("461-10677 Odense", 130_000),
+        ("851-10938 Aalborg", 120_000),
+        ("561-11196 Esbjerg", 110_000),
+        ("615-10615 Horsens", 100_000),
+        ("730-10691 Randers", 90_000),
+        ("621-10588 Kolding", 80_000),
+        ("630-10722 Vejle", 70_000),
+        ("265-10850 Roskilde", 53_897),
+        ("740-10820 Silkeborg", 50_000),
+    )
+    facts = []
+    for name, value in rows:
+        facts.append(
+            {
+                "table": "BY3",
+                "period": "2026",
+                "unit": "Antal",
+                "value": value,
+                "detail": f"BYER: {name}, FOLKARTAET: Folketal",
+                "unpublished": False,
+            }
+        )
+    return facts
+
+
+def test_tenth_city_is_the_tenth_urban_area() -> None:
+    facts = _urban_facts()
+    tenth = guard_answer("Hvilken by er danmarks tiende største", "København", facts)
+    assert "Roskilde" in tenth
+    assert "53.897" in tenth
+    assert "byområde" in tenth.casefold()
+    assert "del af Hovedstadsområdet" not in tenth
+    assert "6.031.699" not in tenth
+    listed = guard_answer(
+        "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+        "København",
+        facts,
+    )
+    assert listed.index("Hovedstadsområdet") < listed.index("Aarhus")
+    assert listed.index("Aarhus") < listed.index("Roskilde")
+    assert "53.897" in listed
+    assert "del af Hovedstadsområdet" not in listed
+    assert "Landdistrikter" not in listed
+
+
+def _verified_urban_facts() -> list[dict]:
+    """BY3 folketal 2026, checked 7 Nov 2026. Parts sum to Hovedstadsområdet."""
+    rows = (
+        ("101-01100 København (del af Hovedstadsområdet)", 1_000_000),
+        ("147-01100 Frederiksberg (del af Hovedstadsområdet)", 408_575),
+        ("751-11045 Aarhus", 305_227),
+        ("461-10677 Odense", 187_558),
+        ("851-10938 Aalborg", 122_550),
+        ("561-11196 Esbjerg", 71_371),
+        ("615-10615 Horsens", 65_037),
+        ("730-10691 Randers", 64_764),
+        ("621-10588 Kolding", 63_664),
+        ("630-10722 Vejle", 62_153),
+        ("265-10850 Roskilde", 53_897),
+        ("740-10820 Silkeborg", 53_058),
+    )
+    facts = []
+    for name, value in rows:
+        facts.append(
+            {
+                "table": "BY3",
+                "period": "2026",
+                "unit": "Antal",
+                "value": value,
+                "detail": f"BYER: {name}, FOLKARTAET: Folketal",
+                "unpublished": False,
+            }
+        )
+    return facts
+
+
+def test_a_repeated_urban_fetch_is_ranked_once() -> None:
+    """Two identical hent_data calls must not double the capital or the rank."""
+    facts = _verified_urban_facts() + _verified_urban_facts()
+    tenth = guard_answer(
+        "Hvilken by ligger på tiendepladsen i Danmark målt på indbyggertal?",
+        "Horsens",
+        facts,
+    )
+    assert "Roskilde" in tenth
+    assert "53.897" in tenth
+    assert "65.037" not in tenth
+    assert "2.817.150" not in tenth
+    listed = guard_answer(
+        "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+        "Horsens",
+        facts,
+    )
+    assert "1.408.575" in listed
+    assert "2.817.150" not in listed
+    assert listed.count("Aarhus") == 1
+    assert "Roskilde" in listed
+
+
+def test_first_of_january_is_the_first_quarter_not_the_latest() -> None:
+    question = "Hvor mange indbyggere havde Viborg Kommune 1. januar 2026?"
+    facts = []
+    for period, value in (("2026K1", 97_874), ("2026K2", 98_014), ("2026K3", 98_104)):
+        fact = _population_fact(value, period, "Viborg")
+        fact["detail"] = "OMRÅDE: Viborg, KØN: I alt, ALDER: Alder i alt"
+        facts.append(fact)
+    answer = guard_answer(question, "98.104", facts)
+    assert "97.874" in answer
+    assert "2026 1. kvt." in answer
+    assert "98.104" not in answer
+    latest = guard_answer("Hvor mange indbyggere har Viborg Kommune?", "98.104", facts)
+    assert "98.104" in latest
+    assert "97.874" not in latest
+    from statistikbanken_mcp.web import apply_fetch_defaults
+
+    kept = apply_fetch_defaults(
+        question,
+        {"table": "BEFOLK3", "values": {"OMRÅDE": ["791"], "Tid": ["2026"]}},
+    )
+    assert kept["table"] == "BEFOLK3"
+    assert kept["values"]["Tid"] == ["2026"]
+    quarter = apply_fetch_defaults(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["Viborg"], "Tid": ["2026"]}},
+    )
+    assert quarter["table"] == "FOLK1A"
+    assert quarter["values"]["Tid"] == ["2026K1"]
+
+
+def test_municipality_history_is_fetched_when_the_model_does_not() -> None:
+    payload = {
+        "table": "FOLK1A",
+        "unit": "Antal",
+        "rows": [
+            {
+                "OMRÅDE": "Viborg",
+                "ALDER": "Alder i alt",
+                "Tid": "2008K1",
+                "value": 92084,
+            },
+            {
+                "OMRÅDE": "Viborg",
+                "ALDER": "Alder i alt",
+                "Tid": "2026K3",
+                "value": 98104,
+            },
+        ],
+    }
+    tools = FakeTools(
+        {
+            "find_tabel": json.dumps(
+                [{"id": "FOLK1A", "first_period": "2008K1", "text": "Befolkningen"}]
+            ),
+            "hent_data": json.dumps(payload),
+        }
+    )
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "befolkning kommune 2000"}, "c1")]),
+            ChatReply("Jeg fandt ingen tal.", []),
+        ]
+    )
+    result = asyncio.run(
+        run_turn(
+            model,
+            tools,
+            "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+            max_tool_calls=6,
+        )
+    )
+    assert "92.084" in result.answer
+    assert "98.104" in result.answer
+    assert "6.020" in result.answer
+    assert "2007" in result.answer
+    assert result.answer != NO_FETCHED_NUMBERS
+    assert any(
+        name == "hent_data" and arguments.get("table") == "FOLK1A"
+        for name, arguments in tools.calls
+    )
+
+
+def test_city_question_fetches_urban_areas_not_municipalities() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults, apply_search_context
+
+    question = "Hvilken by er danmarks tiende største"
+    fetched = apply_fetch_defaults(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["000"], "Tid": ["2026K3"]}},
+    )
+    assert fetched["table"] == "BY3"
+    assert fetched["values"]["FOLKARTAET"] == ["FOLKETAL"]
+    assert fetched["values"]["BYER"] == ["*"]
+    assert "OMRÅDE" not in fetched["values"]
+    searched = apply_search_context(question, {"query": "største by Danmark"})
+    assert "byområde" in str(searched["query"]).casefold()
+    local = apply_fetch_defaults(
+        "Hvor mange bor der i Esbjerg?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}},
+    )
+    assert local["table"] == "FOLK1A"
+    assert "byområder" in SYSTEM_PROMPT
+
+
+def test_a_closed_year_span_is_not_compared_with_the_latest_row() -> None:
+    """1995–2001 stays those two years when the fetch continues to 2026."""
+    question = "Hvor meget steg befolkningen i Danmark i perioden 1995–2001?"
+    facts = [
+        *_population_ends(),
+        _population_fact(6_025_603, "2026", "Hele landet"),
+    ]
+    facts[-1]["table"] = "BEFOLK1"
+    facts[-1]["detail"] = "KØN: I alt, ALDER: Alder i alt"
+    answer = guard_answer(question, "5.349.212", facts)
+    assert "133.494" in answer
+    assert "2001" in answer
+    assert "2026" not in answer
+    assert "809.885" not in answer
+    missing = [fact for fact in facts if fact["period"] != "2001"]
+    gap = guard_answer(question, "5.215.718", missing)
+    assert "2001" in gap
+    assert "ikke med" in gap.casefold()
+    assert "809.885" not in gap
+    assert "6.025.603" not in gap
+
+
+def test_a_census_gap_does_not_end_with_two_full_stops() -> None:
+    calls = [
+        {
+            "name": "hent_data",
+            "arguments": "{}",
+            "result": (
+                "1934 is 1934, which is not in table FT. Neighbouring periods: 1930 and 1935."
+            ),
+        }
+    ]
+    answer = guard_answer(
+        "Hvor mange boede der i Danmark ifølge folketællingen i 1934?",
+        "3.650.500",
+        [],
+        calls,
+    )
+    assert answer.endswith("1935.")
+    assert not answer.endswith("..")
+    assert "FT" in answer
+
+
+def test_a_projection_label_names_the_table_once() -> None:
+    fact = {
+        "table": "FRDK126",
+        "period": "2040",
+        "unit": "Antal",
+        "value": 6_231_908,
+        "detail": "",
+        "projection": True,
+        "url": "https://www.statistikbanken.dk/FRDK126",
+    }
+    answer = guard_answer(
+        "Hvor mange indbyggere forventes Danmark at have i 2040 ifølge befolkningsfremskrivningen?",
+        "6.231.908",
+        [fact],
+    )
+    assert answer.count("FRDK126") == 1
+    assert "fremskrivning" in answer
+
+
+def test_municipality_population_history_reaches_folk1a() -> None:
+    from statistikbanken_mcp.server import find_tabel
+    from statistikbanken_mcp.web import apply_fetch_defaults, apply_search_context
+
+    question = "Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?"
+    searched = apply_search_context(question, {"query": "før 2008"})
+    hits = find_tabel(str(searched["query"]), limit=3)
+    assert hits[0]["id"] == "FOLK1A"
+    assert hits[0]["first_period"] == "2008K1"
+    fetched = apply_fetch_defaults(
+        question,
+        {"table": "NRHB", "values": {"Tid": [">=2000"]}},
+    )
+    assert fetched["table"] == "FOLK1A"
+    assert fetched["values"]["OMRÅDE"] == ["Viborg"]
+    assert fetched["values"]["Tid"] == [">=2000"]
+    kept = apply_fetch_defaults(
+        "Hvor meget steg befolkningen i danmark i 1995 til 2001",
+        {"table": "BEFOLK1", "values": {"Tid": ["1995", "2001"]}},
+    )
+    assert kept["table"] == "BEFOLK1"
