@@ -926,9 +926,9 @@ def _direction_note(question: str, start: float, end: float) -> str:
     rose = ("steget", "vokset", "voksede", "rose", "risen", "increased", "grew")
     fell = ("fald", "fell", "fallen", "decreased", "dropped")
     if any(word in folded for word in rose) and end < start:
-        return "Tallet er ikke steget. Det er faldet."
+        return "Nej, tallet er ikke steget. Det er faldet."
     if any(word in folded for word in fell) and end > start:
-        return "Tallet er ikke faldet. Det er steget."
+        return "Nej, tallet er ikke faldet. Det er steget."
     return ""
 
 
@@ -992,12 +992,12 @@ def _area_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
         extreme = "the fewest" if ascending else "the most"
         line = f"{name} has {extreme}: {shown} ({period})."
         if claimed:
-            line = f"{claimed[0]} is not {extreme}. {line}"
+            line = f"Nej, {claimed[0]} is not {extreme}. {line}"
         return line
     extreme = "færrest" if ascending else "flest"
     line = f"{name} har {extreme} med {shown} ({period})."
     if claimed:
-        line = f"{claimed[0]} er ikke den der har {extreme}. {line}"
+        line = f"Nej, {claimed[0]} er ikke den der har {extreme}. {line}"
     return line
 
 
@@ -1034,11 +1034,9 @@ def _derived_operation(question: str) -> str | None:
         return "per_capita"
     if "ratio" in folded or "forhold" in folded:
         return "ratio"
-    if (
-        "andel" in folded
-        or "share" in folded
-        or (("procent" in folded or "percent" in folded) and "forskel" not in folded)
-    ):
+    if "andel" in folded or "share" in folded or "procent af" in folded or "percent of" in folded:
+        return "share"
+    if ("procent" in folded or "percent" in folded) and "forskel" not in folded:
         return "percent"
     if "forskel" in folded or "difference" in folded:
         return "difference"
@@ -1054,6 +1052,19 @@ def _derived_line(question: str, facts: list[dict[str, Any]]) -> str | None:
     if len(points) != 2:
         return None
     (left, left_value, _left_period), (right, right_value, _right_period) = points
+    if operation == "share":
+        part_label, part_value, whole = _share_of_whole(question, points)
+        if whole <= 0 or part_value > whole:
+            return None
+        payload = compute_figure("share", part_value, whole)
+        shown = _da_number(payload["result"])
+        numerator = _da_number(payload["numerator"])
+        denominator = _da_number(payload["denominator"])
+        return (
+            f"{part_label} er {_da_number(part_value)} af {_da_number(whole)}. "
+            f"Tæller {numerator}, nævner {denominator}, "
+            f"resultat {shown} procent ({payload['unit']})."
+        )
     if operation != "difference" and right_value == 0:
         return None
     payload = compute_figure(operation, left_value, right_value)
@@ -1069,6 +1080,50 @@ def _derived_line(question: str, facts: list[dict[str, Any]]) -> str | None:
     if operation == "difference":
         return f"{inputs} Forskellen er {shown}. {computed}"
     return f"{inputs} {computed}"
+
+
+def _share_of_whole(
+    question: str, points: list[tuple[str, float, str]]
+) -> tuple[str, float, float]:
+    """The named part over the sum of the parts. A share cannot use the other part as the whole."""
+    folded = _fold_place(question)
+    usable = [
+        point
+        for point in points
+        if not (
+            re.search(r"\d+\s*\+|og derover|over\s+\d+", question, re.IGNORECASE)
+            and re.search(r"\b\d+\s*år\b", point[0], re.IGNORECASE)
+            and "+" not in point[0]
+        )
+    ] or points
+    whole = sum(value for _label, value, _period in usable)
+    named = [
+        (label, value)
+        for label, value, _period in usable
+        if len(_fold_place(label)) >= 4 and _fold_place(label) in folded
+    ]
+    if len(named) == 1:
+        return named[0][0], named[0][1], whole
+    label, value, _period = min(usable, key=lambda item: item[1])
+    return label, value, whole
+
+
+def _parts_total(question: str, facts: list[dict[str, Any]]) -> str:
+    """The sum of subgroup rows when the question asks for the total."""
+    folded = _fold_place(question)
+    if not any(
+        word in folded for word in ("i alt", "samlet", "tilsammen", "in total", "altogether")
+    ):
+        return ""
+    numeric = [fact for fact in facts if _single_value(fact)]
+    if len(numeric) < 2 or len({str(fact.get("period") or "") for fact in numeric}) != 1:
+        return ""
+    if any("i alt" in _fold_place(str(fact.get("detail") or "")) for fact in numeric):
+        return ""
+    total = sum(float(fact["value"]) for fact in numeric)
+    unit = str(numeric[0].get("unit") or "")
+    shown = _da_number(total)
+    return f"I alt {shown} ({unit})." if unit else f"I alt {shown}."
 
 
 def _with_missing_part(question: str, facts: list[dict[str, Any]], text: str) -> str:
@@ -1158,8 +1213,10 @@ async def _complete_municipality_history(
 
     Each server call uses one of the remaining tool slots. At the cap, stop.
     """
-    if room <= 0 or facts or _january_year(question) or _asks_city_rank(question):
+    if room <= 0 or _january_year(question) or _asks_city_rank(question):
         return facts, calls
+    if facts:
+        return await _fetch_missing_places(runner, question, facts, calls, room)
     budget = [room]
     folded_subject = _fold_place(question)
     if (
@@ -1194,6 +1251,43 @@ async def _complete_municipality_history(
     if calls or not _looks_like_data_question(question):
         return facts, calls
     return await _search_then_fetch(runner, question, facts, calls, budget)
+
+
+def _named_places(question: str) -> list[str]:
+    return re.findall(
+        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+(?:kommune|municipality)",
+        question,
+        flags=re.IGNORECASE,
+    )
+
+
+async def _fetch_missing_places(
+    runner: ToolRunner,
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+    room: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """A second named municipality is fetched when the first answer omitted it."""
+    names = _named_places(question)
+    if len(names) < 2 or room <= 0:
+        return facts, calls
+    detail = " ".join(str(fact.get("detail") or "") for fact in facts)
+    missing = [name for name in names if name.casefold() not in detail.casefold()]
+    if not missing:
+        return facts, calls
+    table = str(facts[0].get("table") or "FOLK1A") or "FOLK1A"
+    budget = [room]
+    for name in missing:
+        facts, calls = await _fetch_arguments(
+            runner,
+            question,
+            {"table": table, "values": {"OMRÅDE": [name]}},
+            facts,
+            calls,
+            budget,
+        )
+    return facts, calls
 
 
 def _looks_like_data_question(question: str) -> bool:
@@ -1296,6 +1390,17 @@ async def _invoke(runner: ToolRunner, call: ToolCall) -> str:
         return await runner.call(call.name, call.arguments)
     except Exception as exc:
         return f"Tool failed: {exc.__class__.__name__}"
+
+
+def _no_catalogue_reason(calls: list[dict[str, str]] | None) -> str:
+    """An empty search is a specific miss, not a generic no-answer."""
+    for call in calls or []:
+        if call.get("name") != "find_tabel":
+            continue
+        result = str(call.get("result") or "").strip()
+        if result in {"[]", ""} or "No table matches" in result or "Ingen tabel" in result:
+            return "Det emne er ikke i Statistikbanken."
+    return ""
 
 
 def _fallback_answer(calls: list[dict[str, str]], *, capped: bool) -> str:
@@ -2111,9 +2216,12 @@ def _mentions_a_town(folded: str) -> bool:
 def _asks_city_rank(question: str) -> bool:
     """Which town is largest. Not a municipality stock and not a growth question."""
     folded = _fold_place(question)
-    if not _mentions_a_town(folded):
+    english_city = re.search(r"\bcit(?:y|ies)\b|\burban\b", folded) is not None
+    if not _mentions_a_town(folded) and not english_city:
         return False
-    return any(word in folded for word in ("storst", "tiende", "flest", "indbygg", "largest"))
+    return any(
+        word in folded for word in ("storst", "tiende", "flest", "indbygg", "largest", "biggest")
+    )
 
 
 def _city_ordinal(question: str) -> int | None:
@@ -2138,6 +2246,10 @@ def _city_ordinal(question: str) -> int | None:
                 continue
             return number
     if "hvilken" in folded and "storst" in folded:
+        return 1
+    if re.search(r"\bcit(?:y|ies)\b", folded) and any(
+        word in folded for word in ("largest", "biggest")
+    ):
         return 1
     return None
 
@@ -2652,7 +2764,7 @@ def _correct_period_claim(
         return text
     latest = max(numeric, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
     shown = period_label(str(latest.get("period") or ""))
-    note = f"Tallet er for {shown}, ikke {year}."
+    note = f"Nej, tallet er for {shown}, ikke {year}."
     if note.casefold() in text.casefold():
         return text
     return f"{note}\n{text}" if text else note
@@ -2710,7 +2822,7 @@ def _correct_stated_claim(
             for fact in numeric
         ):
             continue
-        note = f"Du nævner {token}. Det hentede tal er {shown}, ikke {token}."
+        note = f"Nej, du nævner {token}. Det hentede tal er {shown}, ikke {token}."
         if token in text and re.search(r"\bikke\b|\bnot\b", text, re.IGNORECASE):
             return text
         return f"{note}\n{text}" if text else note
@@ -2759,6 +2871,9 @@ def _compose_answer(
             return answer
         if _household_exact_unpublished(question):
             return _UNPUBLISHED_HOUSEHOLD
+        reason = _no_catalogue_reason(calls) if _looks_like_data_question(question) else ""
+        if reason:
+            return reason
         return NO_DATA_ANSWER
     refusal = _relevance_refusal(question, facts)
     if refusal:
@@ -2784,6 +2899,9 @@ def _compose_answer(
             derived = _derived_line(question, facts)
             if derived and derived not in body:
                 body = f"{body}\n{derived}"
+            total = _parts_total(question, facts)
+            if total and total not in body:
+                body = f"{body}\n{total}"
             return _with_missing_part(
                 question,
                 facts,

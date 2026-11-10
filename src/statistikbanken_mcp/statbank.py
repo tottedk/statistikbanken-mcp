@@ -757,12 +757,6 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
         2000,
     ),
     _TablePreference(
-        "PRIS111",
-        (("fodevarer",), ("priserne", "arsstigningen")),
-        ("braendstof",),
-        2000,
-    ),
-    _TablePreference(
         "AUF01",
         (("fuldtidsledige", "fuldtidsledig"), ("kvinder", "maend")),
         ("procent", "gennemsnit"),
@@ -2765,14 +2759,15 @@ def compute_figure(operation: str, numerator: float, denominator: float) -> dict
     key = str(operation or "").strip().casefold().replace(" ", "_").replace("-", "_")
     key = {
         "forskel": "difference",
-        "share": "percent",
         "procent": "percent",
-        "andel": "percent",
+        "andel": "share",
         "per_person": "per_capita",
         "density": "per_km2",
     }.get(key, key)
-    if key not in {"difference", "ratio", "percent", "per_capita", "per_km2"}:
-        raise StatbankError("operation must be difference, ratio, percent, per_capita, or per_km2.")
+    if key not in {"difference", "ratio", "percent", "share", "per_capita", "per_km2"}:
+        raise StatbankError(
+            "operation must be difference, ratio, percent, share, per_capita, or per_km2."
+        )
     num = float(numerator)
     den = float(denominator)
     if key != "difference" and den == 0:
@@ -2782,6 +2777,13 @@ def compute_figure(operation: str, numerator: float, denominator: float) -> dict
     elif key == "ratio":
         result, unit = num / den, "ratio"
     elif key == "percent":
+        result, unit = num / den * 100, "percent"
+    elif key == "share":
+        if den <= 0 or num < 0 or num > den:
+            raise StatbankError(
+                "A share of a whole cannot exceed 100 percent. "
+                "Pass the part as numerator and the whole as denominator."
+            )
         result, unit = num / den * 100, "percent"
     elif key == "per_capita":
         result, unit = num / den, "per person"

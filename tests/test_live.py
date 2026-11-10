@@ -670,6 +670,27 @@ def test_subject_tables_match_the_published_figures(live_client: StatbankClient)
     assert int(ranked[1][1]) == 305_227
 
 
+def test_sex_rows_sum_to_the_published_total(live_client: StatbankClient) -> None:
+    """The published Esbjerg total is the sum of the sex rows, and a share stays within 100."""
+    from statistikbanken_mcp.server import beregn
+
+    total = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2026K4"]},
+    )
+    assert total["rows"][0]["value"] == 114_766
+    parts = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "KØN": ["*"], "Tid": ["2026K4"]},
+    )
+    sexes = [row for row in parts["rows"] if row.get("KØN") != "I alt"]
+    assert sum(row["value"] for row in sexes) == 114_766
+    women = next(row["value"] for row in sexes if row.get("KØN") == "Kvinder")
+    share = beregn("share", women, 114_766)
+    assert share["result"] <= 100
+    assert share["unit"] == "percent"
+
+
 def test_quarters_stay_quarters_and_the_price_table_ranks(live_client: StatbankClient) -> None:
     """A bare year in a question is not averaged. PRIS111 is the price index."""
     kept = hent_data(

@@ -3162,6 +3162,140 @@ def test_a_named_month_is_not_replaced_by_the_year() -> None:
     assert fetched["values"]["Tid"] == ["2025M12"]
 
 
+def test_a_false_premise_is_rejected_with_the_fetched_figure() -> None:
+    fact = _population_fact(114_766, "2026K4", "Esbjerg")
+    fact["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"
+    answer = guard_answer(
+        "Esbjerg Kommune har 50.000 indbyggere.",
+        "50.000",
+        [fact],
+    )
+    assert answer.startswith("Nej,")
+    assert "114.766" in answer
+    assert "50.000" in answer
+
+
+def test_a_share_uses_the_whole_and_stays_within_100() -> None:
+    from statistikbanken_mcp.server import beregn
+
+    women = _population_fact(60, "2026K4", "Kvinder")
+    women["detail"] = "KØN: Kvinder"
+    women["unit"] = "Antal"
+    men = _population_fact(40, "2026K4", "Mænd")
+    men["detail"] = "KØN: Mænd"
+    men["unit"] = "Antal"
+    answer = guard_answer("Hvor stor en andel udgør kvinder?", "150 procent", [women, men])
+    assert "60" in answer
+    assert "procent" in answer.casefold()
+    assert "150" not in answer
+    with pytest.raises(Exception, match="100"):
+        beregn("share", 60, 40)
+
+
+def test_a_missing_place_is_fetched_inside_the_cap() -> None:
+    class _Places:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def list_tools(self) -> list[ToolSpec]:
+            return [ToolSpec("hent_data", "fetch", {})]
+
+        async def call(self, name: str, arguments: dict) -> str:
+            self.calls.append((name, arguments))
+            area = arguments.get("values", {}).get("OMRÅDE", ["?"])[0]
+            value = 98_000 if "Horsens" in str(area) else 56_000
+            label = "Horsens" if "Horsens" in str(area) else "Ringkøbing-Skjern"
+            return json.dumps(
+                {
+                    "table": "FOLK1A",
+                    "unit": "Antal",
+                    "rows": [
+                        {
+                            "OMRÅDE": label,
+                            "ALDER": "Alder i alt",
+                            "Tid": "2026K4",
+                            "value": value,
+                        }
+                    ],
+                }
+            )
+
+    tools = _Places()
+    model = ScriptedModel(
+        [
+            ChatReply(
+                "",
+                [_call("hent_data", {"table": "FOLK1A", "values": {"OMRÅDE": ["Horsens"]}}, "c1")],
+            ),
+            ChatReply("Kun Horsens.", []),
+        ]
+    )
+    result = asyncio.run(
+        run_turn(
+            model,
+            tools,
+            "Hvor mange indbyggere har Horsens Kommune og Ringkøbing-Skjern Kommune?",
+            max_tool_calls=2,
+        )
+    )
+    fetched = [arguments.get("values", {}).get("OMRÅDE") for _name, arguments in tools.calls]
+    assert len(tools.calls) == 2
+    assert any("Ringkøbing" in str(area) for area in fetched)
+    assert "98.000" in result.answer
+    assert "56.000" in result.answer
+
+
+def test_an_unknown_subject_names_the_reason() -> None:
+    tools = FakeTools({"find_tabel": "[]", "hent_data": "{}"})
+    model = ScriptedModel([ChatReply("Ved ikke.", [])])
+    result = asyncio.run(
+        run_turn(model, tools, "Hvor mange enhjørninger er der i Lemvig?", max_tool_calls=3)
+    )
+    assert "ikke i Statistikbanken" in result.answer
+    assert any(call["name"] == "find_tabel" for call in result.calls)
+
+
+def test_subgroup_rows_are_summed_when_the_total_is_asked() -> None:
+    women = _population_fact(60, "2026K4", "Kvinder")
+    women["detail"] = "KØN: Kvinder"
+    women["unit"] = "Antal"
+    men = _population_fact(40, "2026K4", "Mænd")
+    men["detail"] = "KØN: Mænd"
+    men["unit"] = "Antal"
+    answer = guard_answer("Hvor mange er der i alt?", "se delene", [women, men])
+    assert "100" in answer
+    assert "Antal" in answer
+
+
+def test_an_english_city_question_names_the_largest_city() -> None:
+    facts = []
+    for name, value in (
+        ("Aarhus", 305_227),
+        ("Odense", 187_558),
+        ("Aalborg", 122_550),
+        ("Esbjerg", 71_371),
+        ("Horsens", 65_037),
+        ("Randers", 64_764),
+        ("Kolding", 63_664),
+        ("Vejle", 62_153),
+        ("Roskilde", 53_897),
+        ("Herning", 51_000),
+    ):
+        facts.append(
+            {
+                "table": "BY3",
+                "period": "2026",
+                "unit": "Antal",
+                "value": value,
+                "detail": f"BYER: {name}",
+            }
+        )
+    answer = guard_answer("Which city is the largest?", "here is everything", facts)
+    assert "Aarhus" in answer
+    assert "305.227" in answer
+    assert "Herning" not in answer
+
+
 def test_an_instruction_injection_does_not_drop_the_figure() -> None:
     fact = _population_fact(114_766, "2026K4", "Esbjerg")
     fact["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"

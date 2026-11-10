@@ -240,10 +240,16 @@ def test_a_short_name_resolves_to_the_hyphenated_municipality(
     assert chosen["OMRÅDE"] == ["173"]
 
 
+def test_food_words_do_not_select_the_price_index() -> None:
+    """Food and price words are not a table rule. The index name still is."""
+    food = find_tabel("årsstigningen i priserne på fødevarer", limit=5)
+    assert food[0]["id"] != "PRIS111"
+    assert find_tabel("forbrugerprisindekset i alt", limit=3)[0]["id"] == "PRIS111"
+
+
 def test_the_unemployment_rate_ranks_above_the_count() -> None:
     assert find_tabel("ledighedsprocenten i Odense", limit=5)[0]["id"] == "AUP01"
     assert find_tabel("forbrugerprisindekset i alt", limit=3)[0]["id"] == "PRIS111"
-    assert find_tabel("årsstigningen i priserne på fødevarer", limit=3)[0]["id"] == "PRIS111"
 
 
 def test_lyngby_suggests_lyngby_taarbaek_and_is_not_accepted(
