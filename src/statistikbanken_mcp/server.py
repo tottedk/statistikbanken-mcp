@@ -1,4 +1,4 @@
-"""MCP server with three Statistikbanken tools: find_tabel, tabelinfo, hent_data."""
+"""MCP server: find_tabel, tabelinfo, hent_data, and beregn."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import httpx
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from statistikbanken_mcp.statbank import StatbankClient, StatbankError
+from statistikbanken_mcp.statbank import StatbankClient, StatbankError, compute_figure
 
 # The server logs at INFO. One line per HTTP call from httpx hides tool errors.
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -41,7 +41,9 @@ INSTRUCTIONS = (
     "A trailing 0 marked unpublished is a period the API has not published yet. "
     'Omit Tid or pass "(1)" for the latest period. '
     "A projection table (fremskrivning) and a forecast row (prognose) are marked "
-    "projection. Say so; do not present them as observed figures."
+    "projection. Say so; do not present them as observed figures. "
+    "beregn computes a difference, ratio, percent, per person, or per km2 from "
+    "two fetched numbers and returns numerator, denominator, result, and unit."
 )
 
 mcp = MCPServer("statistikbanken", instructions=INSTRUCTIONS)
@@ -143,6 +145,7 @@ def hent_data(
     values: dict[str, Any] | None = None,
     sum_from: dict[str, Any] | None = None,
     sum_range: dict[str, Any] | None = None,
+    question: str | None = None,
 ) -> dict[str, Any]:
     """Fetch observations from a Statistikbanken table.
 
@@ -179,7 +182,10 @@ def hent_data(
     not add them together.
 
     A variable that cannot be omitted and has no total makes the call fail and
-    lists the codes to pass.
+    lists the codes to pass. Pass `question` when a value label is in the
+    question (for example Kvinder). That label is selected instead of the total.
+    The call still fails, and lists the codes, when a required variable has no
+    total and the question does not name one of its labels.
 
     `sum_from` maps a variable id to a numeric code. Every numeric code from
     that one upward is added into a single figure. {"ALDER": "80"} is everyone
@@ -209,7 +215,17 @@ def hent_data(
     not an observed figure. Each row uses variable ids as keys and labels as
     text, plus `value`.
     """
-    return _guard(lambda: get_client().fetch(table, values, sum_from, sum_range))
+    return _guard(lambda: get_client().fetch(table, values, sum_from, sum_range, question))
+
+
+@mcp.tool()
+def beregn(operation: str, numerator: float, denominator: float) -> dict[str, Any]:
+    """Compute a figure from two numbers that were already fetched.
+
+    operation is difference, ratio, percent, per_capita, or per_km2.
+    The result has numerator, denominator, result, and unit. Quote that result.
+    """
+    return _guard(lambda: compute_figure(operation, numerator, denominator))
 
 
 def main() -> None:

@@ -876,6 +876,7 @@ def test_calendar_phrases_do_not_substitute_another_period(calls: list[dict[str,
     assert read_as == "2026M10"
     latest, _plan, read_as = _period_meaning(table, variable, "seneste", today)
     assert latest == ["2026M09"]
+    assert read_as == "2026M09"
     span = _Variable(
         id="Tid",
         text="tid",

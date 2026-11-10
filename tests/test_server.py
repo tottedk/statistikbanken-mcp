@@ -17,7 +17,7 @@ async def _session() -> None:
     async with Client(mcp) as client:
         listed = await client.list_tools()
         names = [tool.name for tool in listed.tools]
-        assert names == ["find_tabel", "tabelinfo", "hent_data"]
+        assert names == ["find_tabel", "tabelinfo", "hent_data", "beregn"]
         hent = next(tool for tool in listed.tools if tool.name == "hent_data")
         assert hent.description is not None
         assert "sum_from" in hent.description

@@ -347,6 +347,7 @@ class StatbankClient:
         values: dict[str, Any] | None = None,
         sum_from: dict[str, Any] | None = None,
         sum_range: dict[str, Any] | None = None,
+        question: str | None = None,
     ) -> dict[str, Any]:
         values, sum_from, sum_range, notes = _hoist_nested_sums(values, sum_from, sum_range)
         values = _coerce_code_map(values, "values")
@@ -356,6 +357,19 @@ class StatbankClient:
         values, sum_from, sum_range, aliased = _alias_arguments(
             metadata, values, sum_from, sum_range
         )
+        if isinstance(question, str) and question.strip():
+            occupied = {str(key) for key in (sum_from or {})} | {
+                str(key) for key in (sum_range or {})
+            }
+            values = _coerce_code_map(
+                select_named_groups(
+                    question,
+                    _selection_view(metadata),
+                    values,
+                    skip=occupied,
+                ),
+                "values",
+            )
         notes.extend(aliased)
         values, sum_from, sum_range, promoted = _promote_open_ended(
             metadata, values, sum_from, sum_range
@@ -2575,6 +2589,108 @@ def _headline_sums(
         elif {code.casefold() for code in chosen} == wanted:
             found.append((variable_id, list(codes), label, note))
     return found
+
+
+def _is_total_text(text: str) -> bool:
+    low = text.casefold().strip()
+    return low in {"i alt", "total", "hele landet", "tot", "ialt"} or low.endswith(" i alt")
+
+
+def select_named_groups(
+    question: str,
+    info: dict[str, Any],
+    values: dict[str, Any] | None,
+    skip: set[str] | None = None,
+) -> dict[str, Any]:
+    """Select a value the question names instead of leaving the total.
+
+    A label of four or more letters is bound when it appears as a whole word.
+    Totals (I alt, Hele landet) are not treated as a named group. Several
+    matches on one variable are all kept. A variable the caller already set to
+    a non-total code is left as the caller set it.
+    """
+    chosen: dict[str, Any] = {}
+    for key, raw in (values or {}).items():
+        chosen[str(key)] = raw
+    if not question or not str(question).strip():
+        return chosen
+    skipped = {name.casefold() for name in (skip or set())}
+    for variable in info.get("variables") or []:
+        if not isinstance(variable, dict) or variable.get("time"):
+            continue
+        variable_id = str(variable.get("id") or "")
+        items = [item for item in variable.get("values") or [] if isinstance(item, dict)]
+        if not variable_id or not items or variable_id.casefold() in skipped:
+            continue
+        total_ids = {
+            str(item.get("id")) for item in items if _is_total_text(str(item.get("text") or ""))
+        }
+        current = chosen.get(variable_id)
+        if current is not None:
+            current_ids = {
+                str(item) for item in (current if isinstance(current, list) else [current])
+            }
+            if not current_ids <= total_ids:
+                continue
+        hits: list[str] = []
+        for item in items:
+            text = str(item.get("text") or "").strip()
+            if len(text) < 4 or _is_total_text(text) or not re.search(r"[A-Za-zÆØÅæøå]", text):
+                continue
+            if re.search(rf"(?<!\w){re.escape(text)}(?!\w)", question, flags=re.IGNORECASE):
+                hits.append(str(item["id"]))
+        if hits:
+            chosen[variable_id] = hits
+    return chosen
+
+
+def _selection_view(table: _Table) -> dict[str, Any]:
+    return {
+        "variables": [
+            {
+                "id": variable.id,
+                "time": variable.time,
+                "values": [{"id": item["id"], "text": item["text"]} for item in variable.values],
+            }
+            for variable in table.variables
+        ]
+    }
+
+
+def compute_figure(operation: str, numerator: float, denominator: float) -> dict[str, Any]:
+    """Difference, ratio, percent, per person, or per km2 from two fetched numbers."""
+    key = str(operation or "").strip().casefold().replace(" ", "_").replace("-", "_")
+    key = {
+        "forskel": "difference",
+        "share": "percent",
+        "procent": "percent",
+        "andel": "percent",
+        "per_person": "per_capita",
+        "density": "per_km2",
+    }.get(key, key)
+    if key not in {"difference", "ratio", "percent", "per_capita", "per_km2"}:
+        raise StatbankError("operation must be difference, ratio, percent, per_capita, or per_km2.")
+    num = float(numerator)
+    den = float(denominator)
+    if key != "difference" and den == 0:
+        raise StatbankError("denominator is 0.")
+    if key == "difference":
+        result, unit = num - den, "same unit as the inputs"
+    elif key == "ratio":
+        result, unit = num / den, "ratio"
+    elif key == "percent":
+        result, unit = num / den * 100, "percent"
+    elif key == "per_capita":
+        result, unit = num / den, "per person"
+    else:
+        result, unit = num / den, "per km2"
+    return {
+        "operation": key,
+        "numerator": num,
+        "denominator": den,
+        "result": result,
+        "unit": unit,
+    }
 
 
 def _fill_required(table: _Table, selections: dict[str, list[str]]) -> list[dict[str, str]]:

@@ -508,7 +508,12 @@ async def _stdio_session() -> None:
     )
     async with Client(params) as client:
         listed = await client.list_tools()
-        assert [tool.name for tool in listed.tools] == ["find_tabel", "tabelinfo", "hent_data"]
+        assert [tool.name for tool in listed.tools] == [
+            "find_tabel",
+            "tabelinfo",
+            "hent_data",
+            "beregn",
+        ]
 
         found = await client.call_tool("find_tabel", {"query": "FOLK1A", "limit": 1})
         assert found.is_error is False
@@ -539,6 +544,13 @@ async def _stdio_session() -> None:
         text = _text(bad)
         assert "99999" in text
         assert "Traceback" not in text
+
+        computed = await client.call_tool(
+            "beregn",
+            {"operation": "difference", "numerator": 114983, "denominator": 114766},
+        )
+        assert computed.is_error is False
+        assert "217" in _text(computed)
 
 
 def test_relative_time_inflation_and_a_published_change(live_client: StatbankClient) -> None:
@@ -656,6 +668,70 @@ def test_subject_tables_match_the_published_figures(live_client: StatbankClient)
     )
     assert ranked[1][0] == "Aarhus"
     assert int(ranked[1][1]) == 305_227
+
+
+def test_compute_rank_group_and_required_code(live_client: StatbankClient) -> None:
+    """Known Esbjerg stocks, the municipality rank, a named group, and a required code."""
+    from statistikbanken_mcp.server import beregn
+    from statistikbanken_mcp.web import _area_rank_answer
+
+    earlier = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2025K4"]},
+    )
+    latest = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2026K4"]},
+    )
+    assert earlier["rows"][0]["value"] == 114_983
+    assert latest["rows"][0]["value"] == 114_766
+    diff = beregn("difference", 114_983, 114_766)
+    assert diff["numerator"] == 114_983
+    assert diff["denominator"] == 114_766
+    assert diff["result"] == 217
+    assert diff["unit"]
+    share = beregn("percent", 114_766, 114_983)
+    assert abs(share["result"] - (114_766 / 114_983 * 100)) < 1e-9
+
+    both = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["000", "561"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2026K4"]},
+    )
+    facts = []
+    for row in both["rows"]:
+        facts.append(
+            {
+                "table": "FOLK1A",
+                "period": row["Tid"],
+                "unit": "Antal",
+                "value": row["value"],
+                "detail": f"OMRÅDE: {row['OMRÅDE']}, ALDER: Alder i alt",
+            }
+        )
+    ranked = _area_rank_answer("Which municipality has the largest population?", facts)
+    assert ranked is not None
+    assert "Esbjerg" in ranked
+    assert "114.766" in ranked
+    assert "Hele landet" not in ranked
+
+    women = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "Tid": ["2026K4"]},
+        question="Hvor mange kvinder bor i Esbjerg?",
+    )
+    explicit = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "KØN": ["2"], "Tid": ["2026K4"]},
+    )
+    assert women["rows"][0]["KØN"] == "Kvinder"
+    assert women["rows"][0]["value"] == explicit["rows"][0]["value"]
+    assert women["rows"][0]["value"] != 114_766
+
+    with pytest.raises(ToolError, match="must be set") as caught:
+        hent_data("BY3", {"FOLKARTAET": ["FOLKETAL"], "Tid": ["2026"]})
+    message = str(caught.value)
+    assert "Codes:" in message
+    assert "Pass one of them" in message
 
 
 def _text(result: object) -> str:

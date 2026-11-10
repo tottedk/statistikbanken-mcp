@@ -31,6 +31,8 @@ from zoneinfo import ZoneInfo
 import httpx
 from mcp import Client, StdioServerParameters
 
+from statistikbanken_mcp.statbank import compute_figure
+
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
@@ -795,9 +797,18 @@ class TurnResult:
 def _without_injection(question: str) -> str:
     """Drop an instruction to ignore the question. Keep the statistical part."""
     cleaned = re.sub(
-        r"ignore (?:all |any )?(?:previous |prior |above )?instructions(?: and answer \d+)?\.?",
+        r"(?:ignore|ignorer|ignorér) (?:all |any |alle |de )?"
+        r"(?:previous |prior |above |tidligere |forrige )?"
+        r"(?:instructions?|instruktioner)"
+        r"(?: and answer \d+| og svar \d+)?\.?",
         " ",
         question,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"glem (?:alle )?(?:tidligere |forrige )?instruktioner(?: og svar \d+)?\.?",
+        " ",
+        cleaned,
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .")
@@ -840,6 +851,7 @@ async def run_turn(
             if call.name == "hent_data" and isinstance(call.arguments, dict):
                 call.arguments = apply_age_intent(question, call.arguments)
                 call.arguments = apply_fetch_defaults(question, call.arguments)
+                call.arguments["question"] = question
                 if ranked and call.arguments.get("table"):
                     call.arguments["table"] = preferred_table(ranked, str(call.arguments["table"]))
             blocked = (
@@ -914,17 +926,33 @@ def _direction_note(question: str, start: float, end: float) -> str:
     return ""
 
 
+def _excluded_area(label: str, *, want_region: bool) -> bool:
+    """National totals, regions, landsdele, and non-municipality areas."""
+    low = _fold_place(label)
+    if not low or low in {"hele landet", "i alt", "uoplyst"}:
+        return True
+    if low.startswith("landsdel") or "uoplyst" in low or "christians" in low:
+        return True
+    if low.startswith("region"):
+        return not want_region
+    return False
+
+
 def _area_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
-    """Largest or smallest municipality or region. Not the national total, and not every row."""
+    """Largest or smallest municipality or region, with its value. Not a raw dump."""
     folded = _fold_place(question)
-    if not any(
+    danish = any(
         word in folded for word in ("storst", "mindst", "flest", "faerrest", "hoejest", "lavest")
-    ):
+    )
+    english = any(
+        word in folded for word in ("largest", "smallest", "fewest", "highest", "lowest")
+    ) or ("most" in folded and "municip" in folded)
+    if not danish and not english:
         return None
     if re.search(r"\bby\b|\bbyer\b|\bbyomr", folded):
         return None
-    want_region = "region" in folded and "kommune" not in folded
-    if "kommune" not in folded and not want_region:
+    want_region = "region" in folded and "kommune" not in folded and "municip" not in folded
+    if "kommune" not in folded and "municip" not in folded and not want_region:
         return None
     rows: list[tuple[str, float, dict[str, Any]]] = []
     for fact in facts:
@@ -935,22 +963,25 @@ def _area_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
             key, sep, value = part.partition(": ")
             if sep and _fold_place(key) in _AREA_FIELDS:
                 label = value
-        low = _fold_place(label)
-        if not label or low in {"hele landet", "i alt"}:
+        if not label or _excluded_area(label, want_region=want_region):
             continue
-        if low.startswith("region") and not want_region:
-            continue
-        if want_region and not low.startswith("region"):
+        if want_region and not _fold_place(label).startswith("region"):
             continue
         rows.append((label, float(fact["value"]), fact))
     if not rows:
         return None
-    ascending = any(word in folded for word in ("mindst", "faerrest", "lavest"))
+    ascending = any(
+        word in folded for word in ("mindst", "faerrest", "lavest", "smallest", "fewest", "lowest")
+    )
     rows.sort(key=lambda item: (item[1], _fold_place(item[0])), reverse=not ascending)
     name, value, fact = rows[0]
     period = period_label(str(fact.get("period") or ""))
+    shown = _da_number(value)
+    if english and not danish:
+        extreme = "the fewest" if ascending else "the most"
+        return f"{name} has {extreme}: {shown} ({period})."
     extreme = "færrest" if ascending else "flest"
-    return f"{name} har {extreme} med {_da_number(value)} ({period})."
+    return f"{name} har {extreme} med {shown} ({period})."
 
 
 def _series_points(
@@ -969,33 +1000,54 @@ def _series_points(
     return points
 
 
-def _derived_line(question: str, facts: list[dict[str, Any]]) -> str | None:
-    """Share or difference from the fetched stocks, with both inputs visible."""
+def _derived_operation(question: str) -> str | None:
     folded = _fold_place(question)
-    if not any(word in folded for word in ("forskel", "andel", "procent", "pr. indbygger")):
+    if "per km2" in folded or "pr. km2" in folded or "pr km2" in folded:
+        return "per_km2"
+    if "per capita" in folded or "pr. indbygger" in folded or "pr indbygger" in folded:
+        return "per_capita"
+    if "ratio" in folded or "forhold" in folded:
+        return "ratio"
+    if (
+        "andel" in folded
+        or "share" in folded
+        or (("procent" in folded or "percent" in folded) and "forskel" not in folded)
+    ):
+        return "percent"
+    if "forskel" in folded or "difference" in folded:
+        return "difference"
+    return None
+
+
+def _derived_line(question: str, facts: list[dict[str, Any]]) -> str | None:
+    """Share, difference, ratio, or density from the fetched stocks, with both inputs."""
+    operation = _derived_operation(question)
+    if operation is None:
         return None
     points = _series_points(facts)
     if len(points) != 2:
         return None
     (left, left_value, _left_period), (right, right_value, _right_period) = points
-    if "andel" in folded or ("procent" in folded and "forskel" not in folded):
-        if right_value == 0:
-            return None
-        share = left_value / right_value * 100
-        shown = f"{share:.2f}".replace(".", ",")
-        return (
-            f"{left} er {_da_number(left_value)} og {right} er {_da_number(right_value)}. "
-            f"Andelen er {shown} procent."
-        )
-    return (
-        f"{left} er {_da_number(left_value)} og {right} er {_da_number(right_value)}. "
-        f"Forskellen er {_da_number(abs(left_value - right_value))}."
+    if operation != "difference" and right_value == 0:
+        return None
+    payload = compute_figure(operation, left_value, right_value)
+    result = abs(payload["result"]) if operation == "difference" else payload["result"]
+    shown = _da_number(result)
+    inputs = f"{left} er {_da_number(left_value)} og {right} er {_da_number(right_value)}."
+    computed = (
+        f"Tæller {_da_number(payload['numerator'])}, nævner {_da_number(payload['denominator'])}, "
+        f"resultat {shown} ({payload['unit']})."
     )
+    if operation == "percent":
+        return f"{inputs} Andelen er {shown} procent. {computed}"
+    if operation == "difference":
+        return f"{inputs} Forskellen er {shown}. {computed}"
+    return f"{inputs} {computed}"
 
 
 def _with_missing_part(question: str, facts: list[dict[str, Any]], text: str) -> str:
     names = re.findall(
-        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+kommune",
+        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+(?:kommune|municipality)",
         question,
         flags=re.IGNORECASE,
     )
@@ -1005,8 +1057,17 @@ def _with_missing_part(question: str, facts: list[dict[str, Any]], text: str) ->
     missing = [name for name in names if name.casefold() not in detail.casefold()]
     if not missing or len(missing) == len(names):
         return text
-    note = "Jeg har ikke tal for " + " og ".join(missing) + "."
-    if note.casefold() in text.casefold():
+    answered = [name for name in names if name not in missing]
+    note = (
+        "Dele: "
+        + ", ".join(f"{name} besvaret" for name in answered)
+        + ". Jeg har ikke tal for "
+        + " og ".join(missing)
+        + "."
+    )
+    if "jeg har ikke tal for" in text.casefold() and all(
+        name.casefold() in text.casefold() for name in missing
+    ):
         return text
     return f"{text}\n{note}" if text else note
 
@@ -1046,6 +1107,8 @@ async def _fetch_arguments(
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    arguments = dict(arguments)
+    arguments["question"] = question
     call = ToolCall(id="server:fetch", name="hent_data", arguments=arguments, raw={})
     result = await _invoke(runner, call)
     calls.append(_trace(call, result))
@@ -1062,15 +1125,6 @@ async def _complete_municipality_history(
     """Fetch the obvious table when the model stopped without hent_data."""
     if facts or _january_year(question) or _asks_city_rank(question):
         return facts, calls
-    for subject in _subject_candidates(question):
-        facts, calls = await _fetch_arguments(runner, question, subject, facts, calls)
-        if facts and not str(calls[-1].get("result") or "").casefold().startswith(
-            ("error", "no rows", "unknown")
-        ):
-            return facts, calls
-        facts = []
-    if _subject_candidates(question):
-        return facts, calls
     folded_subject = _fold_place(question)
     if (
         ("ledighed" in folded_subject or "arbejdslose" in folded_subject)
@@ -1086,21 +1140,72 @@ async def _complete_municipality_history(
             calls,
         )
     place = _municipality_in_question(question)
-    if not place:
+    if place:
+        folded = question.casefold()
+        years = _question_years(question)
+        if years and min(years) < 2008:
+            arguments = {
+                "table": "FOLK1A",
+                "values": {"OMRÅDE": [place], "Tid": [">=2008K1"]},
+            }
+            return await _fetch_arguments(runner, question, arguments, facts, calls)
+        if "indbygg" in folded or "befolk" in folded:
+            if "siden" in folded or _asks_for_change(question):
+                return facts, calls
+            arguments = {"table": "FOLK1A", "values": {"OMRÅDE": [place]}}
+            return await _fetch_arguments(runner, question, arguments, facts, calls)
+    if calls or not _looks_like_data_question(question):
         return facts, calls
+    return await _search_then_fetch(runner, question, facts, calls)
+
+
+def _looks_like_data_question(question: str) -> bool:
     folded = question.casefold()
-    years = _question_years(question)
-    if years and min(years) < 2008:
-        arguments = {
-            "table": "FOLK1A",
-            "values": {"OMRÅDE": [place], "Tid": [">=2008K1"]},
-        }
-        return await _fetch_arguments(runner, question, arguments, facts, calls)
-    if "indbygg" in folded or "befolk" in folded:
-        if "siden" in folded or _asks_for_change(question):
+    if "?" in question:
+        return True
+    return any(
+        marker in folded
+        for marker in ("hvor ", "hvad ", "hvilken", "hvilket", "how ", "what ", "which ")
+    )
+
+
+def _table_ids(result: str) -> list[str]:
+    try:
+        payload = json.loads(result)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [str(item["id"]) for item in payload if isinstance(item, dict) and item.get("id")]
+
+
+async def _search_then_fetch(
+    runner: ToolRunner,
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """find_tabel on the question, then hent_data. The next hit is used if the first is empty."""
+    call = ToolCall(
+        id="server:search",
+        name="find_tabel",
+        arguments={"query": question, "limit": 3},
+        raw={},
+    )
+    result = await _invoke(runner, call)
+    calls.append(_trace(call, result))
+    for table_id in _table_ids(result)[:2]:
+        facts, calls = await _fetch_arguments(
+            runner,
+            question,
+            {"table": table_id, "values": {}},
+            facts,
+            calls,
+        )
+        outcome = str(calls[-1].get("result") or "").casefold()
+        if facts and not outcome.startswith(("error", "no rows", "unknown", "tool failed")):
             return facts, calls
-        arguments = {"table": "FOLK1A", "values": {"OMRÅDE": [place]}}
-        return await _fetch_arguments(runner, question, arguments, facts, calls)
+        facts = []
     return facts, calls
 
 
@@ -2431,6 +2536,95 @@ def guard_answer(
 ) -> str:
     """Drop prose that states a number this turn did not fetch.
 
+    A stated figure that is not the fetched one is corrected. A beregn result
+    is shown with its numerator, denominator, and unit.
+    """
+    text = _compose_answer(question, answer, facts, calls)
+    text = _correct_stated_claim(question, facts, text)
+    extra = _computed_sentence(calls)
+    if not extra:
+        return text
+    token = extra.split("resultat ", 1)[-1].split(" ", 1)[0].rstrip(".")
+    if token in text:
+        return text
+    if not text or text in {NO_DATA_ANSWER, NO_FETCHED_NUMBERS}:
+        return extra
+    return f"{text}\n{extra}"
+
+
+def _computed_sentence(calls: list[dict[str, str]] | None) -> str:
+    if not calls:
+        return ""
+    for call in reversed(calls):
+        if call.get("name") != "beregn":
+            continue
+        try:
+            payload = json.loads(call.get("result") or "")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or "result" not in payload:
+            continue
+        try:
+            numerator = float(payload["numerator"])
+            denominator = float(payload["denominator"])
+            result = float(payload["result"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        unit = str(payload.get("unit") or "").strip()
+        unit_bit = f" ({unit})" if unit else ""
+        return (
+            f"Beregnet: tæller {_da_number(numerator)}, "
+            f"nævner {_da_number(denominator)}, "
+            f"resultat {_da_number(result)}{unit_bit}."
+        )
+    return ""
+
+
+def _correct_stated_claim(
+    question: str,
+    facts: list[dict[str, Any]],
+    text: str,
+) -> str:
+    """A number the user states is compared with the fetched figure."""
+    if not facts or "ikke offentliggjort" in text.casefold():
+        return text
+    numeric = [fact for fact in facts if _single_value(fact)]
+    if not numeric:
+        return text
+    latest = max(numeric, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    fetched = float(latest["value"])
+    shown = _da_number(fetched)
+    for match in _NUMBER_RE.finditer(question):
+        token = match.group(1)
+        if re.fullmatch(r"\d{4}", token):
+            year = int(token)
+            if 1600 <= year <= 2100:
+                continue
+        number = _parse_stat_number(token)
+        if abs(number) < 1000:
+            continue
+        if abs(number - fetched) <= max(0.05, abs(fetched) * 0.001):
+            continue
+        if any(
+            abs(number - float(fact["value"])) <= max(0.05, abs(float(fact["value"])) * 0.001)
+            for fact in numeric
+        ):
+            continue
+        note = f"Du nævner {token}. Det hentede tal er {shown}, ikke {token}."
+        if token in text and re.search(r"\bikke\b|\bnot\b", text, re.IGNORECASE):
+            return text
+        return f"{note}\n{text}" if text else note
+    return text
+
+
+def _compose_answer(
+    question: str,
+    answer: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]] | None = None,
+) -> str:
+    """Drop prose that states a number this turn did not fetch.
+
     Allowed figures are the question, a hent_data value, a period or row label
     from those rows, the fetched table title, and a variable value on this
     turn's hent_data arguments. A fetched value tied in the same clause to one
@@ -2874,17 +3068,6 @@ _CITY_TABLES = frozenset(
 )
 
 
-def _place_word(question: str) -> str | None:
-    match = re.search(
-        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+kommune",
-        question,
-        re.IGNORECASE,
-    )
-    if match is None:
-        return None
-    return match.group(1)
-
-
 def _asked_period(question: str) -> str | None:
     quarter = re.search(
         r"([1-4])\s*\.?\s*kvartal\w*\s+((?:19|20)\d{2})",
@@ -2910,87 +3093,12 @@ def _with_period(values: dict[str, list[str]], question: str) -> dict[str, list[
     return values
 
 
-def _subject_candidates(question: str) -> list[dict[str, Any]]:
-    """Colloquial subjects and the official tables tried, in order.
-
-    The first table is the usual series. The next is used when that fetch
-    returns no rows. Average income, the consumer-price index, births,
-    employment and value added stay on the series checked for Q201–300.
-    """
-    folded = _fold_place(question)
-    place = _place_word(question)
-    if "levendef" in folded:
-        values: dict[str, list[str]] = {"BEVÆGELSE": ["B02"]}
-        if place:
-            values["OMRÅDE"] = [place]
-        return [{"table": "BEV22", "values": _with_period(values, question)}]
-    if (
-        "gennemsnit" in folded
-        and "indkomst" in folded
-        and "disponibel" not in folded
-        and "aekvival" not in folded
-    ):
-        values = {
-            "ENHED": ["118"],
-            "KOEN": ["MOK"],
-            "ALDER1": ["00"],
-            "INDKINTB": ["000"],
-            "OMRÅDE": [place or "000"],
-        }
-        return [{"table": "INDKP105", "values": _with_period(values, question)}]
-    if ("inflation" in folded or "forbrugerpris" in folded) and "braendstof" not in folded:
-        change = "inflation" in folded or "stigning" in folded or "procent" in folded
-        values = {
-            "VAREGR": ["010000" if "foedevarer" in folded else "000000"],
-            "ENHED": ["300" if change else "100"],
-        }
-        return [
-            {"table": "PRIS111", "values": _with_period(dict(values), question)},
-            {"table": "PRIS01", "values": _with_period(dict(values), question)},
-        ]
-    if "beskaeftig" in folded and "nationalregnskab" in folded:
-        values = {"TRANSAKT": ["EMPM_DC"], "PRISENHED": ["V_M"]}
-        return [{"table": "NAN1", "values": _with_period(values, question)}]
-    if "bruttovaerditilvaekst" in folded:
-        values = {"TRANSAKT": ["B1GD"], "BRANCHE": ["V"], "PRISENHED": ["V"]}
-        return [{"table": "NABP19", "values": _with_period(values, question)}]
-    if "huspris" in folded or "boligpris" in folded:
-        values = _with_period({}, question)
-        return [
-            {"table": "EJ56", "values": dict(values)},
-            {"table": "BM011", "values": dict(values)},
-        ]
-    if "kontanthjaelp" in folded:
-        return [{"table": "KY21", "values": _with_period({}, question)}]
-    if "indvandrer" in folded:
-        values = _with_period({}, question)
-        return [
-            {"table": "FOLK1E", "values": dict(values)},
-            {"table": "FOLK1C", "values": dict(values)},
-        ]
-    if "befolkningstaethed" in folded:
-        return [{"table": "BY3", "values": _with_period({"FOLKARTAET": ["BEFTAET"]}, question)}]
-    return []
-
-
-def _subject_fetch(question: str) -> dict[str, Any] | None:
-    found = _subject_candidates(question)
-    return found[0] if found else None
-
-
 def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Correct the code the question already named, before the API call."""
     updated = dict(arguments)
     values = dict(updated.get("values") or {})
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
-    subject = _subject_fetch(question)
-    if subject:
-        updated["table"] = subject["table"]
-        updated["values"] = subject["values"]
-        updated.pop("sum_from", None)
-        updated.pop("sum_range", None)
-        return updated
     place = _municipality_in_question(question)
     january = _january_year(question)
     if place and table not in {"FOLK1A", "FOLK1AM"} and not (january and table == "BEFOLK3"):
