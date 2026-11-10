@@ -876,7 +876,29 @@ def test_calendar_phrases_do_not_substitute_another_period(calls: list[dict[str,
     assert read_as == "2026M10"
     latest, _plan, read_as = _period_meaning(table, variable, "seneste", today)
     assert latest == ["2026M09"]
-    assert read_as == "2026M09"
+    span = _Variable(
+        id="Tid",
+        text="tid",
+        eliminable=False,
+        time=True,
+        values=tuple({"id": code, "text": code} for code in ("2024M09", "2025M09", "2026M09")),
+    )
+    span_table = _Table(
+        id="AUS07",
+        title="Fuldtidsledige",
+        description="",
+        unit="Antal",
+        updated=None,
+        active=True,
+        variables=(span,),
+    )
+    now, _plan, read_as = _period_meaning(span_table, span, "nu", today)
+    assert now == ["2026M09"]
+    today_phrase, _plan, read_as = _period_meaning(span_table, span, "i dag", today)
+    assert today_phrase == ["2026M09"]
+    ago, _plan, read_as = _period_meaning(span_table, span, "for 2 år siden", today)
+    assert ago == ["2024M09"]
+    assert "2024M09" in read_as
 
 
 def test_danish_period_phrases_outside_the_table_name_the_range() -> None:

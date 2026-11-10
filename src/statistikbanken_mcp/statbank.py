@@ -1771,9 +1771,13 @@ def _period_meaning(
         return None
     latest_code, latest_year, latest_quarter, latest_month = latest
 
-    if text in {"seneste", "nyeste", "seneste periode", "nyeste periode"}:
+    if text in {"seneste", "nyeste", "seneste periode", "nyeste periode", "nu", "i dag", "idag"}:
         return [latest_code], None, latest_code
-    # i år / i fjor / sidste måned follow the calendar, not the table's last period.
+    years_ago = re.fullmatch(r"for (\d+) aar siden", text)
+    if years_ago:
+        return _shift_published(variable, token, int(years_ago.group(1)))
+    # i år / i fjor follow the calendar. sidste år is that previous calendar year,
+    # resolved through this table's codes, not forced to 1 January.
     if text in {"i aar", "iaar"}:
         return _year_meaning(table, variable, token, today.year, unpublished=True)
     if text in {"i fjor", "sidste aar", "forrige aar"}:
@@ -1950,6 +1954,26 @@ def _quarter_meaning(
     )
 
 
+def _shift_published(
+    variable: _Variable, token: str, years: int
+) -> tuple[list[str], _YearPlan | None, str]:
+    """N years before the latest published period, at that period's own grain."""
+    latest = _latest_period(variable)
+    if latest is None:
+        raise StatbankError(f"{token.strip()!r} needs a time variable.")
+    code = latest[0]
+    match = re.match(r"(\d{4})(.*)", code)
+    if match is None:
+        raise StatbankError(f"{token.strip()!r} needs a yearly period. Seneste er {code}.")
+    shifted = f"{int(match.group(1)) - years}{match.group(2)}"
+    found = _code_on(variable, shifted)
+    if found is None:
+        raise StatbankError(
+            f"{token.strip()!r} er {shifted}, som ikke er offentliggjort; seneste er {code}."
+        )
+    return [found], None, found
+
+
 def _year_meaning(
     table: _Table,
     variable: _Variable,
@@ -1971,6 +1995,9 @@ def _year_meaning(
         )
     ]
     if not codes:
+        latest = _latest_period(variable)
+        if latest is not None and year > latest[1] and not unpublished:
+            raise StatbankError(f"{year} er ikke offentliggjort endnu; seneste er {latest[0]}.")
         if unpublished:
             raise _not_published(token, str(year), table, variable)
         raise StatbankError(

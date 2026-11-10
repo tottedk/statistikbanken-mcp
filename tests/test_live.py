@@ -541,6 +541,73 @@ async def _stdio_session() -> None:
         assert "Traceback" not in text
 
 
+def test_relative_time_inflation_and_a_published_change(live_client: StatbankClient) -> None:
+    """nu is the table's latest period. One year earlier and CPI are fixed figures."""
+    info = tabelinfo("FOLK1A")
+    latest = next(item for item in info["variables"] if item["id"] == "Tid")["time_span"]["last"][
+        "id"
+    ]
+    direct = hent_data(
+        "FOLK1A",
+        {
+            "OMRÅDE": ["561"],
+            "ALDER": ["IALT"],
+            "KØN": ["TOT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": [latest],
+        },
+    )
+    now = hent_data(
+        "FOLK1A",
+        {
+            "OMRÅDE": ["561"],
+            "ALDER": ["IALT"],
+            "KØN": ["TOT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": ["nu"],
+        },
+    )
+    assert now["rows"][0]["Tid"] == latest
+    assert now["rows"][0]["value"] == direct["rows"][0]["value"]
+    earlier = hent_data(
+        "FOLK1A",
+        {
+            "OMRÅDE": ["561"],
+            "ALDER": ["IALT"],
+            "KØN": ["TOT"],
+            "CIVILSTAND": ["TOT"],
+            "Tid": ["for 1 år siden"],
+        },
+    )
+    assert earlier["rows"][0]["Tid"] == f"{int(latest[:4]) - 1}{latest[4:]}"
+    if earlier["rows"][0]["Tid"] == "2025K4":
+        assert earlier["rows"][0]["value"] == 114_983
+        assert direct["rows"][0]["value"] == 114_766
+    with pytest.raises(ToolError, match="2099") as caught:
+        hent_data("FOLK1A", {"OMRÅDE": ["561"], "Tid": ["2099"]})
+    message = str(caught.value)
+    assert latest in message
+    assert "114766" not in message
+    inflation = hent_data(
+        "PRIS111",
+        {"VAREGR": ["000000"], "ENHED": ["300"], "Tid": ["2025M12"]},
+    )
+    assert inflation["rows"][0]["value"] == 1.9
+    areas = hent_data("BY3", {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"], "Tid": ["2026"]})
+    from statistikbanken_mcp.web import rank_urban_areas
+
+    ranked = rank_urban_areas(
+        [
+            (str(row.get("BYER") or ""), float(row["value"]))
+            for row in areas["rows"]
+            if isinstance(row.get("value"), int | float) and not isinstance(row.get("value"), bool)
+        ]
+    )
+    assert ranked[1] == ("Aarhus", 305227) or (
+        ranked[1][0] == "Aarhus" and int(ranked[1][1]) == 305_227
+    )
+
+
 def test_subject_tables_match_the_published_figures(live_client: StatbankClient) -> None:
     """Known figures checked against api.statbank.dk on 10 Nov 2026."""
     from statistikbanken_mcp.web import rank_urban_areas

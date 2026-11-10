@@ -792,6 +792,18 @@ class TurnResult:
     suggestions: list[str] = field(default_factory=list)
 
 
+def _without_injection(question: str) -> str:
+    """Drop an instruction to ignore the question. Keep the statistical part."""
+    cleaned = re.sub(
+        r"ignore (?:all |any )?(?:previous |prior |above )?instructions(?: and answer \d+)?\.?",
+        " ",
+        question,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .")
+    return cleaned or question
+
+
 async def run_turn(
     llm: ChatClient,
     runner: ToolRunner,
@@ -800,6 +812,7 @@ async def run_turn(
     max_tool_calls: int,
     today: date | None = None,
 ) -> TurnResult:
+    question = _without_injection(question)
     specs = await runner.list_tools()
     tools = openai_tools(specs)
     messages: list[dict[str, Any]] = [
@@ -873,6 +886,131 @@ def _question_years(question: str) -> list[int]:
     return [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
 
 
+def _future_year_answer(question: str, facts: list[dict[str, Any]]) -> str:
+    """A year after every fetched period is not that period's value."""
+    if any(fact.get("projection") for fact in facts):
+        return ""
+    years = _question_years(question)
+    if not years:
+        return ""
+    asked = max(years)
+    numeric = [fact for fact in facts if _single_value(fact)]
+    present = [_period_year(str(fact.get("period") or "")) or 0 for fact in numeric]
+    if not present or asked <= max(present):
+        return ""
+    latest = max(numeric, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    return (
+        f"{asked} er ikke offentliggjort endnu; "
+        f"seneste er {period_label(str(latest.get('period') or ''))}."
+    )
+
+
+def _direction_note(question: str, start: float, end: float) -> str:
+    folded = _fold_place(question)
+    if any(word in folded for word in ("steget", "vokset", "voksede")) and end < start:
+        return "Tallet er ikke steget. Det er faldet."
+    if "fald" in folded and end > start:
+        return "Tallet er ikke faldet. Det er steget."
+    return ""
+
+
+def _area_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
+    """Largest or smallest municipality or region. Not the national total, and not every row."""
+    folded = _fold_place(question)
+    if not any(
+        word in folded for word in ("storst", "mindst", "flest", "faerrest", "hoejest", "lavest")
+    ):
+        return None
+    if re.search(r"\bby\b|\bbyer\b|\bbyomr", folded):
+        return None
+    want_region = "region" in folded and "kommune" not in folded
+    if "kommune" not in folded and not want_region:
+        return None
+    rows: list[tuple[str, float, dict[str, Any]]] = []
+    for fact in facts:
+        if not _single_value(fact):
+            continue
+        label = ""
+        for part in str(fact.get("detail") or "").split(", "):
+            key, sep, value = part.partition(": ")
+            if sep and _fold_place(key) in _AREA_FIELDS:
+                label = value
+        low = _fold_place(label)
+        if not label or low in {"hele landet", "i alt"}:
+            continue
+        if low.startswith("region") and not want_region:
+            continue
+        if want_region and not low.startswith("region"):
+            continue
+        rows.append((label, float(fact["value"]), fact))
+    if not rows:
+        return None
+    ascending = any(word in folded for word in ("mindst", "faerrest", "lavest"))
+    rows.sort(key=lambda item: (item[1], _fold_place(item[0])), reverse=not ascending)
+    name, value, fact = rows[0]
+    period = period_label(str(fact.get("period") or ""))
+    extreme = "færrest" if ascending else "flest"
+    return f"{name} har {extreme} med {_da_number(value)} ({period})."
+
+
+def _series_points(
+    facts: list[dict[str, Any]],
+) -> list[tuple[str, float, str]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for fact in facts:
+        if not _single_value(fact):
+            continue
+        groups.setdefault(str(fact.get("detail") or ""), []).append(fact)
+    points: list[tuple[str, float, str]] = []
+    for detail, series in groups.items():
+        latest = max(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+        label = display_label(detail, str(latest.get("table") or "")) or detail
+        points.append((label, float(latest["value"]), str(latest.get("period") or "")))
+    return points
+
+
+def _derived_line(question: str, facts: list[dict[str, Any]]) -> str | None:
+    """Share or difference from the fetched stocks, with both inputs visible."""
+    folded = _fold_place(question)
+    if not any(word in folded for word in ("forskel", "andel", "procent", "pr. indbygger")):
+        return None
+    points = _series_points(facts)
+    if len(points) != 2:
+        return None
+    (left, left_value, _left_period), (right, right_value, _right_period) = points
+    if "andel" in folded or ("procent" in folded and "forskel" not in folded):
+        if right_value == 0:
+            return None
+        share = left_value / right_value * 100
+        shown = f"{share:.2f}".replace(".", ",")
+        return (
+            f"{left} er {_da_number(left_value)} og {right} er {_da_number(right_value)}. "
+            f"Andelen er {shown} procent."
+        )
+    return (
+        f"{left} er {_da_number(left_value)} og {right} er {_da_number(right_value)}. "
+        f"Forskellen er {_da_number(abs(left_value - right_value))}."
+    )
+
+
+def _with_missing_part(question: str, facts: list[dict[str, Any]], text: str) -> str:
+    names = re.findall(
+        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+kommune",
+        question,
+        flags=re.IGNORECASE,
+    )
+    if len(names) < 2:
+        return text
+    detail = " ".join(str(fact.get("detail") or "") for fact in facts)
+    missing = [name for name in names if name.casefold() not in detail.casefold()]
+    if not missing or len(missing) == len(names):
+        return text
+    note = "Jeg har ikke tal for " + " og ".join(missing) + "."
+    if note.casefold() in text.casefold():
+        return text
+    return f"{text}\n{note}" if text else note
+
+
 def _stock_before_series(question: str, facts: list[dict[str, Any]]) -> str:
     """A municipality stock for a year before FOLK1A exists is a coverage gap."""
     if _asks_for_trend(question) or _asks_for_change(question):
@@ -924,9 +1062,29 @@ async def _complete_municipality_history(
     """Fetch the obvious table when the model stopped without hent_data."""
     if facts or _january_year(question) or _asks_city_rank(question):
         return facts, calls
-    subject = _subject_fetch(question)
-    if subject:
-        return await _fetch_arguments(runner, question, subject, facts, calls)
+    for subject in _subject_candidates(question):
+        facts, calls = await _fetch_arguments(runner, question, subject, facts, calls)
+        if facts and not str(calls[-1].get("result") or "").casefold().startswith(
+            ("error", "no rows", "unknown")
+        ):
+            return facts, calls
+        facts = []
+    if _subject_candidates(question):
+        return facts, calls
+    folded_subject = _fold_place(question)
+    if (
+        ("ledighed" in folded_subject or "arbejdslose" in folded_subject)
+        and "netto" not in folded_subject
+        and "procent" not in folded_subject
+        and "gennemsnit" not in folded_subject
+    ):
+        return await _fetch_arguments(
+            runner,
+            question,
+            {"table": "AUS08", "values": _with_period({}, question)},
+            facts,
+            calls,
+        )
     place = _municipality_in_question(question)
     if not place:
         return facts, calls
@@ -2080,11 +2238,13 @@ def _comparison_line(question: str, facts: list[dict[str, Any]]) -> str | None:
     difference = abs(end - start)
     percent = difference / abs(start) * 100
     shown = f"{percent:.2f}".replace(".", ",")
-    return (
+    direction = _direction_note(question, start, end)
+    line = (
         f"{_da_number(start)} ({period_label(str(first.get('period') or ''))}) og "
         f"{_da_number(end)} ({period_label(str(last.get('period') or ''))}). "
         f"Forskellen er {_da_number(difference)} ({shown} procent)."
     )
+    return f"{direction} {line}" if direction else line
 
 
 def _series_endpoints(
@@ -2282,6 +2442,11 @@ def guard_answer(
     is kept with that line.
     """
     facts = _dedupe_facts(facts)
+    question = _without_injection(question)
+    if facts:
+        future = _future_year_answer(question, facts)
+        if future:
+            return future
     if not facts:
         note = _timeout_after_table(calls)
         if note:
@@ -2304,6 +2469,9 @@ def guard_answer(
     refusal = _relevance_refusal(question, facts)
     if refusal:
         return refusal
+    area_rank = _area_rank_answer(question, facts)
+    if area_rank:
+        return _with_missing_part(question, facts, area_rank)
     if _asks_city_rank(question):
         ranked = _city_rank_answer(question, facts)
         if ranked:
@@ -2318,17 +2486,24 @@ def guard_answer(
             return gap
         lines = _selected_lines(question, facts)
         if lines:
-            return _with_municipality_note(
+            return _with_missing_part(
                 question,
-                _with_outside_note(
-                    _with_unpublished_note("\n".join(lines), answer),
+                facts,
+                _with_municipality_note(
                     question,
+                    _with_outside_note(
+                        _with_unpublished_note("\n".join(lines), answer),
+                        question,
+                    ),
                 ),
             )
     if _log_unverified(answer, question, facts, calls):
         change = _comparison_line(question, facts) if _asks_for_change(question) else None
+        derived = _derived_line(question, facts)
         if change:
             return _with_boundary_note(question, facts, change)
+        if derived:
+            return _with_missing_part(question, facts, derived)
         if _single_fact(facts):
             return _summary_line(facts[0])
         return UNVERIFIED_NUMBERS
@@ -2343,6 +2518,9 @@ def guard_answer(
                 prose = answer if _numbers_in(answer) else ""
                 text = f"{change}\n{prose}".strip() if prose else change
                 return _with_boundary_note(question, facts, text)
+            derived = _derived_line(question, facts)
+            if derived:
+                return _with_missing_part(question, facts, derived)
     if _single_fact(facts):
         line = _summary_line(facts[0])
         return f"{line}\n\n{answer}" if answer else line
@@ -2725,18 +2903,27 @@ def _asked_period(question: str) -> str | None:
     return str(years[0])
 
 
-def _subject_fetch(question: str) -> dict[str, Any] | None:
-    """One published table for a subject the question already names."""
+def _with_period(values: dict[str, list[str]], question: str) -> dict[str, list[str]]:
+    period = _asked_period(question)
+    if period:
+        values["Tid"] = [period]
+    return values
+
+
+def _subject_candidates(question: str) -> list[dict[str, Any]]:
+    """Colloquial subjects and the official tables tried, in order.
+
+    The first table is the usual series. The next is used when that fetch
+    returns no rows. Average income, the consumer-price index, births,
+    employment and value added stay on the series checked for Q201–300.
+    """
     folded = _fold_place(question)
     place = _place_word(question)
-    period = _asked_period(question)
     if "levendef" in folded:
         values: dict[str, list[str]] = {"BEVÆGELSE": ["B02"]}
         if place:
             values["OMRÅDE"] = [place]
-        if period:
-            values["Tid"] = [period]
-        return {"table": "BEV22", "values": values}
+        return [{"table": "BEV22", "values": _with_period(values, question)}]
     if (
         "gennemsnit" in folded
         and "indkomst" in folded
@@ -2750,29 +2937,45 @@ def _subject_fetch(question: str) -> dict[str, Any] | None:
             "INDKINTB": ["000"],
             "OMRÅDE": [place or "000"],
         }
-        if period:
-            values["Tid"] = [period]
-        return {"table": "INDKP105", "values": values}
-    if "forbrugerpris" in folded and "braendstof" not in folded and "benzin" not in folded:
-        change = "stigning" in folded or "procent" in folded
+        return [{"table": "INDKP105", "values": _with_period(values, question)}]
+    if ("inflation" in folded or "forbrugerpris" in folded) and "braendstof" not in folded:
+        change = "inflation" in folded or "stigning" in folded or "procent" in folded
         values = {
             "VAREGR": ["010000" if "foedevarer" in folded else "000000"],
             "ENHED": ["300" if change else "100"],
         }
-        if period:
-            values["Tid"] = [period]
-        return {"table": "PRIS111", "values": values}
+        return [
+            {"table": "PRIS111", "values": _with_period(dict(values), question)},
+            {"table": "PRIS01", "values": _with_period(dict(values), question)},
+        ]
     if "beskaeftig" in folded and "nationalregnskab" in folded:
         values = {"TRANSAKT": ["EMPM_DC"], "PRISENHED": ["V_M"]}
-        if period:
-            values["Tid"] = [period]
-        return {"table": "NAN1", "values": values}
+        return [{"table": "NAN1", "values": _with_period(values, question)}]
     if "bruttovaerditilvaekst" in folded:
         values = {"TRANSAKT": ["B1GD"], "BRANCHE": ["V"], "PRISENHED": ["V"]}
-        if period:
-            values["Tid"] = [period]
-        return {"table": "NABP19", "values": values}
-    return None
+        return [{"table": "NABP19", "values": _with_period(values, question)}]
+    if "huspris" in folded or "boligpris" in folded:
+        values = _with_period({}, question)
+        return [
+            {"table": "EJ56", "values": dict(values)},
+            {"table": "BM011", "values": dict(values)},
+        ]
+    if "kontanthjaelp" in folded:
+        return [{"table": "KY21", "values": _with_period({}, question)}]
+    if "indvandrer" in folded:
+        values = _with_period({}, question)
+        return [
+            {"table": "FOLK1E", "values": dict(values)},
+            {"table": "FOLK1C", "values": dict(values)},
+        ]
+    if "befolkningstaethed" in folded:
+        return [{"table": "BY3", "values": _with_period({"FOLKARTAET": ["BEFTAET"]}, question)}]
+    return []
+
+
+def _subject_fetch(question: str) -> dict[str, Any] | None:
+    found = _subject_candidates(question)
+    return found[0] if found else None
 
 
 def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -3009,6 +3212,9 @@ def _place_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
     got = _places_in_facts(facts)
     missing = [name for name in asked if not any(_same_place(name, item) for item in got)]
     if not missing:
+        return ""
+    # One of the asked places was fetched. Keep that figure and name the other later.
+    if got and any(any(_same_place(name, item) for item in got) for name in asked):
         return ""
     missing_text = " og ".join(missing)
     if not got:
