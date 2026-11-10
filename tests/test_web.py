@@ -2179,10 +2179,10 @@ def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
         )
     )
     assert len(children.facts) == 1
-    assert children.facts[0]["value"] == 19171
+    assert children.facts[0]["value"] == 19133
     assert "Viborg" in children.facts[0]["detail"]
     assert "0-17" in children.facts[0]["detail"]
-    assert children.answer.startswith("19.171")
+    assert children.answer.startswith("19.133")
     assert children.show_numbers is True
 
 
@@ -2233,7 +2233,7 @@ def test_scripted_model_recovers_from_the_bad_time_sum() -> None:
 
     result = asyncio.run(_run())
     assert "list_type" not in result.calls[0]["result"]
-    assert "7556" in result.calls[0]["result"]
+    assert "7658" in result.calls[0]["result"]
     assert "22780" not in result.calls[0]["result"]
     assert "not every period" in result.calls[1]["result"]
     assert ">=2015K1" in result.calls[1]["result"]
@@ -2638,3 +2638,134 @@ def test_municipality_population_history_reaches_folk1a() -> None:
         {"table": "BEFOLK1", "values": {"Tid": ["1995", "2001"]}},
     )
     assert kept["table"] == "BEFOLK1"
+
+
+def test_city_rank_follows_the_asked_place_in_the_list() -> None:
+    facts = _verified_urban_facts()
+    second = guard_answer(
+        "Hvilken by er Danmarks næststørste målt på indbyggertal?",
+        "Hovedstadsområdet",
+        facts,
+    )
+    assert "Aarhus" in second
+    assert "305.227" in second
+    assert "1.408.575" not in second
+    third = guard_answer(
+        "Hvilken by er Danmarks tredjestørste målt på indbyggertal?",
+        "Hovedstadsområdet",
+        facts,
+    )
+    assert "Odense" in third and "187.558" in third
+    fifth = guard_answer(
+        "Hvilken by er Danmarks femtestørste målt på indbyggertal?",
+        "Hovedstadsområdet",
+        facts,
+    )
+    assert "Esbjerg" in fifth and "71.371" in fifth
+    esbjerg = guard_answer("Hvor mange indbyggere har byområdet Esbjerg?", "Hovedstaden", facts)
+    assert "71.371" in esbjerg
+    assert "1.408.575" not in esbjerg
+    compared = guard_answer(
+        "Hvilken er størst målt på indbyggertal: byområdet Horsens eller byområdet Randers?",
+        "Hovedstadsområdet",
+        facts,
+    )
+    assert "Horsens" in compared and "65.037" in compared
+    assert "Randers" in compared and "64.764" in compared
+    assert compared.index("Horsens") < compared.index("Randers")
+    top5 = guard_answer(
+        "Hvilke fem byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+        "Roskilde",
+        facts,
+    )
+    assert "1. Hovedstadsområdet" in top5
+    assert "5. Esbjerg" in top5
+    assert "6. Horsens" not in top5
+
+
+def test_both_january_endpoints_stay_on_the_first_quarter() -> None:
+    question = (
+        "Hvor meget voksede befolkningen i Roskilde Kommune fra 1. januar 2015 til 1. januar 2026?"
+    )
+    facts = []
+    for period, value in (
+        ("2015K1", 85_026),
+        ("2015K4", 86_000),
+        ("2026K1", 92_697),
+        ("2026K4", 93_162),
+    ):
+        fact = _population_fact(value, period, "Roskilde")
+        fact["detail"] = "OMRÅDE: Roskilde, ALDER: Alder i alt"
+        facts.append(fact)
+    answer = guard_answer(question, "forkert periode", facts)
+    assert "85.026" in answer
+    assert "92.697" in answer
+    assert "7.671" in answer
+    assert "93.162" not in answer
+    assert "8.136" not in answer
+
+
+def test_an_education_table_total_is_its_15_to_69_population() -> None:
+    question = (
+        "Hvor mange 15-69-årige var der i Danmark i 2025 "
+        "ifølge tabellen over højeste fuldførte uddannelse?"
+    )
+    fact = {
+        "table": "HFUDD11",
+        "period": "2025",
+        "unit": "Antal",
+        "value": 4_157_750,
+        "detail": "BOPOMR: Hele landet, ALDER: Alder i alt, HFUDD: I alt",
+        "unpublished": False,
+    }
+    answer = guard_answer(question, "Alder i alt, ikke 15-69", [fact])
+    assert "4.157.750" in answer
+    assert "ikke for 15-69" not in answer
+
+
+def test_a_municipality_year_before_2008_explains_the_gap() -> None:
+    payload = {
+        "table": "FOLK1A",
+        "unit": "Antal",
+        "rows": [
+            {"OMRÅDE": "Samsø", "ALDER": "Alder i alt", "Tid": "2008K1", "value": 4085},
+        ],
+    }
+    tools = FakeTools({"find_tabel": "[]", "hent_data": json.dumps(payload)})
+    model = ScriptedModel([ChatReply("Jeg fandt ingen tal.", [])])
+    result = asyncio.run(
+        run_turn(
+            model,
+            tools,
+            "Hvor mange indbyggere havde Samsø Kommune i 1995?",
+            max_tool_calls=6,
+        )
+    )
+    assert "1995" in result.answer
+    assert "2008" in result.answer
+    assert "2007" in result.answer
+    assert "fandt ingen tal" not in result.answer.casefold()
+
+
+def test_a_missed_fetch_uses_the_subject_table() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults
+
+    income = apply_fetch_defaults(
+        "Hvad var den gennemsnitlige indkomst i Danmark i 2025?",
+        {"table": "INDKP201", "values": {"OMRÅDE": ["000"], "Tid": ["2025"]}},
+    )
+    assert income["table"] == "INDKP105"
+    assert income["values"]["ENHED"] == ["118"]
+    index = apply_fetch_defaults(
+        "Hvad var forbrugerprisindekset i alt i december 2025?",
+        {"table": "PRIS01", "values": {"Tid": ["2025M12"]}},
+    )
+    assert index["table"] == "PRIS111"
+    assert index["values"]["ENHED"] == ["100"]
+    births = apply_fetch_defaults(
+        "Hvor mange levendefødte var der i Aarhus Kommune i 3. kvartal 2026?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["751"]}},
+    )
+    assert births["table"] == "BEV22"
+    assert births["values"]["BEVÆGELSE"] == ["B02"]
+    assert births["values"]["Tid"] == ["2026K3"]

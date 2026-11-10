@@ -679,6 +679,7 @@ class _TablePreference:
     table_id: str
     all_of: tuple[tuple[str, ...], ...]
     unless: tuple[str, ...] = ()
+    weight: int = 400
 
 
 # One list. Search uses it and nothing else hard-codes these ids.
@@ -758,6 +759,31 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
         "INDKP105",
         (("indkomst", "income"), ("personlig", "personal")),
         ("køn", "alder", "uddannelse", "sex"),
+    ),
+    # Average income in kroner, not equivalised disposable income.
+    _TablePreference(
+        "INDKP105",
+        (("indkomst",), ("gennemsnit",)),
+        ("disponibel", "ækvival", "aekvival", "median"),
+        2500,
+    ),
+    _TablePreference(
+        "BEV22",
+        (("levendefødte", "levendefodte", "fødte"),),
+        ("døde", "dode", "vielse"),
+        1500,
+    ),
+    _TablePreference(
+        "NAN1",
+        (("beskæftigede", "beskaeftigede", "beskæftigelse"), ("nationalregnskab",)),
+        ("ledige", "ledighed"),
+        1500,
+    ),
+    _TablePreference(
+        "NABP19",
+        (("bruttoværditilvækst", "bruttovaerditilvaekst"),),
+        (),
+        1500,
     ),
     _TablePreference(
         "STRAF10",
@@ -842,6 +868,20 @@ def _explicit_table_ids(query: str, tables: list[dict[str, Any]]) -> set[str]:
     return named
 
 
+def _preference_terms_are_tokens(table_id: str, query: str) -> bool:
+    folded = _fold(query)
+    tokens = set(re.findall(r"[0-9a-z]+", folded))
+    for preference in _TABLE_PREFERENCES:
+        if preference.table_id.casefold() != table_id.casefold():
+            continue
+        if any(_term_in_query(folded, term) for term in preference.unless):
+            continue
+        groups = preference.all_of
+        if groups and all(any(_fold(term) in tokens for term in group) for group in groups):
+            return True
+    return False
+
+
 def _preference_boost(table_id: str, query: str, named_ids: set[str]) -> int:
     # A named id is the caller's choice. Do not pull another table in front of it.
     if named_ids:
@@ -854,7 +894,7 @@ def _preference_boost(table_id: str, query: str, named_ids: set[str]) -> int:
             return 0
         groups = preference.all_of
         if groups and all(any(_term_in_query(folded, term) for term in group) for group in groups):
-            return _PREFERENCE_BOOST
+            return preference.weight or _PREFERENCE_BOOST
     return 0
 
 
@@ -949,7 +989,14 @@ def _score_table(
         if best:
             matched += 1
             score += best
-    if matched == 0 and score < 1000:
+    boost = _preference_boost(table_id, folded, named_ids or set())
+    # A preference can introduce a table the title does not mention, but only
+    # when its words are whole query tokens. "arbejdsløshedxyz" is not "ledighed".
+    if (
+        matched == 0
+        and score < 1000
+        and not (boost and _preference_terms_are_tokens(table_id, folded))
+    ):
         return None
     score += matched * 25
     if tokens and matched == len(tokens):
@@ -960,11 +1007,7 @@ def _score_table(
     if table_id.casefold() in named:
         # Above the preference boost, so "ledighed AUF01" stays AUF01.
         score += 1000
-    return (
-        score
-        + _pre_tax_adjustment(folded, haystack_title, tokens)
-        + _preference_boost(table_id, folded, named)
-    )
+    return score + _pre_tax_adjustment(folded, haystack_title, tokens) + boost
 
 
 def _parse_table(data: Any) -> _Table:

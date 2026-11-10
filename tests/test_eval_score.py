@@ -305,7 +305,7 @@ def test_coverage_gap_requires_an_explanation() -> None:
 
 def test_question_file_is_the_fixed_set() -> None:
     questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    assert [item["id"] for item in questions] == list(range(1, 131))
+    assert [item["id"] for item in questions] == list(range(1, 131)) + list(range(201, 301))
     by_id = {item["id"]: item for item in questions}
     growth = {
         106: ("Hvor meget er befolkningen i danmark vokset siden 1989", "1989"),
@@ -425,6 +425,13 @@ def test_question_file_is_the_fixed_set() -> None:
         assert check["variables"]["FOLKARTAET"] == ["FOLKETAL"]
     assert by_id[127]["expect"]["checks"][0]["rank"] == 10
     assert by_id[130]["expect"]["checks"][0]["rank"] == [1, 10]
+    added = [item for item in questions if 201 <= item["id"] <= 300]
+    assert [item["id"] for item in added] == list(range(201, 301))
+    assert by_id[231]["expect"]["checks"][0]["table"] == "INDKP105"
+    assert by_id[233]["expect"]["checks"][0]["table"] == "PRIS111"
+    assert by_id[252]["expect"]["checks"][0]["rank"] == 2
+    assert by_id[243]["expect"]["checks"][0]["table"] == "NAN1"
+    assert by_id[292]["expect"]["kind"] == "coverage_gap"
 
 
 def test_a_transient_group_is_retried_once_and_the_leaf_is_recorded(monkeypatch) -> None:
@@ -503,6 +510,19 @@ def test_a_transient_group_is_retried_once_and_the_leaf_is_recorded(monkeypatch)
     plain = _run_one(settings, question)
     assert calls["n"] == 1
     assert "ValueError" in (plain["error"] or "")
+
+
+def test_million_and_billion_kroner_are_the_same_figure() -> None:
+    """NAHL2 states millions. NAN1 states billions. 3,118,538 mio. is 3,118.5 mia."""
+    question = {
+        "question": "Hvad var Danmarks BNP i løbende priser i 2025?",
+        "expect": {"kind": "figures"},
+    }
+    truth = [Truth("NAN1", [3118.5], ["2025"])]
+    stated = _result("3.118.538 mio. kr. (NAHL2, BNP, løbende priser)")
+    assert classify(question, stated, truth) == "correct"
+    billion = _result("3.118,5 mia. kr.")
+    assert classify(question, billion, truth) == "correct"
 
 
 def test_change_check_adds_the_difference_and_percent() -> None:

@@ -869,33 +869,81 @@ async def run_turn(
             return _turn(question, answer, facts, calls)
 
 
+def _question_years(question: str) -> list[int]:
+    return [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
+
+
+def _stock_before_series(question: str, facts: list[dict[str, Any]]) -> str:
+    """A municipality stock for a year before FOLK1A exists is a coverage gap."""
+    if _asks_for_trend(question) or _asks_for_change(question):
+        return ""
+    place = _municipality_in_question(question)
+    years = _question_years(question)
+    if not place or len(years) != 1 or years[0] >= 2008:
+        return ""
+    numeric = [
+        fact
+        for fact in facts
+        if _single_value(fact) and str(fact.get("table") or "").upper().startswith("FOLK")
+    ]
+    if not numeric:
+        return ""
+    earliest = min(numeric, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    period = str(earliest.get("period") or "")
+    start = re.match(r"(\d{4})", period)
+    if start is None or int(start.group(1)) <= years[0]:
+        return ""
+    table = str(earliest.get("table") or "FOLK1A")
+    return (
+        f"{place} i {table} starter {period_label(period)} med {_da_number(earliest['value'])}, "
+        f"kommunegrænsen efter kommunalreformen i 2007. "
+        f"{years[0]} er ikke med i denne serie."
+    )
+
+
+async def _fetch_arguments(
+    runner: ToolRunner,
+    question: str,
+    arguments: dict[str, Any],
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    call = ToolCall(id="server:fetch", name="hent_data", arguments=arguments, raw={})
+    result = await _invoke(runner, call)
+    calls.append(_trace(call, result))
+    facts.extend(_facts_from("hent_data", result))
+    return _dedupe_facts(facts), calls
+
+
 async def _complete_municipality_history(
     runner: ToolRunner,
     question: str,
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Fetch FOLK1A when a municipality change before 2008 never reached hent_data."""
-    if facts or _january_year(question):
+    """Fetch the obvious table when the model stopped without hent_data."""
+    if facts or _january_year(question) or _asks_city_rank(question):
         return facts, calls
+    subject = _subject_fetch(question)
+    if subject:
+        return await _fetch_arguments(runner, question, subject, facts, calls)
     place = _municipality_in_question(question)
     if not place:
         return facts, calls
     folded = question.casefold()
-    if "siden" not in folded and not _asks_for_change(question):
-        return facts, calls
-    years = [int(year) for year in re.findall(r"\b(?:1[6-9]|20)\d{2}\b", question)]
-    if not years or min(years) >= 2008:
-        return facts, calls
-    arguments = apply_fetch_defaults(
-        question,
-        {"table": "FOLK1A", "values": {"OMRÅDE": [place], "Tid": [">=2008K1"]}},
-    )
-    call = ToolCall(id="server:folk1a", name="hent_data", arguments=arguments, raw={})
-    result = await _invoke(runner, call)
-    calls.append(_trace(call, result))
-    facts.extend(_facts_from("hent_data", result))
-    return _dedupe_facts(facts), calls
+    years = _question_years(question)
+    if years and min(years) < 2008:
+        arguments = {
+            "table": "FOLK1A",
+            "values": {"OMRÅDE": [place], "Tid": [">=2008K1"]},
+        }
+        return await _fetch_arguments(runner, question, arguments, facts, calls)
+    if "indbygg" in folded or "befolk" in folded:
+        if "siden" in folded or _asks_for_change(question):
+            return facts, calls
+        arguments = {"table": "FOLK1A", "values": {"OMRÅDE": [place]}}
+        return await _fetch_arguments(runner, question, arguments, facts, calls)
+    return facts, calls
 
 
 def _assistant_message(reply: ChatReply) -> dict[str, Any]:
@@ -1752,6 +1800,65 @@ def _asks_city_rank(question: str) -> bool:
     return any(word in folded for word in ("storst", "tiende", "flest", "indbygg"))
 
 
+def _city_ordinal(question: str) -> int | None:
+    """2 for næststørste, 5 for femtestørste, 1 for hvilken by er størst. Not a named town."""
+    folded = _fold_place(question)
+    for word, number in (
+        ("tiende", 10),
+        ("niende", 9),
+        ("ottende", 8),
+        ("syvende", 7),
+        ("sjette", 6),
+        ("femte", 5),
+        ("fjerde", 4),
+        ("tredje", 3),
+        ("naest", 2),
+        ("andenstor", 2),
+    ):
+        if word in folded and (
+            word in {"naest", "andenstor"} or "stor" in folded or word == "tiende"
+        ):
+            if word in {"naest", "andenstor"} and "stor" not in folded:
+                continue
+            return number
+    if "hvilken" in folded and "storst" in folded:
+        return 1
+    return None
+
+
+def _city_list_size(question: str) -> int | None:
+    if not _wants_city_list(question):
+        return None
+    folded = _fold_place(question)
+    words = {
+        "to": 2,
+        "tre": 3,
+        "fire": 4,
+        "fem": 5,
+        "seks": 6,
+        "syv": 7,
+        "otte": 8,
+        "ni": 9,
+        "ti": 10,
+    }
+    for word, number in words.items():
+        if re.search(rf"(?<![a-z]){word}(?![a-z])", folded) and "byer" in folded:
+            return number
+    return 10
+
+
+def _cities_named_in(question: str, ranked: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    folded = _fold_place(question)
+    found: list[tuple[str, float]] = []
+    for name, value in ranked:
+        token = _fold_place(name)
+        if len(token) < 4:
+            continue
+        if re.search(rf"(?<![a-z]){re.escape(token)}(?![a-z])", folded):
+            found.append((name, value))
+    return found
+
+
 def _wants_city_list(question: str) -> bool:
     folded = question.casefold()
     if "flest" in folded or "rækkefølge" in folded or "raekkefolge" in folded:
@@ -1824,13 +1931,27 @@ def _city_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
         "Hovedstadsområdet er ét byområde, summen af delene, fordi selve rækken er 0. "
         "Områder uden for byerne tæller ikke med."
     )
-    if _wants_city_list(question):
+    named = _cities_named_in(question, ranked)
+    size = _city_list_size(question)
+    if size:
         lines = [
             f"{index}. {name}: {_da_number(value)}"
-            for index, (name, value) in enumerate(ranked[:10], start=1)
+            for index, (name, value) in enumerate(ranked[:size], start=1)
         ]
         return f"{definition}\n" + "\n".join(lines)
-    number = 10 if "tiende" in question.casefold() else 1
+    if len(named) >= 2:
+        ordered = sorted(named, key=lambda item: (-item[1], _fold_place(item[0])))
+        first, second = ordered[0], ordered[1]
+        return (
+            f"{first[0]} er størst med {_da_number(first[1])} indbyggere. "
+            f"{second[0]} har {_da_number(second[1])}. ({definition})"
+        )
+    number = _city_ordinal(question)
+    if len(named) == 1 and number is None:
+        name, value = named[0]
+        return f"{name} byområde har {_da_number(value)} indbyggere ({definition})"
+    if number is None or number > len(ranked):
+        return None
     name, value = ranked[number - 1]
     return f"{name} er den {number}. største by med {_da_number(value)} indbyggere ({definition})"
 
@@ -1881,10 +2002,20 @@ def _period_year(period: str) -> int | None:
     return int(match.group(1))
 
 
-def _row_in_year(rows: list[dict[str, Any]], year: int, *, last: bool) -> dict[str, Any] | None:
+def _row_in_year(
+    rows: list[dict[str, Any]], year: int, *, last: bool, january: bool = False
+) -> dict[str, Any] | None:
     chosen = [row for row in rows if _period_year(str(row.get("period") or "")) == year]
     if not chosen:
         return None
+    if january:
+        opening = [
+            row
+            for row in chosen
+            if str(row.get("period") or "").upper() in {str(year), f"{year}K1", f"{year}Q1"}
+        ]
+        if opening:
+            return opening[0]
     exact = [row for row in chosen if re.fullmatch(r"\d{4}", str(row.get("period") or "").strip())]
     pool = exact or chosen
     pool.sort(key=lambda row: _period_sort_key(str(row.get("period") or "")))
@@ -1903,8 +2034,9 @@ def _series_bounds(
             return None
         return first, last
     start_year, end_year = span
-    start = _row_in_year(ordered, start_year, last=False)
-    end = _row_in_year(ordered, end_year, last=True)
+    january_years = {int(year) for year in _JANUARY_RE.findall(question)}
+    start = _row_in_year(ordered, start_year, last=False, january=start_year in january_years)
+    end = _row_in_year(ordered, end_year, last=True, january=end_year in january_years)
     missing = [str(year) for year, row in ((start_year, start), (end_year, end)) if row is None]
     if missing:
         return f"{' og '.join(missing)} er ikke med i de hentede tal."
@@ -2181,6 +2313,9 @@ def guard_answer(
             "De hentede tal er ikke en sammenlignelig byrækkefølge."
         )
     if not _asks_for_trend(question):
+        gap = _stock_before_series(question, facts)
+        if gap:
+            return gap
         lines = _selected_lines(question, facts)
         if lines:
             return _with_municipality_note(
@@ -2561,12 +2696,98 @@ _CITY_TABLES = frozenset(
 )
 
 
+def _place_word(question: str) -> str | None:
+    match = re.search(
+        r"([A-Za-zÆØÅæøå][A-Za-zÆØÅæøå-]*)\s+kommune",
+        question,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _asked_period(question: str) -> str | None:
+    quarter = re.search(
+        r"([1-4])\s*\.?\s*kvartal\w*\s+((?:19|20)\d{2})",
+        question,
+        re.IGNORECASE,
+    )
+    if quarter:
+        return f"{quarter.group(2)}K{quarter.group(1)}"
+    years = _question_years(question)
+    if len(years) != 1:
+        return None
+    folded = question.casefold()
+    for index, name in enumerate(_MONTHS, start=1):
+        if name in folded:
+            return f"{years[0]}M{index:02d}"
+    return str(years[0])
+
+
+def _subject_fetch(question: str) -> dict[str, Any] | None:
+    """One published table for a subject the question already names."""
+    folded = _fold_place(question)
+    place = _place_word(question)
+    period = _asked_period(question)
+    if "levendef" in folded:
+        values: dict[str, list[str]] = {"BEVÆGELSE": ["B02"]}
+        if place:
+            values["OMRÅDE"] = [place]
+        if period:
+            values["Tid"] = [period]
+        return {"table": "BEV22", "values": values}
+    if (
+        "gennemsnit" in folded
+        and "indkomst" in folded
+        and "disponibel" not in folded
+        and "aekvival" not in folded
+    ):
+        values = {
+            "ENHED": ["118"],
+            "KOEN": ["MOK"],
+            "ALDER1": ["00"],
+            "INDKINTB": ["000"],
+            "OMRÅDE": [place or "000"],
+        }
+        if period:
+            values["Tid"] = [period]
+        return {"table": "INDKP105", "values": values}
+    if "forbrugerpris" in folded and "braendstof" not in folded and "benzin" not in folded:
+        change = "stigning" in folded or "procent" in folded
+        values = {
+            "VAREGR": ["010000" if "foedevarer" in folded else "000000"],
+            "ENHED": ["300" if change else "100"],
+        }
+        if period:
+            values["Tid"] = [period]
+        return {"table": "PRIS111", "values": values}
+    if "beskaeftig" in folded and "nationalregnskab" in folded:
+        values = {"TRANSAKT": ["EMPM_DC"], "PRISENHED": ["V_M"]}
+        if period:
+            values["Tid"] = [period]
+        return {"table": "NAN1", "values": values}
+    if "bruttovaerditilvaekst" in folded:
+        values = {"TRANSAKT": ["B1GD"], "BRANCHE": ["V"], "PRISENHED": ["V"]}
+        if period:
+            values["Tid"] = [period]
+        return {"table": "NABP19", "values": values}
+    return None
+
+
 def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Correct the code the question already named, before the API call."""
     updated = dict(arguments)
     values = dict(updated.get("values") or {})
     table = str(updated.get("table") or "").upper()
     folded = question.casefold()
+    subject = _subject_fetch(question)
+    if subject:
+        updated["table"] = subject["table"]
+        updated["values"] = subject["values"]
+        updated.pop("sum_from", None)
+        updated.pop("sum_range", None)
+        return updated
     place = _municipality_in_question(question)
     january = _january_year(question)
     if place and table not in {"FOLK1A", "FOLK1AM"} and not (january and table == "BEFOLK3"):
@@ -2753,6 +2974,11 @@ def _age_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
             labels.append(label)
     if not labels or all(_age_label_matches(intent, label) for label in labels):
         return ""
+    # HFUDD11's "Alder i alt" is the table's own 15–69 population, not every age.
+    if all(label.casefold() in {"alder i alt", "i alt", "tot", "total"} for label in labels):
+        tables = {str(fact.get("table") or "").upper() for fact in facts}
+        if tables and all(not table.startswith(("FOLK", "BEFOLK", "FRKM")) for table in tables):
+            return ""
     kind, low, high = intent
     wanted = f"{low}+" if kind == "from" else f"{low}-{high}"
     return f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {wanted}."

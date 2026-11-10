@@ -11,6 +11,13 @@ from statistikbanken_mcp.server import find_tabel, hent_data, set_client, tabeli
 from statistikbanken_mcp.statbank import StatbankClient
 
 
+def test_subject_search_ranks_the_published_table() -> None:
+    assert find_tabel("gennemsnitlig indkomst Danmark", limit=5)[0]["id"] == "INDKP105"
+    assert find_tabel("levendefødte Aarhus", limit=5)[0]["id"] == "BEV22"
+    assert find_tabel("beskæftigede nationalregnskab", limit=5)[0]["id"] == "NAN1"
+    assert find_tabel("bruttoværditilvækst Danmark", limit=3)[0]["id"] == "NABP19"
+
+
 def test_find_tabel_befolkning_leads_with_folk1a() -> None:
     hits = find_tabel("befolkning", limit=5)
     assert hits[0] == {

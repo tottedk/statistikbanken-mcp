@@ -541,6 +541,56 @@ async def _stdio_session() -> None:
         assert "Traceback" not in text
 
 
+def test_subject_tables_match_the_published_figures(live_client: StatbankClient) -> None:
+    """Known figures checked against api.statbank.dk on 10 Nov 2026."""
+    from statistikbanken_mcp.web import rank_urban_areas
+
+    income = hent_data(
+        "INDKP105",
+        {
+            "OMRÅDE": ["000"],
+            "ENHED": ["118"],
+            "KOEN": ["MOK"],
+            "ALDER1": ["00"],
+            "INDKINTB": ["000"],
+            "Tid": ["2025"],
+        },
+    )
+    assert income["rows"][0]["value"] == 428_795
+    prices = hent_data(
+        "PRIS111",
+        {"VAREGR": ["000000"], "ENHED": ["100"], "Tid": ["2025M12"]},
+    )
+    assert prices["rows"][0]["value"] == 121.2
+    education = hent_data(
+        "HFUDD11",
+        {
+            "BOPOMR": ["000"],
+            "HERKOMST": ["TOT"],
+            "HFUDD": ["TOT"],
+            "ALDER": ["TOT"],
+            "KØN": ["TOT"],
+            "Tid": ["2025"],
+        },
+    )
+    assert education["rows"][0]["value"] == 4_157_750
+    births = hent_data(
+        "BEV22",
+        {"OMRÅDE": ["751"], "BEVÆGELSE": ["B02"], "KØN": ["*"], "Tid": ["2026K3"]},
+    )
+    assert sum(row["value"] for row in births["rows"]) == 1_250
+    areas = hent_data("BY3", {"FOLKARTAET": ["FOLKETAL"], "BYER": ["*"], "Tid": ["2026"]})
+    ranked = rank_urban_areas(
+        [
+            (str(row.get("BYER") or ""), float(row["value"]))
+            for row in areas["rows"]
+            if isinstance(row.get("value"), int | float) and not isinstance(row.get("value"), bool)
+        ]
+    )
+    assert ranked[1][0] == "Aarhus"
+    assert int(ranked[1][1]) == 305_227
+
+
 def _text(result: object) -> str:
     content = getattr(result, "content", None)
     assert content

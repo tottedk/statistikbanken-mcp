@@ -3009,5 +3009,3386 @@
       ]
     },
     "note": "Same BY3 definition as question 127. The ten names have to appear in descending order, with their populations."
+  },
+  {
+    "id": 201,
+    "question": "Hvor mange indbyggere har Herning Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "657"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 202,
+    "question": "Hvor mange indbyggere har Holstebro Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "661"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 203,
+    "question": "Hvor mange indbyggere har Fredericia Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "607"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 204,
+    "question": "Hvor mange indbyggere har Svendborg Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "479"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 205,
+    "question": "Hvor mange indbyggere har Køge Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "259"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 206,
+    "question": "Hvor mange indbyggere har Hjørring Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "860"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 207,
+    "question": "Hvor mange indbyggere har Haderslev Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "510"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 208,
+    "question": "Hvor mange indbyggere har Skive Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "779"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 209,
+    "question": "Hvor mange indbyggere har Thisted Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "787"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 210,
+    "question": "Hvor mange indbyggere har Holbæk Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "316"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 211,
+    "question": "Hvor mange kvinder bor der i Horsens Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "615"
+            ],
+            "KØN": [
+              "2"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 212,
+    "question": "Hvor mange kvinder bor der i Næstved Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "370"
+            ],
+            "KØN": [
+              "2"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 213,
+    "question": "Hvor mange kvinder bor der i Helsingør Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "217"
+            ],
+            "KØN": [
+              "2"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 214,
+    "question": "Hvor mange kvinder bor der i Sønderborg Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "540"
+            ],
+            "KØN": [
+              "2"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 215,
+    "question": "Hvor mange mænd bor der i Skive Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "779"
+            ],
+            "KØN": [
+              "1"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 216,
+    "question": "Hvor mange mænd bor der i Thisted Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "787"
+            ],
+            "KØN": [
+              "1"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 217,
+    "question": "Hvor mange personer på 65 år og derover bor der i Varde Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "573"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "65",
+              "66",
+              "67",
+              "68",
+              "69",
+              "70",
+              "71",
+              "72",
+              "73",
+              "74",
+              "75",
+              "76",
+              "77",
+              "78",
+              "79",
+              "80",
+              "81",
+              "82",
+              "83",
+              "84",
+              "85",
+              "86",
+              "87",
+              "88",
+              "89",
+              "90",
+              "91",
+              "92",
+              "93",
+              "94",
+              "95",
+              "96",
+              "97",
+              "98",
+              "99",
+              "100",
+              "101",
+              "102",
+              "103",
+              "104",
+              "105",
+              "106",
+              "107",
+              "108",
+              "109",
+              "110",
+              "111",
+              "112",
+              "113",
+              "114",
+              "115",
+              "116",
+              "117",
+              "118",
+              "119",
+              "120",
+              "121",
+              "122",
+              "123",
+              "124",
+              "125"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 218,
+    "question": "Hvor mange personer på 65 år og derover bor der i Nyborg Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "450"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "65",
+              "66",
+              "67",
+              "68",
+              "69",
+              "70",
+              "71",
+              "72",
+              "73",
+              "74",
+              "75",
+              "76",
+              "77",
+              "78",
+              "79",
+              "80",
+              "81",
+              "82",
+              "83",
+              "84",
+              "85",
+              "86",
+              "87",
+              "88",
+              "89",
+              "90",
+              "91",
+              "92",
+              "93",
+              "94",
+              "95",
+              "96",
+              "97",
+              "98",
+              "99",
+              "100",
+              "101",
+              "102",
+              "103",
+              "104",
+              "105",
+              "106",
+              "107",
+              "108",
+              "109",
+              "110",
+              "111",
+              "112",
+              "113",
+              "114",
+              "115",
+              "116",
+              "117",
+              "118",
+              "119",
+              "120",
+              "121",
+              "122",
+              "123",
+              "124",
+              "125"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 219,
+    "question": "Hvor mange personer på 65 år og derover bor der i Holstebro Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "661"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "65",
+              "66",
+              "67",
+              "68",
+              "69",
+              "70",
+              "71",
+              "72",
+              "73",
+              "74",
+              "75",
+              "76",
+              "77",
+              "78",
+              "79",
+              "80",
+              "81",
+              "82",
+              "83",
+              "84",
+              "85",
+              "86",
+              "87",
+              "88",
+              "89",
+              "90",
+              "91",
+              "92",
+              "93",
+              "94",
+              "95",
+              "96",
+              "97",
+              "98",
+              "99",
+              "100",
+              "101",
+              "102",
+              "103",
+              "104",
+              "105",
+              "106",
+              "107",
+              "108",
+              "109",
+              "110",
+              "111",
+              "112",
+              "113",
+              "114",
+              "115",
+              "116",
+              "117",
+              "118",
+              "119",
+              "120",
+              "121",
+              "122",
+              "123",
+              "124",
+              "125"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 220,
+    "question": "Hvor mange indbyggere har Tønder Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "550"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 221,
+    "question": "Hvor mange 0-17-årige bor der i Billund Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "530"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15",
+              "16",
+              "17"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 222,
+    "question": "Hvor mange 0-17-årige bor der i Odder Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "727"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15",
+              "16",
+              "17"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 223,
+    "question": "Hvor mange 0-17-årige bor der i Rebild Kommune?",
+    "category": "breakdown",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "840"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "0",
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15",
+              "16",
+              "17"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 224,
+    "question": "Hvor mange nettoledige var der i Danmark i september 2026, sæsonkorrigeret?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUS07",
+          "variables": {
+            "YD": [
+              "NET"
+            ],
+            "SAESONFAK": [
+              "10"
+            ]
+          },
+          "time": [
+            "2026M09"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 225,
+    "question": "Hvor mange bruttoledige var der i Danmark i september 2026, sæsonkorrigeret?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUS07",
+          "variables": {
+            "YD": [
+              "TOT"
+            ],
+            "SAESONFAK": [
+              "10"
+            ]
+          },
+          "time": [
+            "2026M09"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 226,
+    "question": "Hvor mange fuldtidsledige var der i gennemsnit i Næstved Kommune i 2025?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUL01",
+          "variables": {
+            "OMRÅDE": [
+              "370"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "AKASSE": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 227,
+    "question": "Hvor mange fuldtidsledige var der i gennemsnit i Helsingør Kommune i 2025?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUL01",
+          "variables": {
+            "OMRÅDE": [
+              "217"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "AKASSE": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 228,
+    "question": "Hvad var ledighedsprocenten i Aarhus Kommune i september 2026?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUP01",
+          "variables": {
+            "OMRÅDE": [
+              "751"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2026M09"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 229,
+    "question": "Hvad var ledighedsprocenten i Odense Kommune i september 2026?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUP01",
+          "variables": {
+            "OMRÅDE": [
+              "461"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2026M09"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 230,
+    "question": "Hvor mange fuldtidsledige kvinder var der i hele landet i september 2026?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUF01",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "AKASSE": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "K"
+            ]
+          },
+          "time": [
+            "2026M09"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 231,
+    "question": "Hvad var den gennemsnitlige indkomst i Danmark i 2025?",
+    "category": "income",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "INDKP105",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "ENHED": [
+              "118"
+            ],
+            "KOEN": [
+              "MOK"
+            ],
+            "ALDER1": [
+              "00"
+            ],
+            "INDKINTB": [
+              "000"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 232,
+    "question": "Hvad var den gennemsnitlige indkomst i Esbjerg Kommune i 2025?",
+    "category": "income",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "INDKP105",
+          "variables": {
+            "OMRÅDE": [
+              "561"
+            ],
+            "ENHED": [
+              "118"
+            ],
+            "KOEN": [
+              "MOK"
+            ],
+            "ALDER1": [
+              "00"
+            ],
+            "INDKINTB": [
+              "000"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 233,
+    "question": "Hvad var forbrugerprisindekset i alt i december 2025?",
+    "category": "prices",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS111",
+          "variables": {
+            "VAREGR": [
+              "000000"
+            ],
+            "ENHED": [
+              "100"
+            ]
+          },
+          "time": [
+            "2025M12"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 234,
+    "question": "Hvad var årsstigningen i forbrugerprisindekset i alt i december 2025?",
+    "category": "prices",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS111",
+          "variables": {
+            "VAREGR": [
+              "000000"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": [
+            "2025M12"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 235,
+    "question": "Hvad var årsstigningen i priserne på fødevarer og ikke-alkoholiske drikkevarer i december 2025?",
+    "category": "prices",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "PRIS111",
+          "variables": {
+            "VAREGR": [
+              "010000"
+            ],
+            "ENHED": [
+              "300"
+            ]
+          },
+          "time": [
+            "2025M12"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 236,
+    "question": "Hvor mange beboede boliger (boliger med CPR-tilmeldte personer) var der i Danmark i 2026?",
+    "category": "housing",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BOL101",
+          "variables": {
+            "OMRÅDE": [
+              "000"
+            ],
+            "BEBO": [
+              "1000"
+            ],
+            "ANVENDELSE": [
+              "*"
+            ],
+            "UDLFORH": [
+              "*"
+            ],
+            "EJER": [
+              "*"
+            ],
+            "OPFØRELSESÅR": [
+              "*"
+            ]
+          },
+          "time": [
+            "2026"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 237,
+    "question": "Hvor mange beboede boliger (boliger med CPR-tilmeldte personer) var der i Esbjerg Kommune i 2026?",
+    "category": "housing",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BOL101",
+          "variables": {
+            "OMRÅDE": [
+              "561"
+            ],
+            "BEBO": [
+              "1000"
+            ],
+            "ANVENDELSE": [
+              "*"
+            ],
+            "UDLFORH": [
+              "*"
+            ],
+            "EJER": [
+              "*"
+            ],
+            "OPFØRELSESÅR": [
+              "*"
+            ]
+          },
+          "time": [
+            "2026"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 238,
+    "question": "Hvor mange beboede boliger (boliger med CPR-tilmeldte personer) var der i Viborg Kommune i 2026?",
+    "category": "housing",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BOL101",
+          "variables": {
+            "OMRÅDE": [
+              "791"
+            ],
+            "BEBO": [
+              "1000"
+            ],
+            "ANVENDELSE": [
+              "*"
+            ],
+            "UDLFORH": [
+              "*"
+            ],
+            "EJER": [
+              "*"
+            ],
+            "OPFØRELSESÅR": [
+              "*"
+            ]
+          },
+          "time": [
+            "2026"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 239,
+    "question": "Hvor mange 15-69-årige var der i Danmark i 2025 ifølge tabellen over højeste fuldførte uddannelse?",
+    "category": "education",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "HFUDD11",
+          "variables": {
+            "BOPOMR": [
+              "000"
+            ],
+            "HERKOMST": [
+              "TOT"
+            ],
+            "HFUDD": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 240,
+    "question": "Hvor mange 15-69-årige var der i Esbjerg Kommune i 2025 ifølge tabellen over højeste fuldførte uddannelse?",
+    "category": "education",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "HFUDD11",
+          "variables": {
+            "BOPOMR": [
+              "561"
+            ],
+            "HERKOMST": [
+              "TOT"
+            ],
+            "HFUDD": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 241,
+    "question": "Hvor mange nye personbiler blev registreret i Danmark i september 2026?",
+    "category": "transport",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIL51",
+          "variables": {
+            "EJER": [
+              "1000"
+            ],
+            "DRIV": [
+              "20200"
+            ]
+          },
+          "time": [
+            "2026M09"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 242,
+    "question": "Hvor mange nye personbiler blev registreret i Danmark i alt i 2025?",
+    "category": "transport",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BIL51",
+          "variables": {
+            "EJER": [
+              "1000"
+            ],
+            "DRIV": [
+              "20200"
+            ]
+          },
+          "time": {
+            "year": "2025",
+            "grain": "month"
+          },
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 243,
+    "question": "Hvad var Danmarks BNP i løbende priser i 2025?",
+    "category": "economy",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "NAN1",
+          "variables": {
+            "TRANSAKT": [
+              "B1GQK"
+            ],
+            "PRISENHED": [
+              "V_M"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 244,
+    "question": "Hvad var den reale vækst i Danmarks BNP i 2025?",
+    "category": "economy",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "NAN1",
+          "variables": {
+            "TRANSAKT": [
+              "B1GQK"
+            ],
+            "PRISENHED": [
+              "L_V"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 245,
+    "question": "Hvor mange beskæftigede var der i Danmark i 2025 ifølge nationalregnskabet?",
+    "category": "economy",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "NAN1",
+          "variables": {
+            "TRANSAKT": [
+              "EMPM_DC"
+            ],
+            "PRISENHED": [
+              "V_M"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 246,
+    "question": "Hvad var bruttoværditilvæksten i Danmark i løbende priser i 2025?",
+    "category": "economy",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "NABP19",
+          "variables": {
+            "TRANSAKT": [
+              "B1GD"
+            ],
+            "BRANCHE": [
+              "V"
+            ],
+            "PRISENHED": [
+              "V"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 247,
+    "question": "Hvor mange døde var der i Danmark i 2025?",
+    "category": "health",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "DOD",
+          "variables": {
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "*"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 248,
+    "question": "Hvor mange mænd døde i Danmark i 2025?",
+    "category": "health",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "DOD",
+          "variables": {
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "M"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 249,
+    "question": "Hvor mange levendefødte var der i Aarhus Kommune i 3. kvartal 2026?",
+    "category": "health",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEV22",
+          "variables": {
+            "OMRÅDE": [
+              "751"
+            ],
+            "BEVÆGELSE": [
+              "B02"
+            ],
+            "KØN": [
+              "*"
+            ]
+          },
+          "time": [
+            "2026K3"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 250,
+    "question": "Hvor mange levendefødte var der i Odense Kommune i 3. kvartal 2026?",
+    "category": "health",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEV22",
+          "variables": {
+            "OMRÅDE": [
+              "461"
+            ],
+            "BEVÆGELSE": [
+              "B02"
+            ],
+            "KØN": [
+              "*"
+            ]
+          },
+          "time": [
+            "2026K3"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 random; live api 2026-11-10"
+  },
+  {
+    "id": 251,
+    "question": "Hvilken by er Danmarks største målt på indbyggertal?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 1
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 252,
+    "question": "Hvilken by er Danmarks næststørste målt på indbyggertal?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 2
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 253,
+    "question": "Hvilken by er Danmarks tredjestørste målt på indbyggertal?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 3
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 254,
+    "question": "Hvilken by er Danmarks femtestørste målt på indbyggertal?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 5
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 255,
+    "question": "Hvilken by er Danmarks tiende største målt på indbyggertal?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": 10
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 256,
+    "question": "Hvilke fem byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": [
+            1,
+            5
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 257,
+    "question": "Hvilke ti byer i Danmark har flest indbyggere, i faldende rækkefølge?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": [
+            1,
+            10
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 258,
+    "question": "Hvor mange indbyggere har byområdet Esbjerg?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "56111196"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 259,
+    "question": "Hvor mange indbyggere har byområdet Aarhus?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "75111045"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 260,
+    "question": "Hvilken er størst målt på indbyggertal: byområdet Horsens eller byområdet Randers?",
+    "category": "geography",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BY3",
+          "variables": {
+            "FOLKARTAET": [
+              "FOLKETAL"
+            ],
+            "BYER": [
+              "*"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "urban_rank",
+          "rank": [
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 261,
+    "question": "Hvor meget steg befolkningen i Danmark fra 1970 til 1980?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1970",
+            "1980"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1970",
+            "1980"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 262,
+    "question": "Hvor meget steg befolkningen i Danmark fra 1990 til 2000?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1990",
+            "2000"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1990",
+            "2000"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 263,
+    "question": "Hvor meget voksede Danmarks befolkning fra 2000 til 2010?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2000",
+            "2010"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2000",
+            "2010"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 264,
+    "question": "Hvor mange flere indbyggere var der i Danmark i 2010 end i 2000?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2000",
+            "2010"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2000",
+            "2010"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 265,
+    "question": "Hvad var befolkningstilvæksten i Danmark mellem 2010 og 2020, både i personer og procent?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2010",
+            "2020"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2010",
+            "2020"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 266,
+    "question": "Hvor meget steg befolkningen i Danmark i perioden 2016–2020?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2016",
+            "2020"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2016",
+            "2020"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 267,
+    "question": "Hvor stor var forskellen på Danmarks befolkning i 1985 og 1990?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1985",
+            "1990"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference"
+          ]
+        },
+        {
+          "table": "BEFOLK1",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1985",
+            "1990"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 268,
+    "question": "Hvor mange indbyggere havde Danmark 1. januar 1975?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1975"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 269,
+    "question": "Hvor mange indbyggere havde Danmark 1. januar 1992?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "1992"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 270,
+    "question": "Hvor mange indbyggere havde Danmark 1. januar 2012?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEFOLK2",
+          "variables": {
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2012"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 271,
+    "question": "Hvor mange indbyggere havde Aalborg Kommune 1. januar 2026?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "851"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2026K1"
+          ],
+          "aggregate": "values"
+        },
+        {
+          "table": "BEFOLK3",
+          "variables": {
+            "OMRÅDE": [
+              "851"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ]
+          },
+          "time": [
+            "2026"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 272,
+    "question": "Hvor mange indbyggere havde Aarhus Kommune 1. januar 2026?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "751"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2026K1"
+          ],
+          "aggregate": "values"
+        },
+        {
+          "table": "BEFOLK3",
+          "variables": {
+            "OMRÅDE": [
+              "751"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ]
+          },
+          "time": [
+            "2026"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 273,
+    "question": "Hvor mange indbyggere havde Odense Kommune 1. januar 2025?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "461"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025K1"
+          ],
+          "aggregate": "values"
+        },
+        {
+          "table": "BEFOLK3",
+          "variables": {
+            "OMRÅDE": [
+              "461"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 274,
+    "question": "Hvor mange indbyggere havde Horsens Kommune 1. januar 2020?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "615"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2020K1"
+          ],
+          "aggregate": "values"
+        },
+        {
+          "table": "BEFOLK3",
+          "variables": {
+            "OMRÅDE": [
+              "615"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ]
+          },
+          "time": [
+            "2020"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 275,
+    "question": "Hvor mange indbyggere havde Roskilde Kommune 1. januar 2015?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "265"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2015K1"
+          ],
+          "aggregate": "values"
+        },
+        {
+          "table": "BEFOLK3",
+          "variables": {
+            "OMRÅDE": [
+              "265"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ]
+          },
+          "time": [
+            "2015"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 276,
+    "question": "Hvor mange indbyggere havde Helsingør Kommune 1. januar 2026?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "217"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2026K1"
+          ],
+          "aggregate": "values"
+        },
+        {
+          "table": "BEFOLK3",
+          "variables": {
+            "OMRÅDE": [
+              "217"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ]
+          },
+          "time": [
+            "2026"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 277,
+    "question": "Hvor meget er befolkningen i Horsens Kommune vokset fra 1. januar 2008 til seneste kvartal?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "615"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1",
+            "latest"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 278,
+    "question": "Hvor meget er befolkningen i Aalborg Kommune vokset fra 1. januar 2008 til seneste kvartal?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "851"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1",
+            "latest"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 279,
+    "question": "Hvor mange flere indbyggere har Aarhus Kommune i seneste kvartal end 1. januar 2008?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "751"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1",
+            "latest"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 280,
+    "question": "Hvor meget voksede befolkningen i Roskilde Kommune fra 1. januar 2015 til 1. januar 2026?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "265"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2015K1",
+            "2026K1"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 281,
+    "question": "Hvad var befolkningstilvæksten i Helsingør Kommune mellem 1. januar 2020 og 1. januar 2026, i personer og procent?",
+    "category": "time_series",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "217"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2020K1",
+            "2026K1"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 282,
+    "question": "Hvor mange indbyggere har Læsø Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "825"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 283,
+    "question": "Hvor mange indbyggere har Fanø Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "563"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 284,
+    "question": "Hvor mange indbyggere har Samsø Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "741"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 285,
+    "question": "Hvor mange indbyggere har Ærø Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "492"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 286,
+    "question": "Hvor mange indbyggere har Dragør Kommune i seneste kvartal?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "155"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 287,
+    "question": "Hvor mange indbyggere havde Læsø Kommune 1. januar 2026?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "825"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2026K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 288,
+    "question": "Hvor mange indbyggere havde Fanø Kommune 1. januar 2008?",
+    "category": "periods",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "563"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 289,
+    "question": "Hvor mange kvinder bor der i Læsø Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "825"
+            ],
+            "KØN": [
+              "2"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 290,
+    "question": "Hvor meget er befolkningen i Horsens Kommune vokset siden 2000?",
+    "category": "geography",
+    "expect": {
+      "kind": "coverage_gap",
+      "require_any": [
+        "2008",
+        "2007",
+        "starter",
+        "reform"
+      ],
+      "require_all": [
+        [
+          "2007",
+          "kommunalreform",
+          "kommunegræn"
+        ],
+        [
+          "ikke med",
+          "før 2008",
+          "foer 2008"
+        ]
+      ],
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "615"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1",
+            "latest"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 291,
+    "question": "Hvor meget er befolkningen i Aalborg Kommune vokset siden 2000?",
+    "category": "geography",
+    "expect": {
+      "kind": "coverage_gap",
+      "require_any": [
+        "2008",
+        "2007",
+        "starter",
+        "reform"
+      ],
+      "require_all": [
+        [
+          "2007",
+          "kommunalreform",
+          "kommunegræn"
+        ],
+        [
+          "ikke med",
+          "før 2008",
+          "foer 2008"
+        ]
+      ],
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "851"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1",
+            "latest"
+          ],
+          "aggregate": "values",
+          "also": [
+            "difference",
+            "percent"
+          ]
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 292,
+    "question": "Hvor mange indbyggere havde Samsø Kommune i 1995?",
+    "category": "geography",
+    "expect": {
+      "kind": "coverage_gap",
+      "require_any": [
+        "2008",
+        "starter",
+        "før",
+        "ikke"
+      ],
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "741"
+            ],
+            "KØN": [
+              "TOT"
+            ],
+            "ALDER": [
+              "IALT"
+            ],
+            "CIVILSTAND": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2008K1"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 293,
+    "question": "Hvor mange boede der i Danmark ifølge folketællingen i 1933?",
+    "category": "historical",
+    "expect": {
+      "kind": "coverage_gap",
+      "require_any": [
+        "1930",
+        "1935",
+        "ikke",
+        "har ikke"
+      ],
+      "checks": [
+        {
+          "table": "FT",
+          "variables": {
+            "HOVEDDELE": [
+              "000"
+            ]
+          },
+          "time": [
+            "1930"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 294,
+    "question": "Hvor mange mennesker bor der i kolding",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "621"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ],
+      "require_all": [
+        [
+          "befolkning"
+        ],
+        [
+          "kommune"
+        ],
+        [
+          "alder i alt",
+          "alle aldre"
+        ]
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 295,
+    "question": "Hvor mange bor der i silkeborg",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "740"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ],
+      "require_all": [
+        [
+          "befolkning"
+        ],
+        [
+          "kommune"
+        ],
+        [
+          "alder i alt",
+          "alle aldre"
+        ]
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 296,
+    "question": "Hvor mange indbyggere har Vejle Kommune?",
+    "category": "municipality",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FOLK1A",
+          "variables": {
+            "OMRÅDE": [
+              "630"
+            ]
+          },
+          "time": "latest",
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 297,
+    "question": "Hvor mange fuldtidsledige var der i gennemsnit i Læsø Kommune i 2025?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUL01",
+          "variables": {
+            "OMRÅDE": [
+              "825"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "AKASSE": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 298,
+    "question": "Hvor mange fuldtidsledige var der i gennemsnit i Fanø Kommune i 2025?",
+    "category": "labour",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "AUL01",
+          "variables": {
+            "OMRÅDE": [
+              "563"
+            ],
+            "YDELSESTYPE": [
+              "TOT"
+            ],
+            "AKASSE": [
+              "TOT"
+            ],
+            "ALDER": [
+              "TOT"
+            ],
+            "KØN": [
+              "TOT"
+            ]
+          },
+          "time": [
+            "2025"
+          ],
+          "aggregate": "values"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 299,
+    "question": "Hvor mange levendefødte var der i Aalborg Kommune i 3. kvartal 2026?",
+    "category": "health",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "BEV22",
+          "variables": {
+            "OMRÅDE": [
+              "851"
+            ],
+            "BEVÆGELSE": [
+              "B02"
+            ],
+            "KØN": [
+              "*"
+            ]
+          },
+          "time": [
+            "2026K3"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
+  },
+  {
+    "id": 300,
+    "question": "Hvor mange indbyggere forventes Danmark at have i 2050 ifølge befolkningsfremskrivningen?",
+    "category": "concept",
+    "expect": {
+      "kind": "figures",
+      "checks": [
+        {
+          "table": "FRDK126",
+          "variables": {
+            "HERKOMST": [
+              "*"
+            ],
+            "KØN": [
+              "*"
+            ],
+            "ALDER": [
+              "*"
+            ]
+          },
+          "time": [
+            "2050"
+          ],
+          "aggregate": "sum"
+        }
+      ]
+    },
+    "note": "eval100 hard; live api 2026-11-10"
   }
 ]
