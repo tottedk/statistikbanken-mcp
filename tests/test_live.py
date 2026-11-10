@@ -670,6 +670,27 @@ def test_subject_tables_match_the_published_figures(live_client: StatbankClient)
     assert int(ranked[1][1]) == 305_227
 
 
+def test_quarters_stay_quarters_and_the_price_table_ranks(live_client: StatbankClient) -> None:
+    """A bare year in a question is not averaged. PRIS111 is the price index."""
+    kept = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["791"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2008", "2026"]},
+        question="Hvor meget er befolkningen i Viborg Kommune vokset siden 2000?",
+    )
+    by_period = {row["Tid"]: row["value"] for row in kept["rows"]}
+    assert "2008" not in by_period
+    assert by_period["2008K1"] == 92_084
+    assert isinstance(by_period["2008K1"], int)
+    assert by_period["2026K4"] == 98_282
+    assert isinstance(by_period["2026K4"], int)
+    assert find_tabel("forbrugerprisindekset i alt", limit=3)[0]["id"] == "PRIS111"
+    place = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Lyngby"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2026K4"]},
+    )
+    assert place["rows"][0]["OMRÅDE"] == "Lyngby-Taarbæk"
+
+
 def test_compute_rank_group_and_required_code(live_client: StatbankClient) -> None:
     """Known Esbjerg stocks, the municipality rank, a named group, and a required code."""
     from statistikbanken_mcp.server import beregn

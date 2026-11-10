@@ -3011,6 +3011,157 @@ def test_a_named_group_is_not_replaced_by_the_total() -> None:
     assert chosen["KØN"] == ["2"]
 
 
+def test_a_question_keeps_each_quarter_instead_of_a_year_average() -> None:
+    from statistikbanken_mcp.server import hent_data
+
+    kept = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["Esbjerg"], "ALDER": ["IALT"], "Tid": ["2025"]},
+        question="Hvor mange indbyggere havde Esbjerg Kommune i 2025?",
+    )
+    assert [row["Tid"] for row in kept["rows"]] == ["2025K1", "2025K2", "2025K3", "2025K4"]
+    assert all(isinstance(row["value"], int) for row in kept["rows"])
+    assert kept["rows"][0]["value"] != 115029
+
+
+def test_the_server_fallback_respects_the_tool_cap() -> None:
+    payload = json.dumps(
+        {
+            "table": "FOLK1A",
+            "unit": "Antal",
+            "rows": [
+                {"OMRÅDE": "Horsens", "ALDER": "Alder i alt", "Tid": "2026K4", "value": 98000}
+            ],
+        }
+    )
+    tools = FakeTools({"find_tabel": "[]", "hent_data": payload})
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("find_tabel", {"query": "a"}, "c1")]),
+            ChatReply("", [_call("find_tabel", {"query": "b"}, "c2")]),
+            ChatReply("Ingen tal.", []),
+        ]
+    )
+    result = asyncio.run(
+        run_turn(
+            model,
+            tools,
+            "Hvor mange indbyggere har Horsens Kommune?",
+            max_tool_calls=2,
+        )
+    )
+    assert len(result.calls) == 2
+    assert all(call["name"] == "find_tabel" for call in result.calls)
+    assert "98.000" not in result.answer
+
+
+def test_english_largest_by_population_names_one_municipality() -> None:
+    facts = []
+    for place, value in (
+        ("Hele landet", 6_000_000),
+        ("Aarhus", 381_363),
+        ("Esbjerg", 114_766),
+    ):
+        fact = _population_fact(value, "2026K4", place)
+        fact["detail"] = f"OMRÅDE: {place}, ALDER: Alder i alt"
+        facts.append(fact)
+    answer = guard_answer("Which municipality is the largest by population?", "dump", facts)
+    assert "Aarhus" in answer
+    assert "381.363" in answer
+    assert "6.000.000" not in answer
+    assert "114.766" not in answer
+
+
+def test_density_unit_spellings_use_the_same_figure() -> None:
+    facts = [
+        _population_fact(10_000, "2026", "Fanø"),
+        {
+            "table": "AREAL",
+            "period": "2026",
+            "unit": "km2",
+            "value": 50,
+            "detail": "Areal: Fanø",
+        },
+    ]
+    facts[0]["detail"] = "OMRÅDE: Fanø"
+    for question in (
+        "Hvad er befolkningstætheden pr. km²?",
+        "What is the density per km2?",
+        "Hvor mange pr. kvadratkilometer?",
+    ):
+        answer = guard_answer(question, "kun tekst", facts)
+        assert "200" in answer, question
+
+
+def test_a_parish_figure_is_not_called_a_municipality() -> None:
+    fact = _population_fact(1_200, "2026", "Ribe Sogn")
+    fact["table"] = "FOLK1A"
+    fact["detail"] = "OMRÅDE: Ribe Sogn, ALDER: Alder i alt"
+    answer = guard_answer("Hvor mange bor i Ribe sogn?", "1.200", [fact])
+    assert "1.200" in answer
+    assert "kommune" not in answer.casefold()
+
+
+def test_an_open_age_is_a_sum_when_the_model_omits_it() -> None:
+    from statistikbanken_mcp.web import apply_age_intent
+
+    fetched = apply_age_intent(
+        "Hvor mange er over 80 i Ringkøbing-Skjern Kommune?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["760"]}},
+    )
+    assert fetched["sum_from"]["ALDER"] == "80"
+    older = apply_age_intent(
+        "Hvor mange er 80 år og derover i Ringkøbing-Skjern?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["760"], "ALDER": ["80"]}},
+    )
+    assert older["sum_from"]["ALDER"] == "80"
+    assert "ALDER" not in older.get("values", {})
+
+
+def test_both_sexes_are_answered() -> None:
+    fact = _population_fact(57_000, "2026K4", "Horsens")
+    fact["detail"] = "OMRÅDE: Horsens, KØN: Kvinder, ALDER: Alder i alt"
+    answer = guard_answer(
+        "Hvor mange mænd og kvinder bor i Horsens Kommune?",
+        "57.000",
+        [fact],
+    )
+    assert "57.000" in answer
+    assert "mænd" in answer.casefold()
+    assert "ikke" in answer.casefold()
+
+
+def test_a_false_rank_and_a_wrong_period_are_corrected() -> None:
+    facts = []
+    for place, value in (("Aarhus", 381_363), ("Esbjerg", 114_766)):
+        fact = _population_fact(value, "2026K4", place)
+        fact["detail"] = f"OMRÅDE: {place}, ALDER: Alder i alt"
+        facts.append(fact)
+    rank = guard_answer("Esbjerg er den største kommune, ikke?", "Esbjerg", facts)
+    assert "Aarhus" in rank
+    assert "ikke" in rank.casefold()
+    stock = _population_fact(114_766, "2026K4", "Esbjerg")
+    stock["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"
+    period = guard_answer(
+        "Esbjerg Kommune havde 114.766 indbyggere i 2024.",
+        "114.766",
+        [stock],
+    )
+    assert "2026" in period
+    assert "2024" in period
+    assert "ikke" in period.casefold()
+
+
+def test_a_named_month_is_not_replaced_by_the_year() -> None:
+    from statistikbanken_mcp.web import apply_fetch_defaults
+
+    fetched = apply_fetch_defaults(
+        "Hvad var forbrugerprisindekset i december 2025?",
+        {"table": "PRIS111", "values": {"Tid": ["2025"]}},
+    )
+    assert fetched["values"]["Tid"] == ["2025M12"]
+
+
 def test_an_instruction_injection_does_not_drop_the_figure() -> None:
     fact = _population_fact(114_766, "2026K4", "Esbjerg")
     fact["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"

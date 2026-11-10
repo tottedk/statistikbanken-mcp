@@ -840,7 +840,9 @@ async def run_turn(
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
             answer = reply.content.strip() or _fallback_answer(calls, capped=not allow_tools)
-            facts, calls = await _complete_municipality_history(runner, question, facts, calls)
+            facts, calls = await _complete_municipality_history(
+                runner, question, facts, calls, room=max_tool_calls - used
+            )
             return _turn(question, answer, facts, calls)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
@@ -890,7 +892,9 @@ async def run_turn(
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
             answer = final.content.strip() or _fallback_answer(calls, capped=True)
-            facts, calls = await _complete_municipality_history(runner, question, facts, calls)
+            facts, calls = await _complete_municipality_history(
+                runner, question, facts, calls, room=max_tool_calls - used
+            )
             return _turn(question, answer, facts, calls)
 
 
@@ -919,9 +923,11 @@ def _future_year_answer(question: str, facts: list[dict[str, Any]]) -> str:
 
 def _direction_note(question: str, start: float, end: float) -> str:
     folded = _fold_place(question)
-    if any(word in folded for word in ("steget", "vokset", "voksede")) and end < start:
+    rose = ("steget", "vokset", "voksede", "rose", "risen", "increased", "grew")
+    fell = ("fald", "fell", "fallen", "decreased", "dropped")
+    if any(word in folded for word in rose) and end < start:
         return "Tallet er ikke steget. Det er faldet."
-    if "fald" in folded and end > start:
+    if any(word in folded for word in fell) and end > start:
         return "Tallet er ikke faldet. Det er steget."
     return ""
 
@@ -949,7 +955,7 @@ def _area_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
     ) or ("most" in folded and "municip" in folded)
     if not danish and not english:
         return None
-    if re.search(r"\bby\b|\bbyer\b|\bbyomr", folded):
+    if _mentions_a_town(folded):
         return None
     want_region = "region" in folded and "kommune" not in folded and "municip" not in folded
     if "kommune" not in folded and "municip" not in folded and not want_region:
@@ -977,11 +983,22 @@ def _area_rank_answer(question: str, facts: list[dict[str, Any]]) -> str | None:
     name, value, fact = rows[0]
     period = period_label(str(fact.get("period") or ""))
     shown = _da_number(value)
+    claimed = [
+        label
+        for label, _value, _fact in rows
+        if _fold_place(label) in folded and _fold_place(label) != _fold_place(name)
+    ]
     if english and not danish:
         extreme = "the fewest" if ascending else "the most"
-        return f"{name} has {extreme}: {shown} ({period})."
+        line = f"{name} has {extreme}: {shown} ({period})."
+        if claimed:
+            line = f"{claimed[0]} is not {extreme}. {line}"
+        return line
     extreme = "færrest" if ascending else "flest"
-    return f"{name} har {extreme} med {shown} ({period})."
+    line = f"{name} har {extreme} med {shown} ({period})."
+    if claimed:
+        line = f"{claimed[0]} er ikke den der har {extreme}. {line}"
+    return line
 
 
 def _series_points(
@@ -1000,9 +1017,18 @@ def _series_points(
     return points
 
 
+def _unit_text(question: str) -> str:
+    return (
+        _fold_place(question)
+        .replace("²", "2")
+        .replace("kvadratkilometer", "km2")
+        .replace("kvadratkilometre", "km2")
+    )
+
+
 def _derived_operation(question: str) -> str | None:
-    folded = _fold_place(question)
-    if "per km2" in folded or "pr. km2" in folded or "pr km2" in folded:
+    folded = _unit_text(question)
+    if any(phrase in folded for phrase in ("per km2", "pr. km2", "pr km2", " / km2")):
         return "per_km2"
     if "per capita" in folded or "pr. indbygger" in folded or "pr indbygger" in folded:
         return "per_capita"
@@ -1106,7 +1132,11 @@ async def _fetch_arguments(
     arguments: dict[str, Any],
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
+    budget: list[int],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    if budget[0] <= 0:
+        return facts, calls
+    budget[0] -= 1
     arguments = dict(arguments)
     arguments["question"] = question
     call = ToolCall(id="server:fetch", name="hent_data", arguments=arguments, raw={})
@@ -1121,10 +1151,16 @@ async def _complete_municipality_history(
     question: str,
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
+    *,
+    room: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Fetch the obvious table when the model stopped without hent_data."""
-    if facts or _january_year(question) or _asks_city_rank(question):
+    """Fetch the obvious table when the model stopped without hent_data.
+
+    Each server call uses one of the remaining tool slots. At the cap, stop.
+    """
+    if room <= 0 or facts or _january_year(question) or _asks_city_rank(question):
         return facts, calls
+    budget = [room]
     folded_subject = _fold_place(question)
     if (
         ("ledighed" in folded_subject or "arbejdslose" in folded_subject)
@@ -1138,6 +1174,7 @@ async def _complete_municipality_history(
             {"table": "AUS08", "values": _with_period({}, question)},
             facts,
             calls,
+            budget,
         )
     place = _municipality_in_question(question)
     if place:
@@ -1148,15 +1185,15 @@ async def _complete_municipality_history(
                 "table": "FOLK1A",
                 "values": {"OMRÅDE": [place], "Tid": [">=2008K1"]},
             }
-            return await _fetch_arguments(runner, question, arguments, facts, calls)
+            return await _fetch_arguments(runner, question, arguments, facts, calls, budget)
         if "indbygg" in folded or "befolk" in folded:
             if "siden" in folded or _asks_for_change(question):
                 return facts, calls
             arguments = {"table": "FOLK1A", "values": {"OMRÅDE": [place]}}
-            return await _fetch_arguments(runner, question, arguments, facts, calls)
+            return await _fetch_arguments(runner, question, arguments, facts, calls, budget)
     if calls or not _looks_like_data_question(question):
         return facts, calls
-    return await _search_then_fetch(runner, question, facts, calls)
+    return await _search_then_fetch(runner, question, facts, calls, budget)
 
 
 def _looks_like_data_question(question: str) -> bool:
@@ -1184,8 +1221,12 @@ async def _search_then_fetch(
     question: str,
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
+    budget: list[int],
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """find_tabel on the question, then hent_data. The next hit is used if the first is empty."""
+    if budget[0] <= 0:
+        return facts, calls
+    budget[0] -= 1
     call = ToolCall(
         id="server:search",
         name="find_tabel",
@@ -1201,6 +1242,7 @@ async def _search_then_fetch(
             {"table": table_id, "values": {}},
             facts,
             calls,
+            budget,
         )
         outcome = str(calls[-1].get("result") or "").casefold()
         if facts and not outcome.startswith(("error", "no rows", "unknown", "tool failed")):
@@ -1433,7 +1475,7 @@ def display_label(detail: str, table: str = "") -> str:
         for name, text in fields:
             if text.casefold() in _ALL_AGES_LABELS:
                 continue
-            if _fold_place(name) in _AREA_FIELDS and _municipality_name(text):
+            if _fold_place(name) in _AREA_FIELDS and _municipality_name(text, table):
                 shown.append(f"{text} kommune")
             else:
                 shown.append(text)
@@ -1441,10 +1483,12 @@ def display_label(detail: str, table: str = "") -> str:
     return ", ".join(text for _name, text in fields)
 
 
-def _municipality_name(text: str) -> bool:
-    """A bare area name on a population table is a municipality, not a town."""
+def _municipality_name(text: str, table: str = "") -> bool:
+    """A bare area name on a population table is a municipality, not a town or parish."""
+    if table.upper().startswith(("BY", "SOGN")):
+        return False
     folded = text.casefold()
-    if folded in {"hele landet", "i alt"}:
+    if folded in {"hele landet", "i alt"} or "sogn" in folded or "byområde" in folded:
         return False
     return not folded.startswith(_REGION_PREFIXES)
 
@@ -2055,12 +2099,21 @@ def _asks_for_change(question: str) -> bool:
     return any(marker in folded for marker in _CHANGE_MARKERS) or _asks_named_difference(question)
 
 
+def _mentions_a_town(folded: str) -> bool:
+    """Danish 'by' is a town. English 'by population' is not."""
+    if re.search(r"\bbyer\b|\bbyomr", folded):
+        return True
+    if "municip" in folded or "kommune" in folded:
+        return False
+    return re.search(r"\bby\b", folded) is not None
+
+
 def _asks_city_rank(question: str) -> bool:
     """Which town is largest. Not a municipality stock and not a growth question."""
     folded = _fold_place(question)
-    if not re.search(r"\bby\b|\bbyer\b|\bbyomr", folded):
+    if not _mentions_a_town(folded):
         return False
-    return any(word in folded for word in ("storst", "tiende", "flest", "indbygg"))
+    return any(word in folded for word in ("storst", "tiende", "flest", "indbygg", "largest"))
 
 
 def _city_ordinal(question: str) -> int | None:
@@ -2541,6 +2594,8 @@ def guard_answer(
     """
     text = _compose_answer(question, answer, facts, calls)
     text = _correct_stated_claim(question, facts, text)
+    text = _correct_period_claim(question, facts, text)
+    text = _with_missing_groups(question, facts, text)
     extra = _computed_sentence(calls)
     if not extra:
         return text
@@ -2578,6 +2633,51 @@ def _computed_sentence(calls: list[dict[str, str]] | None) -> str:
             f"resultat {_da_number(result)}{unit_bit}."
         )
     return ""
+
+
+def _correct_period_claim(
+    question: str,
+    facts: list[dict[str, Any]],
+    text: str,
+) -> str:
+    """A single named year that is not the fetched period is corrected."""
+    if not facts or _asks_for_change(question) or _asks_for_trend(question):
+        return text
+    years = _question_years(question)
+    if len(set(years)) != 1:
+        return text
+    year = years[0]
+    numeric = [fact for fact in facts if _single_value(fact)]
+    if not numeric or any(str(year) in str(fact.get("period") or "") for fact in numeric):
+        return text
+    latest = max(numeric, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+    shown = period_label(str(latest.get("period") or ""))
+    note = f"Tallet er for {shown}, ikke {year}."
+    if note.casefold() in text.casefold():
+        return text
+    return f"{note}\n{text}" if text else note
+
+
+def _with_missing_groups(
+    question: str,
+    facts: list[dict[str, Any]],
+    text: str,
+) -> str:
+    """Name a sex or place the question asked for and the rows do not contain."""
+    folded = _fold_place(question)
+    detail = _fold_place(" ".join(str(fact.get("detail") or "") for fact in facts))
+    missing: list[str] = []
+    if "maend" in folded and "kvinder" in folded:
+        if "maend" not in detail and "mand" not in detail:
+            missing.append("mænd")
+        if "kvinder" not in detail:
+            missing.append("kvinder")
+    if not missing:
+        return text
+    note = "Jeg har ikke tal for " + " og ".join(missing) + "."
+    if note.casefold() in text.casefold():
+        return text
+    return f"{text}\n{note}" if text else note
 
 
 def _correct_stated_claim(
@@ -2680,13 +2780,17 @@ def _compose_answer(
             return gap
         lines = _selected_lines(question, facts)
         if lines:
+            body = "\n".join(lines)
+            derived = _derived_line(question, facts)
+            if derived and derived not in body:
+                body = f"{body}\n{derived}"
             return _with_missing_part(
                 question,
                 facts,
                 _with_municipality_note(
                     question,
                     _with_outside_note(
-                        _with_unpublished_note("\n".join(lines), answer),
+                        _with_unpublished_note(body, answer),
                         question,
                     ),
                 ),
@@ -3068,6 +3172,27 @@ _CITY_TABLES = frozenset(
 )
 
 
+def _named_subyear(question: str) -> str | None:
+    """A named month or quarter. '1. januar' stays the stock date, not January's month."""
+    if _JANUARY_RE.search(question):
+        return None
+    quarter = re.search(
+        r"([1-4])\s*\.?\s*kvartal\w*\s+((?:19|20)\d{2})",
+        question,
+        re.IGNORECASE,
+    )
+    if quarter:
+        return f"{quarter.group(2)}K{quarter.group(1)}"
+    years = _question_years(question)
+    if len(set(years)) != 1:
+        return None
+    folded = question.casefold()
+    for index, name in enumerate(_MONTHS, start=1):
+        if name in folded:
+            return f"{years[0]}M{index:02d}"
+    return None
+
+
 def _asked_period(question: str) -> str | None:
     quarter = re.search(
         r"([1-4])\s*\.?\s*kvartal\w*\s+((?:19|20)\d{2})",
@@ -3161,6 +3286,11 @@ def apply_fetch_defaults(question: str, arguments: dict[str, Any]) -> dict[str, 
         _put_code(values, "Tid", [f"{january}K1"])
     elif january and table == "BEFOLK3":
         _put_code(values, "Tid", [str(january)])
+    subyear = _named_subyear(question)
+    if subyear:
+        current = _codes(values, "Tid")
+        if not current or all(re.fullmatch(r"\d{4}", item) for item in current):
+            _put_code(values, "Tid", [subyear])
     if values:
         updated["values"] = values
     return updated
@@ -3203,7 +3333,15 @@ def apply_age_intent(question: str, arguments: dict[str, Any]) -> dict[str, Any]
     if intent is None:
         return arguments
     if not any(_has_alder(arguments.get(key)) for key in ("values", "sum_from", "sum_range")):
-        return arguments
+        # 80+ with no age code is still the open sum, on a population table.
+        table = str(arguments.get("table") or "").upper()
+        if intent[0] != "from" or not table.startswith(("FOLK", "BEFOLK")):
+            return arguments
+        updated = dict(arguments)
+        sum_from = dict(updated.get("sum_from") or {})
+        sum_from["ALDER"] = str(intent[1])
+        updated["sum_from"] = sum_from
+        return updated
     kind, low, high = intent
     updated = dict(arguments)
     values = _without_alder(updated.get("values"))

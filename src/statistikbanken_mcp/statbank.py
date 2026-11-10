@@ -299,6 +299,31 @@ class StatbankClient:
                     for item in place_hit[:5]
                 ]
             ranked.append((score, -index, hit))
+        present = {str(table.get("id") or "").casefold() for table in catalogue}
+        added: set[str] = set()
+        for preference in _TABLE_PREFERENCES:
+            table_id = preference.table_id
+            key = table_id.casefold()
+            if key in present or key in added:
+                continue
+            boost = _preference_boost(table_id, folded, named_ids)
+            if not boost:
+                continue
+            added.add(key)
+            ranked.append(
+                (
+                    boost,
+                    1,
+                    {
+                        "id": table_id,
+                        "title": "",
+                        "unit": "",
+                        "first_period": None,
+                        "latest_period": None,
+                        "variables": [],
+                    },
+                )
+            )
         if not ranked:
             raise StatbankError(
                 f"No table matches {query.strip()!r}. Try fewer words, or a subject such as "
@@ -405,10 +430,13 @@ class StatbankClient:
                 source = (data.get("dataset") or {}).get("source") or source
         _flag_unpublished(rows)
         plans = list(year_plans)
-        if not plans:
+        combine = _requested_year_figure(question)
+        if not plans and combine != "none":
             plans = _plans_from_open_range(metadata, values, rows)
+        if combine == "none":
+            plans = []
         if plans:
-            rows, year_notes = _collapse_years(metadata, rows, plans)
+            rows, year_notes = _collapse_years(metadata, rows, plans, combine=combine)
             notes.extend(year_notes)
         for variable_id, codes, label, note in headline:
             rows = _sum_rows(rows, variable_id, codes)
@@ -715,6 +743,30 @@ _TABLE_PREFERENCES: tuple[_TablePreference, ...] = (
         "FOLK1E",
         (("befolkning", "population", "people", "indbyggere"), ("herkomst",)),
         ("fremskriv",),
+    ),
+    _TablePreference(
+        "AUP01",
+        (("ledighedsprocenten", "ledighedsprocent"),),
+        ("gennemsnit",),
+        1800,
+    ),
+    _TablePreference(
+        "PRIS111",
+        (("forbrugerprisindekset", "forbrugerprisindeks"),),
+        ("braendstof", "benzin", "diesel"),
+        2000,
+    ),
+    _TablePreference(
+        "PRIS111",
+        (("fodevarer",), ("priserne", "arsstigningen")),
+        ("braendstof",),
+        2000,
+    ),
+    _TablePreference(
+        "AUF01",
+        (("fuldtidsledige", "fuldtidsledig"), ("kvinder", "maend")),
+        ("procent", "gennemsnit"),
+        1600,
     ),
     _TablePreference(
         "AUS08",
@@ -2081,10 +2133,24 @@ def _plans_from_open_range(
     return [_YearPlan(year=year, codes=tuple(codes), complete=True)]
 
 
+def _requested_year_figure(question: str | None) -> str:
+    """'auto' keeps a bare year. A question averages or sums only when it asks."""
+    if not isinstance(question, str) or not question.strip():
+        return "auto"
+    folded = _fold(question)
+    if "gennemsnit" in folded or "average" in folded:
+        return "average"
+    if any(word in folded for word in ("i alt", "samlet", "summen", "tilsammen")):
+        return "sum"
+    return "none"
+
+
 def _collapse_years(
     table: _Table,
     rows: list[dict[str, Any]],
     plans: list[_YearPlan],
+    *,
+    combine: str = "auto",
 ) -> tuple[list[dict[str, Any]], list[str]]:
     time_id = next((variable.id for variable in table.variables if variable.time), None)
     if time_id is None:
@@ -2112,6 +2178,8 @@ def _collapse_years(
             and isinstance(value, str)
         )
         method = _measure_method(table, labels) if plan.complete else None
+        if combine not in {"auto", ""} and method != combine:
+            continue
         aggregated = _aggregate_year(chosen, time_id, plan, method) if method else None
         if aggregated is None:
             notes.append(_year_skip_note(plan, method))
@@ -2264,7 +2332,12 @@ def _value_matches(variable: _Variable, token: str) -> list[str]:
                 keys.add(text[len(prefix) :].strip())
         if folded in keys:
             labels.append(item["id"])
-    return labels
+    if labels:
+        return labels
+    hits = _prefix_hits(variable, token)
+    if len(hits) == 1:
+        return [hits[0]["id"]]
+    return []
 
 
 def _prefix_hits(variable: _Variable, token: str) -> list[dict[str, str]]:
@@ -2641,7 +2714,37 @@ def select_named_groups(
                 hits.append(str(item["id"]))
         if hits:
             chosen[variable_id] = hits
+            continue
+        if (
+            _fold(variable_id) in {"omraade", "kommune", "bopomr", "byer"}
+            and variable_id not in chosen
+        ):
+            prefix = _one_area_prefix(items, question)
+            if prefix:
+                chosen[variable_id] = [prefix]
     return chosen
+
+
+def _one_area_prefix(items: list[dict[str, Any]], question: str) -> str | None:
+    """The one hyphenated area whose first part is a word in the question."""
+    found: list[str] = []
+    for word in re.findall(r"[A-Za-zÆØÅæøå]{4,}", question):
+        folded = _fold(word)
+        matches = [
+            str(item["id"])
+            for item in items
+            if any(
+                part.startswith(folded)
+                for part in re.split(r"[\s\-]+", _fold(str(item.get("text") or "")))
+                if part
+            )
+            and re.search(r"[\s\-]", str(item.get("text") or ""))
+        ]
+        if len(matches) == 1 and matches[0] not in found:
+            found.append(matches[0])
+    if len(found) == 1:
+        return found[0]
+    return None
 
 
 def _selection_view(table: _Table) -> dict[str, Any]:
