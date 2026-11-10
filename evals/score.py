@@ -236,14 +236,25 @@ def close(expected: float, got: float) -> bool:
     return abs(expected - got) <= max(0.05, abs(expected) * 0.001)
 
 
-def covers(expected: list[float], stated: list[float]) -> bool:
+def _same_kroner_scale(expected: float, got: float, text: str) -> bool:
+    """3.118.538 mio. kr. and 3.118,5 mia. kr. are one national-accounts figure."""
+    folded = text.casefold()
+    if not any(word in folded for word in ("mio", "mia", "million", "milliard")):
+        return False
+    if not expected or not got:
+        return False
+    ratio = abs(got / expected)
+    return abs(ratio - 1000) <= 1 or abs(ratio - 0.001) <= 1e-6
+
+
+def covers(expected: list[float], stated: list[float], text: str = "") -> bool:
     """Every expected figure has its own stated number. Extras are allowed."""
     if not expected:
         return False
     pool = list(stated)
     for value in expected:
         for index, got in enumerate(pool):
-            if close(value, got):
+            if close(value, got) or (text and _same_kroner_scale(value, got, text)):
                 pool.pop(index)
                 break
         else:
@@ -278,9 +289,9 @@ def classify(question: dict[str, Any], result: dict[str, Any], truths: list[Trut
     return "edge_behaviour_wrong"
 
 
-def _figure_match(truth: Truth, stated: list[float], answer: str) -> bool:
+def _figure_match(truth: Truth, stated: list[float], answer: str, text: str = "") -> bool:
     """Stocks, and for a rank the place names in order and the geography type."""
-    if not covers(truth.values, stated):
+    if not covers(truth.values, stated, text):
         return False
     if not truth.names:
         return True
@@ -319,7 +330,7 @@ def _score_figures(question: dict[str, Any], result: dict[str, Any], truths: lis
     stated = _stated(result)
     facts = _fact_values(result)
     answer = str(result.get("answer") or "")
-    if any(_figure_match(truth, stated, answer) for truth in truths):
+    if any(_figure_match(truth, stated, answer, text=answer) for truth in truths):
         if not _phrases_ok(question, result):
             return "edge_behaviour_wrong"
         return "correct"

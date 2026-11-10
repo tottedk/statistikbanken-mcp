@@ -11,6 +11,13 @@ from statistikbanken_mcp.server import find_tabel, hent_data, set_client, tabeli
 from statistikbanken_mcp.statbank import StatbankClient
 
 
+def test_subject_search_ranks_the_published_table() -> None:
+    assert find_tabel("gennemsnitlig indkomst Danmark", limit=5)[0]["id"] == "INDKP105"
+    assert find_tabel("levendefødte Aarhus", limit=5)[0]["id"] == "BEV22"
+    assert find_tabel("beskæftigede nationalregnskab", limit=5)[0]["id"] == "NAN1"
+    assert find_tabel("bruttoværditilvækst Danmark", limit=3)[0]["id"] == "NABP19"
+
+
 def test_find_tabel_befolkning_leads_with_folk1a() -> None:
     hits = find_tabel("befolkning", limit=5)
     assert hits[0] == {
@@ -204,17 +211,58 @@ def test_denmark_does_not_outrank_the_subject() -> None:
     assert find_tabel("Denmark", limit=1)[0]["id"] == "BEF5F"
 
 
+def test_a_short_name_resolves_to_the_hyphenated_municipality(
+    calls: list[dict[str, object]],
+) -> None:
+    from statistikbanken_mcp.statbank import select_named_groups
+
+    with pytest.raises(ToolError):
+        hent_data("FOLK1A", {"OMRÅDE": ["Lyngby"], "ALDER": ["IALT"], "Tid": ["2026K3"]})
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    areas = next(item["values"] for item in sent["variables"] if item["code"] == "OMRÅDE")
+    assert areas == ["173"]
+    chosen = select_named_groups(
+        "Hvor mange bor i Lyngby?",
+        {
+            "variables": [
+                {
+                    "id": "OMRÅDE",
+                    "values": [
+                        {"id": "173", "text": "Lyngby-Taarbæk"},
+                        {"id": "101", "text": "København"},
+                    ],
+                }
+            ]
+        },
+        {},
+    )
+    assert chosen["OMRÅDE"] == ["173"]
+
+
+def test_the_unemployment_rate_ranks_above_the_count() -> None:
+    assert find_tabel("ledighedsprocenten i Odense", limit=5)[0]["id"] == "AUP01"
+    assert find_tabel("forbrugerprisindekset i alt", limit=3)[0]["id"] == "PRIS111"
+    assert find_tabel("årsstigningen i priserne på fødevarer", limit=3)[0]["id"] == "PRIS111"
+
+
 def test_lyngby_suggests_lyngby_taarbaek_and_is_not_accepted(
     calls: list[dict[str, object]],
 ) -> None:
-    with pytest.raises(ToolError, match=r"Lyngby-Taarbæk \(173\)") as caught:
+    """A unique first part is the municipality. The old suggestion is no longer an error."""
+    with pytest.raises(ToolError):
         hent_data("FOLK1A", {"OMRÅDE": ["Lyngby"]})
-    message = str(caught.value)
-    assert "Did you mean" in message
-    assert "Unknown value 'Lyngby'" in message
-    with pytest.raises(ToolError, match=r"Høje-Taastrup \(169\)"):
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    areas = next(item["values"] for item in sent["variables"] if item["code"] == "OMRÅDE")
+    assert areas == ["173"]
+    calls.clear()
+    with pytest.raises(ToolError):
         hent_data("FOLK1A", {"OMRÅDE": ["Taastrup"]})
-    assert not any(str(call["path"]).endswith("/data") for call in calls)
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    areas = next(item["values"] for item in sent["variables"] if item["code"] == "OMRÅDE")
+    assert areas == ["169"]
 
 
 def test_out_of_range_period_states_the_available_range() -> None:
@@ -870,6 +918,29 @@ def test_calendar_phrases_do_not_substitute_another_period(calls: list[dict[str,
     latest, _plan, read_as = _period_meaning(table, variable, "seneste", today)
     assert latest == ["2026M09"]
     assert read_as == "2026M09"
+    span = _Variable(
+        id="Tid",
+        text="tid",
+        eliminable=False,
+        time=True,
+        values=tuple({"id": code, "text": code} for code in ("2024M09", "2025M09", "2026M09")),
+    )
+    span_table = _Table(
+        id="AUS07",
+        title="Fuldtidsledige",
+        description="",
+        unit="Antal",
+        updated=None,
+        active=True,
+        variables=(span,),
+    )
+    now, _plan, read_as = _period_meaning(span_table, span, "nu", today)
+    assert now == ["2026M09"]
+    today_phrase, _plan, read_as = _period_meaning(span_table, span, "i dag", today)
+    assert today_phrase == ["2026M09"]
+    ago, _plan, read_as = _period_meaning(span_table, span, "for 2 år siden", today)
+    assert ago == ["2024M09"]
+    assert "2024M09" in read_as
 
 
 def test_danish_period_phrases_outside_the_table_name_the_range() -> None:
