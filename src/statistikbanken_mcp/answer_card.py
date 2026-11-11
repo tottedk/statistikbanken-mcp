@@ -16,6 +16,11 @@ _PLACE_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_RE = re.compile(r"\d{1,3}(?:\.\d{3})+|\d+")
+_PERCENT_WORD = re.compile(r"%|procent|percent|\bpct\b", re.IGNORECASE)
+_VALUE_SUFFIX = re.compile(
+    r"(?:\s*%|\s+pct\.?|\s+procent|\s+percent|\s+personer|\s+antal|\s+kr\.?|\s+kroner|\s+indeks)\s*$",
+    re.IGNORECASE,
+)
 
 
 def decompose(question: str) -> list[str]:
@@ -120,17 +125,17 @@ def verify_card(card: dict[str, Any], facts: list[dict[str, Any]]) -> list[str]:
     numeric = [fact for fact in facts if _number(fact.get("value")) is not None]
     fetched = [_number(fact["value"]) for fact in numeric]
     tables = {str(fact.get("table") or "") for fact in numeric}
-    periods = {str(fact.get("period") or "") for fact in numeric}
-    units = {str(fact.get("unit") or "") for fact in numeric if fact.get("unit")}
+    periods = {str(fact.get("period") or "").casefold() for fact in numeric}
+    units = {str(fact.get("unit") or "").casefold() for fact in numeric if fact.get("unit")}
 
     table_id = str(card.get("table_id") or "")
     if table_id and tables and table_id not in tables:
         errors.append(f"table {table_id} was not fetched")
     for period in card.get("periods") or []:
-        if str(period) not in periods:
+        if str(period).casefold() not in periods:
             errors.append(f"period {period} is not in the fetched rows")
-    unit = str(card.get("unit") or "")
-    if unit and units and unit not in units:
+    unit = str(card.get("unit") or "").strip()
+    if unit and units and unit.casefold() not in units:
         errors.append(f"unit {unit} does not match the table")
     for value in card.get("values") or []:
         number = _number(value)
@@ -181,7 +186,17 @@ def render_card(card: dict[str, Any]) -> str:
         lines.append(f"{left} / {right} = {_fmt(share['result'])} procent.")
     for error in card.get("_errors") or []:
         lines.append(f"Ikke bekræftet: {error}")
-    return "\n".join(lines)
+    if lines:
+        return "\n".join(lines)
+    for value in card.get("values") or []:
+        if _number(value) is None:
+            continue
+        shown = _fmt(value)
+        suffix = f" ({unit})" if unit else ""
+        return f"{shown}{suffix}"
+    if table:
+        return table
+    return "Bekræftet svar."
 
 
 def _share_errors(share: dict[str, Any], facts: list[dict[str, Any]]) -> list[str]:
@@ -191,6 +206,8 @@ def _share_errors(share: dict[str, Any], facts: list[dict[str, Any]]) -> list[st
     result = _number(share.get("result"))
     if numerator is None or denominator is None or result is None:
         return ["share is missing numerator, denominator, or result"]
+    if denominator > 0 and 0 < result <= 1 and _close(result * 100, numerator / denominator * 100):
+        result = result * 100
     if result > 100 or numerator > denominator or denominator <= 0:
         errors.append("share exceeds 100 percent")
     period = str(share.get("period") or "")
@@ -231,18 +248,39 @@ def _denominator_is_total(
     return len(facts) == 1 and _close(denominator, _number(facts[0].get("value")) or -1)
 
 
-def _known(value: float, fetched: list[float]) -> bool:
-    if any(_close(value, item) for item in fetched):
+def _known(value: Any, fetched: list[float]) -> bool:
+    if any(_equivalent(value, item) for item in fetched):
         return True
+    number = _number(value)
+    if number is None:
+        return False
     for left in fetched:
         for right in fetched:
-            if _close(value, left - right) or _close(value, abs(left - right)):
+            if _close(number, left - right) or _close(number, abs(left - right)):
                 return True
-            if _close(value, left + right):
+            if _close(number, left + right):
                 return True
-            if right and left <= right and _close(value, left / right * 100):
+            if right and left <= right and _close(number, left / right * 100):
                 return True
     return False
+
+
+def _equivalent(stated: Any, fetched: float) -> bool:
+    """Thousand separators, decimal commas, a trailing unit, and a percent fraction."""
+    parsed = _parsed(stated)
+    if parsed is None:
+        return False
+    number, saw_percent = parsed
+    if _close(number, fetched):
+        return True
+    if saw_percent and _close(number / 100, fetched):
+        return True
+    return (
+        not saw_percent
+        and 0 < abs(number) <= 1
+        and abs(fetched) <= 100
+        and _close(number * 100, fetched)
+    )
 
 
 def _claimed_numbers(question: str) -> list[float]:
@@ -257,9 +295,46 @@ def _claimed_numbers(question: str) -> list[float]:
 
 
 def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    parsed = _parsed(value)
+    if parsed is None:
         return None
-    return float(value)
+    return parsed[0]
+
+
+def _parsed(value: Any) -> tuple[float, bool] | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value), False
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().replace("\u00a0", " ")
+    if not raw:
+        return None
+    saw_percent = _PERCENT_WORD.search(raw) is not None
+    text = _VALUE_SUFFIX.sub("", raw).strip().replace(" ", "")
+    number = _parse_token(text)
+    if number is None:
+        return None
+    return number, saw_percent
+
+
+def _parse_token(token: str) -> float | None:
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+,\d+", token):
+        whole, frac = token.split(",")
+        return float(f"{whole.replace('.', '')}.{frac}")
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+\.\d+", token):
+        whole, frac = token.split(".")
+        return float(f"{whole.replace(',', '')}.{frac}")
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token) and not token.startswith("0"):
+        return float(token.replace(".", ""))
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+", token):
+        return float(token.replace(",", ""))
+    if re.fullmatch(r"\d+,\d+", token):
+        return float(token.replace(",", "."))
+    if re.fullmatch(r"\d+(?:\.\d+)?", token):
+        return float(token)
+    return None
 
 
 def _close(left: float, right: float) -> bool:

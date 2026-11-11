@@ -95,6 +95,33 @@ def test_a_sub_part_without_a_value_or_a_reason_is_rejected() -> None:
     assert verify_card(told, [_ESBJERG]) == []
 
 
+def test_equivalent_spellings_match_and_a_wrong_number_does_not() -> None:
+    for spelling in ("114.766", "114,766", "114766", "114.766,0", "114.766 personer"):
+        card = _card(
+            values=[spelling],
+            sub_parts=[{"part": "Esbjerg", "value": spelling, "missing": None}],
+        )
+        assert verify_card(card, [_ESBJERG]) == [], spelling
+    rate = {**_ESBJERG, "value": 12.3, "unit": "pct"}
+    for spelling in ("12,3 %", "12.3%", "0.123"):
+        card = _card(
+            unit="pct",
+            values=[spelling],
+            sub_parts=[{"part": "ændring", "value": spelling, "missing": None}],
+        )
+        assert verify_card(card, [rate]) == [], spelling
+    wrong = _card(values=["99.999"])
+    assert verify_card(wrong, [_ESBJERG])
+
+
+def test_a_verified_card_never_renders_blank() -> None:
+    card = _card(premise_check="true", sub_parts=[], share=None)
+    assert verify_card(card, [_ESBJERG]) == []
+    rendered = render_card(card).strip()
+    assert rendered
+    assert "114.766" in rendered
+
+
 def test_decomposition_splits_places_and_the_tool_cap() -> None:
     parts = decompose("Hvor mange indbyggere har Horsens Kommune og Ringkøbing-Skjern Kommune?")
     assert len(parts) == 2

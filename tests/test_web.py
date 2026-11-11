@@ -3210,6 +3210,63 @@ def test_each_part_is_fetched_inside_the_shared_cap() -> None:
     assert "56.000" in result.answer
 
 
+def test_the_guard_keeps_a_verified_premise_correction_and_every_part() -> None:
+    from statistikbanken_mcp.answer_card import render_card, verify_card
+
+    esbjerg = _population_fact(114_766, "2026K4", "Esbjerg")
+    esbjerg["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"
+    premise = {
+        "premise_check": "false",
+        "premise_figure": "114.766",
+        "table_id": "FOLK1A",
+        "periods": ["2026K4"],
+        "unit": "Antal",
+        "values": ["114.766"],
+        "sub_parts": [{"part": "Esbjerg", "value": "114.766", "missing": None}],
+        "share": None,
+    }
+    assert verify_card(premise, [esbjerg]) == []
+    shown = _turn(
+        "Esbjerg Kommune har 50.000 indbyggere.",
+        render_card(premise),
+        [esbjerg],
+        [],
+        verified=premise,
+    )
+    assert "Nej" in shown.answer
+    assert "114.766" in shown.answer
+
+    horsens = _population_fact(98_000, "2026K4", "Horsens")
+    horsens["detail"] = "OMRÅDE: Horsens, ALDER: Alder i alt"
+    other = _population_fact(56_000, "2026K4", "Ringkøbing-Skjern")
+    other["detail"] = "OMRÅDE: Ringkøbing-Skjern, ALDER: Alder i alt"
+    parts = {
+        "premise_check": "na",
+        "premise_figure": None,
+        "table_id": "FOLK1A",
+        "periods": ["2026K4"],
+        "unit": "Antal",
+        "values": [98_000, 56_000],
+        "sub_parts": [
+            {"part": "Horsens", "value": 98_000, "missing": None},
+            {"part": "Ringkøbing-Skjern", "value": 56_000, "missing": None},
+        ],
+        "share": None,
+    }
+    assert verify_card(parts, [horsens, other]) == []
+    both = _turn(
+        "Hvor mange indbyggere har Horsens Kommune og Ringkøbing-Skjern Kommune?",
+        render_card(parts),
+        [horsens, other],
+        [],
+        verified=parts,
+    )
+    assert "Horsens" in both.answer
+    assert "Ringkøbing-Skjern" in both.answer
+    assert "98.000" in both.answer
+    assert "56.000" in both.answer
+
+
 def test_a_rejected_card_is_sent_back_once() -> None:
     payload = json.dumps(
         {

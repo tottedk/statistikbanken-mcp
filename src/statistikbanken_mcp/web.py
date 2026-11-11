@@ -849,7 +849,7 @@ async def run_turn(
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
             answer = reply.content.strip() or _fallback_answer(calls, capped=not allow_tools)
-            answer, facts, calls, retried = await _verified_answer(
+            answer, facts, calls, retried, verified = await _verified_answer(
                 messages,
                 runner,
                 question,
@@ -863,7 +863,7 @@ async def run_turn(
             if answer is None:
                 force_prose = True
                 continue
-            return _turn(question, answer, facts, calls)
+            return _turn(question, answer, facts, calls, verified=verified)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
             if used >= max_tool_calls:
@@ -912,7 +912,7 @@ async def run_turn(
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
             answer = final.content.strip() or _fallback_answer(calls, capped=True)
-            answer, facts, calls, retried = await _verified_answer(
+            answer, facts, calls, retried, verified = await _verified_answer(
                 messages,
                 runner,
                 question,
@@ -926,7 +926,7 @@ async def run_turn(
             if answer is None:
                 force_prose = True
                 continue
-            return _turn(question, answer, facts, calls)
+            return _turn(question, answer, facts, calls, verified=verified)
 
 
 async def _verified_answer(
@@ -940,7 +940,7 @@ async def _verified_answer(
     room: int,
     cap: int,
     retried: bool,
-) -> tuple[str | None, list[dict[str, Any]], list[dict[str, str]], bool]:
+) -> tuple[str | None, list[dict[str, Any]], list[dict[str, str]], bool, dict[str, Any] | None]:
     """Check a model card once, or fetch each part inside the tool cap.
 
     None means the model gets one more turn with the verifier's errors.
@@ -960,15 +960,16 @@ async def _verified_answer(
                     + ". Send one corrected answer_card JSON object.",
                 }
             )
-            return None, facts, calls, True
+            return None, facts, calls, True, None
         if errors:
             card = dict(card)
             card["_errors"] = errors
-        return render_card(card), facts, calls, retried
+            return render_card(card), facts, calls, retried, None
+        return render_card(card), facts, calls, retried, card
     facts, calls, note = await _fetch_parts(runner, question, facts, calls, room, cap)
     if note and note not in answer:
         answer = f"{answer}\n{note}".strip()
-    return answer, facts, calls, retried
+    return answer, facts, calls, retried, None
 
 
 async def _fetch_parts(
@@ -2018,11 +2019,28 @@ def _household_exact_unpublished(question: str) -> bool:
     return re.search(r"mere end\s+(?:2|to)\s+voksne", folded) is not None
 
 
+def _keep_verified_card(rendered: str, guarded: str) -> str:
+    """A verified card's correction and every part stay in the final answer."""
+    rendered = rendered.strip()
+    if not rendered:
+        return guarded
+    if not guarded.strip():
+        return rendered
+    body = guarded.strip()
+    for line in rendered.splitlines():
+        line = line.strip()
+        if line and line not in body:
+            body = f"{line}\n{body}" if line.startswith("Nej") else f"{body}\n{line}"
+    return body
+
+
 def _turn(
     question: str,
     answer: str,
     facts: list[dict[str, Any]],
     calls: list[dict[str, str]],
+    *,
+    verified: dict[str, Any] | None = None,
 ) -> TurnResult:
     if _household_exact_unpublished(question):
         return TurnResult(
@@ -2046,8 +2064,11 @@ def _turn(
         )
     kept = _dedupe_facts(facts)
     chart = chart_series(kept)
+    guarded = guard_answer(question, answer, kept, calls)
+    if verified and not verify_card(verified, kept):
+        guarded = _keep_verified_card(render_card(verified), guarded)
     return TurnResult(
-        answer=guard_answer(question, answer, kept, calls),
+        answer=guarded,
         facts=kept,
         calls=calls,
         chart=chart,
