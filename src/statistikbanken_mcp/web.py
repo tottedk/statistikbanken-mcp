@@ -31,6 +31,13 @@ from zoneinfo import ZoneInfo
 import httpx
 from mcp import Client, StdioServerParameters
 
+from statistikbanken_mcp.answer_card import (
+    allocate_budget,
+    decompose,
+    parse_card,
+    render_card,
+    verify_card,
+)
 from statistikbanken_mcp.statbank import compute_figure
 
 logger = logging.getLogger(__name__)
@@ -835,14 +842,27 @@ async def run_turn(
     facts: list[dict[str, Any]] = []
     ranked: str | None = None
     used = 0
+    retried = False
+    force_prose = False
     while True:
-        allow_tools = used < max_tool_calls
+        allow_tools = used < max_tool_calls and not force_prose
         reply = await asyncio.to_thread(llm.complete, messages, tools if allow_tools else None)
         if not reply.tool_calls or not allow_tools:
             answer = reply.content.strip() or _fallback_answer(calls, capped=not allow_tools)
-            facts, calls = await _complete_municipality_history(
-                runner, question, facts, calls, room=max_tool_calls - used
+            answer, facts, calls, retried = await _verified_answer(
+                messages,
+                runner,
+                question,
+                answer,
+                facts,
+                calls,
+                room=max_tool_calls - used,
+                cap=max_tool_calls,
+                retried=retried,
             )
+            if answer is None:
+                force_prose = True
+                continue
             return _turn(question, answer, facts, calls)
         messages.append(_assistant_message(reply))
         for call in reply.tool_calls:
@@ -892,10 +912,91 @@ async def run_turn(
         if used >= max_tool_calls:
             final = await asyncio.to_thread(llm.complete, messages, None)
             answer = final.content.strip() or _fallback_answer(calls, capped=True)
-            facts, calls = await _complete_municipality_history(
-                runner, question, facts, calls, room=max_tool_calls - used
+            answer, facts, calls, retried = await _verified_answer(
+                messages,
+                runner,
+                question,
+                answer,
+                facts,
+                calls,
+                room=max_tool_calls - used,
+                cap=max_tool_calls,
+                retried=retried,
             )
+            if answer is None:
+                force_prose = True
+                continue
             return _turn(question, answer, facts, calls)
+
+
+async def _verified_answer(
+    messages: list[dict[str, Any]],
+    runner: ToolRunner,
+    question: str,
+    answer: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+    *,
+    room: int,
+    cap: int,
+    retried: bool,
+) -> tuple[str | None, list[dict[str, Any]], list[dict[str, str]], bool]:
+    """Check a model card once, or fetch each part inside the tool cap.
+
+    None means the model gets one more turn with the verifier's errors.
+    """
+    card = parse_card(answer)
+    if card is not None:
+        facts, calls = await _complete_municipality_history(
+            runner, question, facts, calls, room=room
+        )
+        errors = verify_card(card, facts)
+        if errors and not retried:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Verifier rejected the answer card: "
+                    + "; ".join(errors)
+                    + ". Send one corrected answer_card JSON object.",
+                }
+            )
+            return None, facts, calls, True
+        if errors:
+            card = dict(card)
+            card["_errors"] = errors
+        return render_card(card), facts, calls, retried
+    facts, calls, note = await _fetch_parts(runner, question, facts, calls, room, cap)
+    if note and note not in answer:
+        answer = f"{answer}\n{note}".strip()
+    return answer, facts, calls, retried
+
+
+async def _fetch_parts(
+    runner: ToolRunner,
+    question: str,
+    facts: list[dict[str, Any]],
+    calls: list[dict[str, str]],
+    room: int,
+    cap: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], str]:
+    parts = decompose(question)
+    if len(parts) <= 1 or facts or room <= 0:
+        facts, calls = await _complete_municipality_history(
+            runner, question, facts, calls, room=room
+        )
+        return facts, calls, ""
+    shares = allocate_budget(len(parts), room)
+    skipped = [part for part, share in zip(parts, shares, strict=True) if share <= 0]
+    for part, share in zip(parts, shares, strict=True):
+        if share <= 0:
+            continue
+        facts, calls = await _search_then_fetch(runner, part, facts, calls, [share])
+    if not skipped:
+        return facts, calls, ""
+    note = f"Ikke hentet, fordi loftet er {cap} opslag og der er {len(parts)} dele: " + "; ".join(
+        skipped
+    )
+    return facts, calls, note
 
 
 def _question_years(question: str) -> list[int]:
@@ -2577,7 +2678,11 @@ def _closing_instruction(question: str) -> str:
         f"{language} {scope} "
         "Do not open with the table id or the table title. "
         "Use only numbers that appear in hent_data rows from this question. "
-        "If a tool call failed, say so and do not invent figures."
+        "If a tool call failed, say so and do not invent figures. "
+        "End with one JSON object answer_card with premise_check "
+        "(true, false, or na), premise_figure, table_id, periods, unit, values, "
+        "sub_parts as {part, value, missing}, and share or null. "
+        "share.denominator_value is the total for that table and period."
     )
 
 

@@ -670,6 +670,29 @@ def test_subject_tables_match_the_published_figures(live_client: StatbankClient)
     assert int(ranked[1][1]) == 305_227
 
 
+def test_a_verified_card_matches_the_esbjerg_stock(live_client: StatbankClient) -> None:
+    """The card accepts the published 2026K4 stock and rejects a number that was not fetched."""
+    from statistikbanken_mcp.answer_card import build_card, verify_card
+
+    data = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["561"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": ["2026K4"]},
+    )
+    assert data["rows"][0]["value"] == 114_766
+    fact = {
+        "table": "FOLK1A",
+        "period": data["rows"][0]["Tid"],
+        "unit": data["unit"],
+        "value": data["rows"][0]["value"],
+        "detail": "OMRÅDE: Esbjerg",
+    }
+    card = build_card("Hvor mange indbyggere har Esbjerg Kommune?", [fact])
+    assert verify_card(card, [fact]) == []
+    rejected = dict(card)
+    rejected["values"] = [1]
+    assert verify_card(rejected, [fact])
+
+
 def test_quarters_stay_quarters_and_the_price_table_ranks(live_client: StatbankClient) -> None:
     """A bare year in a question is not averaged. PRIS111 is the price index."""
     kept = hent_data(

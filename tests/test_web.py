@@ -3162,6 +3162,103 @@ def test_a_named_month_is_not_replaced_by_the_year() -> None:
     assert fetched["values"]["Tid"] == ["2025M12"]
 
 
+def test_each_part_is_fetched_inside_the_shared_cap() -> None:
+    class _Parts:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def list_tools(self) -> list[ToolSpec]:
+            return [
+                ToolSpec("find_tabel", "search", {}),
+                ToolSpec("hent_data", "fetch", {}),
+            ]
+
+        async def call(self, name: str, arguments: dict) -> str:
+            self.calls.append((name, arguments))
+            if name == "find_tabel":
+                return json.dumps([{"id": "FOLK1A"}])
+            text = json.dumps(arguments, ensure_ascii=False)
+            horsens = "Horsens" in text
+            return json.dumps(
+                {
+                    "table": "FOLK1A",
+                    "unit": "Antal",
+                    "rows": [
+                        {
+                            "OMRÅDE": "Horsens" if horsens else "Ringkøbing-Skjern",
+                            "ALDER": "Alder i alt",
+                            "Tid": "2026K4",
+                            "value": 98_000 if horsens else 56_000,
+                        }
+                    ],
+                }
+            )
+
+    tools = _Parts()
+    model = ScriptedModel([ChatReply("Ved ikke.", [])])
+    result = asyncio.run(
+        run_turn(
+            model,
+            tools,
+            "Hvor mange indbyggere har Horsens Kommune og Ringkøbing-Skjern Kommune?",
+            max_tool_calls=4,
+        )
+    )
+    assert len(tools.calls) <= 4
+    assert sum(name == "find_tabel" for name, _arguments in tools.calls) == 2
+    assert "98.000" in result.answer
+    assert "56.000" in result.answer
+
+
+def test_a_rejected_card_is_sent_back_once() -> None:
+    payload = json.dumps(
+        {
+            "table": "FOLK1A",
+            "unit": "Antal",
+            "rows": [
+                {"OMRÅDE": "Esbjerg", "ALDER": "Alder i alt", "Tid": "2026K4", "value": 114766}
+            ],
+        }
+    )
+    bad = json.dumps(
+        {
+            "premise_check": "na",
+            "premise_figure": None,
+            "table_id": "FOLK1A",
+            "periods": ["2026K4"],
+            "unit": "Antal",
+            "values": [1],
+            "sub_parts": [{"part": "Esbjerg", "value": 1, "missing": None}],
+            "share": None,
+        }
+    )
+    good = json.dumps(
+        {
+            "premise_check": "na",
+            "premise_figure": None,
+            "table_id": "FOLK1A",
+            "periods": ["2026K4"],
+            "unit": "Antal",
+            "values": [114766],
+            "sub_parts": [{"part": "Esbjerg", "value": 114766, "missing": None}],
+            "share": None,
+        }
+    )
+    tools = FakeTools({"hent_data": payload})
+    model = ScriptedModel(
+        [
+            ChatReply("", [_call("hent_data", {"table": "FOLK1A"}, "c1")]),
+            ChatReply(bad, []),
+            ChatReply(good, []),
+        ]
+    )
+    result = asyncio.run(
+        run_turn(model, tools, "Hvor mange indbyggere har Esbjerg?", max_tool_calls=4)
+    )
+    assert len(model.tools_seen) == 3
+    assert "114.766" in result.answer
+
+
 def test_an_instruction_injection_does_not_drop_the_figure() -> None:
     fact = _population_fact(114_766, "2026K4", "Esbjerg")
     fact["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"
