@@ -122,6 +122,68 @@ def test_a_verified_card_never_renders_blank() -> None:
     assert "114.766" in rendered
 
 
+def test_a_realistic_card_verifies_on_the_first_try() -> None:
+    """Dict values, labels, a string period, and a percent derived from counts."""
+    facts = [
+        {
+            "table": "FOLK1A",
+            "period": "2026K4",
+            "unit": "Antal",
+            "value": 200,
+            "detail": "OMRÅDE: Aarhus",
+        },
+        {
+            "table": "FOLK1A",
+            "period": "2026K4",
+            "unit": "Antal",
+            "value": 80,
+            "detail": "OMRÅDE: Odense",
+        },
+    ]
+    card = {
+        "premise_check": "na",
+        "premise_figure": None,
+        "table_id": "FOLK1A",
+        "periods": "2026K4",
+        "unit": "pct.",
+        "values": [
+            {"label": "Aarhus", "value": 200, "unit": "Antal"},
+            {"label": "Odense", "value": "80"},
+            "Mænd",
+            "0-17",
+            {"label": "ændring", "value": "150 %"},
+            250,
+        ],
+        "sub_parts": [
+            {"part": "Aarhus", "value": {"label": "Aarhus", "value": 200}},
+            {"part": "Odense", "value": 80},
+            {"part": "Aalborg", "value": None, "missing": "ikke hentet"},
+        ],
+        "share": None,
+    }
+    assert verify_card(card, facts) == []
+    assert render_card(card).strip()
+
+
+def test_labels_are_not_figures_and_a_wrong_number_still_fails() -> None:
+    card = _card(values=["Mænd", "0-17", {"label": "Esbjerg", "value": 114_766}])
+    assert verify_card(card, [_ESBJERG]) == []
+    wrong = _card(values=["Mænd", {"label": "Esbjerg", "value": 1}])
+    assert verify_card(wrong, [_ESBJERG])
+
+
+def test_percent_difference_and_ratio_are_derived_from_counts() -> None:
+    facts = [
+        {**_ESBJERG, "value": 200, "detail": "A"},
+        {**_ESBJERG, "value": 80, "detail": "B"},
+    ]
+    difference = _card(values=[150], unit="pct.", sub_parts=[])
+    ratio = _card(values=[250], unit="%", sub_parts=[])
+    assert verify_card(difference, facts) == []
+    assert verify_card(ratio, facts) == []
+    assert verify_card(_card(values=[999], unit="pct.", sub_parts=[]), facts)
+
+
 def test_decomposition_splits_places_and_the_tool_cap() -> None:
     parts = decompose("Hvor mange indbyggere har Horsens Kommune og Ringkøbing-Skjern Kommune?")
     assert len(parts) == 2

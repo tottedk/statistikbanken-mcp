@@ -981,10 +981,13 @@ async def _fetch_parts(
     cap: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], str]:
     parts = decompose(question)
-    if len(parts) <= 1 or facts or room <= 0:
+    if len(parts) <= 1 or room <= 0:
         facts, calls = await _complete_municipality_history(
             runner, question, facts, calls, room=room
         )
+        return facts, calls, ""
+    parts = [part for part in parts if not _part_already_fetched(part, facts)]
+    if not parts:
         return facts, calls, ""
     shares = allocate_budget(len(parts), room)
     skipped = [part for part, share in zip(parts, shares, strict=True) if share <= 0]
@@ -998,6 +1001,18 @@ async def _fetch_parts(
         skipped
     )
     return facts, calls, note
+
+
+def _part_already_fetched(part: str, facts: list[dict[str, Any]]) -> bool:
+    """A part is done when its place name is already in a fetched row."""
+    skip = {"hvor", "mange", "bor", "indbyggere", "kommune", "municipality", "hvad"}
+    words = [
+        word for word in re.findall(r"[A-Za-zÆØÅæøå-]{4,}", part) if word.casefold() not in skip
+    ]
+    if not words:
+        return False
+    detail = " ".join(str(fact.get("detail") or "") for fact in facts).casefold()
+    return any(word.casefold() in detail for word in words)
 
 
 def _question_years(question: str) -> list[int]:
@@ -2066,7 +2081,11 @@ def _turn(
     chart = chart_series(kept)
     guarded = guard_answer(question, answer, kept, calls)
     if verified and not verify_card(verified, kept):
-        guarded = _keep_verified_card(render_card(verified), guarded)
+        rendered = render_card(verified).strip()
+        if "Teksten er udeladt" in guarded or guarded in {UNVERIFIED_NUMBERS, NO_FETCHED_NUMBERS}:
+            guarded = rendered
+        else:
+            guarded = _keep_verified_card(rendered, guarded)
     return TurnResult(
         answer=guarded,
         facts=kept,

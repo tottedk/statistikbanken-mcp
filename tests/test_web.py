@@ -3210,6 +3210,94 @@ def test_each_part_is_fetched_inside_the_shared_cap() -> None:
     assert "56.000" in result.answer
 
 
+def test_a_verified_nej_with_a_label_is_not_omitted() -> None:
+    from statistikbanken_mcp.answer_card import render_card, verify_card
+
+    fact = _population_fact(114_766, "2026K4", "Esbjerg")
+    fact["detail"] = "OMRÅDE: Esbjerg, ALDER: Alder i alt"
+    card = {
+        "premise_check": "false",
+        "premise_figure": {"label": "Esbjerg", "value": "114.766"},
+        "table_id": "FOLK1A",
+        "periods": "2026K4",
+        "unit": "Antal",
+        "values": [{"label": "Esbjerg", "value": 114_766}, "Mænd", "0-17"],
+        "sub_parts": [
+            {"part": "Esbjerg", "value": {"label": "Esbjerg", "value": 114_766}},
+            {"part": "0-17", "value": None, "missing": "ikke hentet"},
+        ],
+        "share": None,
+    }
+    assert verify_card(card, [fact]) == []
+    shown = _turn(
+        "Hvorfor er befolkningen i Esbjerg steget siden 2015?",
+        render_card(card),
+        [fact],
+        [],
+        verified=card,
+    )
+    assert "Nej" in shown.answer
+    assert "114.766" in shown.answer
+    assert "Teksten er udeladt" not in shown.answer
+    assert "0-17" in shown.answer
+
+
+def test_remaining_parts_are_fetched_when_one_fact_exists() -> None:
+    class _Parts:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        async def list_tools(self) -> list[ToolSpec]:
+            return [
+                ToolSpec("find_tabel", "search", {}),
+                ToolSpec("hent_data", "fetch", {}),
+            ]
+
+        async def call(self, name: str, arguments: dict) -> str:
+            self.calls.append((name, arguments))
+            if name == "find_tabel":
+                return json.dumps([{"id": "FOLK1A"}])
+            areas = (arguments.get("values") or {}).get("OMRÅDE") or []
+            if areas:
+                text = " ".join(str(area) for area in areas)
+            else:
+                text = str(arguments.get("query") or arguments.get("question") or "")
+            if "Odense" in text:
+                label, value = "Odense", 180_000
+            elif "Aalborg" in text:
+                label, value = "Aalborg", 120_000
+            else:
+                label, value = "Aarhus", 300_000
+            return json.dumps(
+                {
+                    "table": "FOLK1A",
+                    "unit": "Antal",
+                    "rows": [
+                        {"OMRÅDE": label, "ALDER": "Alder i alt", "Tid": "2026K4", "value": value}
+                    ],
+                }
+            )
+
+    tools = _Parts()
+    model = ScriptedModel(
+        [
+            ChatReply(
+                "",
+                [_call("hent_data", {"table": "FOLK1A", "values": {"OMRÅDE": ["Aarhus"]}}, "c1")],
+            ),
+            ChatReply("Kun Aarhus.", []),
+        ]
+    )
+    question = "Hvor mange bor i Aarhus? Hvor mange bor i Odense? Hvor mange bor i Aalborg?"
+    result = asyncio.run(run_turn(model, tools, question, max_tool_calls=6))
+    text = json.dumps(tools.calls, ensure_ascii=False)
+    assert "Odense" in text
+    assert "Aalborg" in text
+    assert len(tools.calls) <= 6
+    assert "Odense" in result.answer
+    assert "Aalborg" in result.answer
+
+
 def test_the_guard_keeps_a_verified_premise_correction_and_every_part() -> None:
     from statistikbanken_mcp.answer_card import render_card, verify_card
 

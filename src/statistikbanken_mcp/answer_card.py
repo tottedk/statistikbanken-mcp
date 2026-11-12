@@ -131,15 +131,17 @@ def verify_card(card: dict[str, Any], facts: list[dict[str, Any]]) -> list[str]:
     table_id = str(card.get("table_id") or "")
     if table_id and tables and table_id not in tables:
         errors.append(f"table {table_id} was not fetched")
-    for period in card.get("periods") or []:
+    for period in _as_items(card.get("periods")):
         if str(period).casefold() not in periods:
             errors.append(f"period {period} is not in the fetched rows")
     unit = str(card.get("unit") or "").strip()
-    if unit and units and unit.casefold() not in units:
+    if unit and units and unit.casefold() not in units and not _derived_percent_unit(unit, units):
         errors.append(f"unit {unit} does not match the table")
-    for value in card.get("values") or []:
+    for value in _as_items(card.get("values")):
         number = _number(value)
-        if number is None or not _known(number, fetched):
+        if number is None:
+            continue
+        if not _known(number, fetched):
             errors.append(f"value {value} is not in the fetched data")
     premise = str(card.get("premise_check") or "na")
     if premise == "false":
@@ -150,7 +152,10 @@ def verify_card(card: dict[str, Any], facts: list[dict[str, Any]]) -> list[str]:
         if not isinstance(part, dict):
             errors.append("sub_part is not an object")
             continue
-        value = _number(part.get("value"))
+        raw = part.get("value")
+        value = _number(raw)
+        if value is None and raw not in (None, "") and not str(part.get("missing") or "").strip():
+            continue
         if value is None and not str(part.get("missing") or "").strip():
             errors.append(f"sub_part {part.get('part')} has no value")
         elif value is not None and not _known(value, fetched):
@@ -260,7 +265,11 @@ def _known(value: Any, fetched: list[float]) -> bool:
                 return True
             if _close(number, left + right):
                 return True
-            if right and left <= right and _close(number, left / right * 100):
+            if not right:
+                continue
+            if _close(number, left / right * 100):
+                return True
+            if _close(number, (left - right) / right * 100):
                 return True
     return False
 
@@ -306,6 +315,11 @@ def _parsed(value: Any) -> tuple[float, bool] | None:
         return None
     if isinstance(value, int | float):
         return float(value), False
+    if isinstance(value, dict):
+        for key in ("value", "tal", "figure", "result"):
+            if key in value:
+                return _parsed(value[key])
+        return None
     if not isinstance(value, str):
         return None
     raw = value.strip().replace("\u00a0", " ")
@@ -335,6 +349,27 @@ def _parse_token(token: str) -> float | None:
     if re.fullmatch(r"\d+(?:\.\d+)?", token):
         return float(token)
     return None
+
+
+def _as_items(value: Any) -> list[Any]:
+    """A string is one entry. A list is its entries. Do not walk the characters."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _derived_percent_unit(unit: str, table_units: set[str]) -> bool:
+    """A percent computed from counts is not a different table unit."""
+    folded = unit.casefold().strip().rstrip(".")
+    if folded not in {"pct", "%", "procent", "percent"}:
+        return False
+    return any("antal" in item for item in table_units)
 
 
 def _close(left: float, right: float) -> bool:
