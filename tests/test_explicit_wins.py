@@ -1,0 +1,242 @@
+"""The model's explicit request wins, and a gap is explained.
+
+These tests lock the two general rules. A server heuristic may fill a
+variable the model left unset. It may not replace a code the model set.
+A turn with no fetched figures keeps a figure-free explanation.
+"""
+
+from __future__ import annotations
+
+import pytest
+from mcp.server.mcpserver.exceptions import ToolError
+
+from statistikbanken_mcp.server import find_tabel, hent_data, tabelinfo
+from statistikbanken_mcp.statbank import compute_figure, select_named_groups
+from statistikbanken_mcp.web import (
+    NO_DATA_ANSWER,
+    NO_FETCHED_NUMBERS,
+    SYSTEM_PROMPT,
+    apply_age_intent,
+    apply_fetch_defaults,
+    guard_answer,
+)
+
+
+def _ages() -> dict:
+    return {
+        "variables": [
+            {
+                "id": "ALDER",
+                "values": [
+                    {"id": "IALT", "text": "Alder i alt"},
+                    {"id": "5", "text": "5 år"},
+                    {"id": "65", "text": "65 år"},
+                    {"id": "65+", "text": "65 år eller derover"},
+                ],
+            },
+            {
+                "id": "KØN",
+                "values": [
+                    {"id": "TOT", "text": "I alt"},
+                    {"id": "1", "text": "Mænd"},
+                    {"id": "2", "text": "Kvinder"},
+                ],
+            },
+        ]
+    }
+
+
+_COUNTY_NOTE = "De danske amter blev nedlagt 1. januar 2007 og erstattet af regioner og kommuner."
+
+
+def _fact(value: int, period: str, detail: str, table: str = "FOLK1A") -> dict:
+    return {
+        "table": table,
+        "period": period,
+        "unit": "Antal",
+        "value": value,
+        "detail": detail,
+        "unpublished": False,
+    }
+
+
+def test_an_explicit_total_is_not_replaced_by_a_word_in_the_question() -> None:
+    chosen = select_named_groups(
+        "Hvor mange mænd og kvinder bor der i alt?",
+        _ages(),
+        {"KØN": ["TOT"]},
+    )
+    assert chosen["KØN"] == ["TOT"]
+
+
+def test_a_named_group_still_fills_a_variable_the_model_left_unset() -> None:
+    chosen = select_named_groups("Hvor mange kvinder bor i Esbjerg?", _ages(), {})
+    assert chosen["KØN"] == ["2"]
+
+
+def test_relative_time_is_not_read_as_an_age(
+    calls: list[dict[str, object]],
+) -> None:
+    question = "Hvor mange indbyggere havde Esbjerg Kommune for 5 år siden?"
+    try:
+        hent_data(
+            "FOLK1A",
+            {"OMRÅDE": ["561"], "KØN": ["TOT"], "Tid": ["2026K3"]},
+            question=question,
+        )
+    except ToolError:
+        pass
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
+    assert ages != ["5"]
+    kept = apply_age_intent(question, {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}})
+    assert "sum_from" not in kept
+    assert "ALDER" not in kept.get("values", {})
+
+
+def test_an_open_ended_age_is_not_collapsed_to_the_single_year() -> None:
+    question = "Hvor stor en andel er 65 år eller derover?"
+    chosen = select_named_groups(question, _ages(), {})
+    assert chosen.get("ALDER") != ["65"]
+    assert chosen.get("ALDER") == ["65+"]
+    explicit = select_named_groups(question, _ages(), {"ALDER": ["IALT"]})
+    assert explicit["ALDER"] == ["IALT"]
+    filled = apply_age_intent(
+        "Hvor mange er 65 år eller derover i Esbjerg Kommune?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}},
+    )
+    assert filled["sum_from"]["ALDER"] == "65"
+
+
+def test_one_age_intent_does_not_overwrite_every_call() -> None:
+    question = "Hvor mange er 0-17 år og hvor mange er over 80?"
+    older = apply_age_intent(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}, "sum_from": {"ALDER": "80"}},
+    )
+    assert older["sum_from"] == {"ALDER": "80"}
+    assert "sum_range" not in older
+    unset = apply_age_intent(question, {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}})
+    assert "sum_from" not in unset
+    assert "sum_range" not in unset
+    explicit = apply_age_intent(
+        "Hvor mange er 80 år og derover?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["561"], "ALDER": ["80"]}},
+    )
+    assert explicit["values"]["ALDER"] == ["80"]
+    assert "sum_from" not in explicit
+
+
+def test_two_named_dates_are_not_rewritten_to_the_first() -> None:
+    question = "Hvor mange indbyggere havde Viborg Kommune 1. januar 2010 og 1. januar 2026?"
+    fetched = apply_fetch_defaults(
+        question,
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["791"], "Tid": ["2010K1", "2026K1"]}},
+    )
+    assert fetched["values"]["Tid"] == ["2010K1", "2026K1"]
+    facts = [
+        _fact(94_000, "2010K1", "OMRÅDE: Viborg, ALDER: Alder i alt"),
+        _fact(98_000, "2026K1", "OMRÅDE: Viborg, ALDER: Alder i alt"),
+    ]
+    answer = guard_answer(question, "kun 2010", facts)
+    assert "94.000" in answer
+    assert "98.000" in answer
+    assert "ikke offentliggjort" not in answer.casefold()
+
+
+def test_procent_flere_is_a_percent_difference_not_a_share() -> None:
+    payload = compute_figure("percent_difference", 703, 400)
+    assert payload["result"] == pytest.approx(75.75)
+    facts = [
+        _fact(703, "2026K1", "OMRÅDE: Aarhus, ALDER: Alder i alt"),
+        _fact(400, "2026K1", "OMRÅDE: Esbjerg, ALDER: Alder i alt"),
+    ]
+    answer = guard_answer(
+        "Hvor mange procent flere indbyggere har Aarhus end Esbjerg?",
+        "kun tekst",
+        facts,
+    )
+    assert "75,75" in answer
+    assert "175,75" not in answer
+
+
+def test_a_share_uses_the_total_row_as_the_denominator() -> None:
+    facts = [
+        _fact(400, "2026K1", "ALDER: Alder i alt"),
+        _fact(100, "2026K1", "ALDER: 65 år"),
+    ]
+    answer = guard_answer("Hvor stor er andelen?", "kun tekst", facts)
+    assert "Andelen er 25 procent" in answer
+    assert "Andelen er 400 procent" not in answer
+    named = [
+        _fact(1_000, "2026K1", "ALDER: Alder i alt"),
+        _fact(100, "2026K1", "ALDER: 65 år"),
+        _fact(250, "2026K1", "ALDER: 80 år"),
+    ]
+    picked = guard_answer("Hvor stor en andel er 80 år?", "kun tekst", named)
+    assert "Andelen er 25 procent" in picked
+    assert "Andelen er 10 procent" not in picked
+
+
+def test_a_density_question_keeps_the_table_the_model_chose() -> None:
+    fetched = apply_fetch_defaults(
+        "Hvor mange indbyggere er der pr. km2 i Esbjerg Kommune?",
+        {"table": "ARE207", "values": {"OMRÅDE": ["561"], "Tid": ["2026"]}},
+    )
+    assert fetched["table"] == "ARE207"
+    share = apply_fetch_defaults(
+        "Hvor stor en andel af indbyggerne i Esbjerg Kommune er over 80?",
+        {"table": "HFUDD11", "values": {"OMRÅDE": ["561"]}},
+    )
+    assert share["table"] == "HFUDD11"
+    population = apply_fetch_defaults(
+        "Hvor mange indbyggere har Esbjerg Kommune?",
+        {"table": "NRHB", "values": {"Tid": ["2026"]}},
+    )
+    assert population["table"] == "FOLK1A"
+
+
+def test_a_figure_free_explanation_is_kept_when_nothing_was_fetched() -> None:
+    explanation = "Amterne blev nedlagt 1. januar 2007 og erstattet af regioner og kommuner."
+    assert guard_answer("Hvor mange boede der i Ribe Amt i 2005?", explanation, []) == explanation
+    generic = guard_answer("Hvor mange boede der i Ribe Amt i 2005?", "Jeg fandt ingen tal.", [])
+    assert generic == _COUNTY_NOTE
+    assert generic != NO_DATA_ANSWER
+    invented = guard_answer("Hvor mange boede der i Ribe Amt?", "Der boede 12.000.", [])
+    assert invented == NO_FETCHED_NUMBERS
+
+
+def test_abolished_counties_are_discoverable_from_search_and_metadata() -> None:
+    assert "1 January 2007" in SYSTEM_PROMPT
+    assert "amter" in SYSTEM_PROMPT
+    hits = find_tabel("befolkning amter", limit=5)
+    assert hits
+    assert all(hit["geography_note"] == _COUNTY_NOTE for hit in hits)
+    info = tabelinfo("FOLK1A", values_filter="amt")
+    assert info["geography_note"] == _COUNTY_NOTE
+    plain = tabelinfo("FOLK1A")
+    assert "geography_note" not in plain
+
+
+def test_a_fetched_change_states_the_actual_direction() -> None:
+    question = "Hvorfor faldt befolkningen i Esbjerg fra 2025 til 2026?"
+    facts = [
+        _fact(100_000, "2025K4", "OMRÅDE: Esbjerg, ALDER: Alder i alt"),
+        _fact(110_000, "2026K4", "OMRÅDE: Esbjerg, ALDER: Alder i alt"),
+    ]
+    answer = guard_answer(
+        question,
+        "Den faldt fra 100.000 til 110.000. Forskellen er 10.000.",
+        facts,
+    )
+    assert "ikke faldet" in answer.casefold()
+    assert "steget" in answer.casefold()
+    assert "100.000" in answer
+    assert "110.000" in answer
+    ranking = guard_answer(
+        "Hvilke fem byer har flest indbyggere, i faldende rækkefølge?",
+        "Esbjerg",
+        facts,
+    )
+    assert "ikke faldet" not in ranking.casefold()

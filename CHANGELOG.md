@@ -9,6 +9,11 @@ The initial commit on 2026-10-31 added only the title line of the README.
 
 ## [Unreleased]
 
+### Changed
+
+- A code the model already set is kept. Named groups, ages, and dates fill only what was left unset, and a question that names two dates is not collapsed to the first. "procent flere/mere/færre" is a percent difference. A share uses the total row as the denominator. A per-km² or share question is not rewritten onto FOLK1A.
+- When nothing was fetched, a figure-free explanation is kept. A question about an amt says that Danish counties were abolished on 1 January 2007 and replaced by regioner and kommuner. A fetched change states the actual direction when the question assumed the opposite.
+
 ### Security
 
 - Public mode exits at startup when `STATBANK_PROXY_SECRET` is unset, empty, or whitespace. The same truthy values as before (`1`, `true`, `yes`, `on`) turn public mode on. The message names the variable and does not include a value. Local mode does not require the variable.

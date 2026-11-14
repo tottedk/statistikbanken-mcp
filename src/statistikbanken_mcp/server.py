@@ -101,6 +101,8 @@ def find_tabel(query: str, limit: int = 10) -> list[dict[str, Any]]:
     Each hit has id, title, unit, first_period, latest_period, and variables.
     first_period is the table's earliest published period. A year before it is
     not in that table; use a hit whose first_period covers the year.
+    Danish amter were abolished on 1 January 2007 and replaced by regioner and
+    kommuner. A query that names an amt includes that note on each hit.
     The title is the
     table's own wording and can be narrower than the query. Read it, then
     tabelinfo, before treating the hit as the answer. If nothing matches, the
@@ -128,8 +130,10 @@ def tabelinfo(
     is the full size and values_truncated means the list was cut. Pass
     values_filter to search codes and labels. Several words, separated by a
     comma or a space, match any of them (for example "Esbjerg, Viborg").
-    A variable with no match keeps its normal list and says so. `total`, when
+    A variable with no match keeps its normal list and says so.     `total`, when
     present, is the code used if that variable is omitted in hent_data.
+    Area values are kommuner and regioner. Amter were abolished on 1 January
+    2007; a values_filter that names an amt says so.
     eliminable means the variable can be left out. A time variable also accepts
     "(1)" for the latest period and ranges such as ">=2016K3". A table whose
     title is a fremskrivning has projection true.
@@ -182,8 +186,9 @@ def hent_data(
     not add them together.
 
     A variable that cannot be omitted and has no total makes the call fail and
-    lists the codes to pass. Pass `question` when a value label is in the
-    question (for example Kvinder). That label is selected instead of the total.
+    lists the codes to pass.     Pass `question` when a value label is in the
+    question (for example Kvinder) and that variable was left unset. The label
+    is then selected. A code already passed, including a total, is kept.
     The call still fails, and lists the codes, when a required variable has no
     total and the question does not name one of its labels.
 
