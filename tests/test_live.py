@@ -276,7 +276,8 @@ def test_new_cars_and_gentofte_dwellings_match_the_known_totals(
 ) -> None:
     cars = hent_data("BIL55", {"REGBIL": ["4000101002"], "Tid": ["2025"]})
     assert cars["rows"][0]["Tid"] == "2025"
-    assert cars["rows"][0]["value"] == 185394
+    # Sum of the twelve published months, checked 14 Nov 2026. Revised from 185394.
+    assert cars["rows"][0]["value"] == 185395
     assert cars["rows"][0]["year_total"]["method"] == "sum"
     homes = hent_data("BOL101", {"OMRÅDE": ["157"]})
     assert len(homes["rows"]) == 1
