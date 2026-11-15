@@ -3767,7 +3767,7 @@ def _keep_age(low: int, high: int | None) -> bool:
 def _asked_age_spans(question: str) -> list[tuple[int, int | None]]:
     """Age ranges named in the question. An open end is None.
 
-    Patterns are generic (N-M, N+, N år og derover, mellem N og M).
+    Patterns are generic (N-M, N+, N år og derover, mellem N og M, under N, over N).
     """
     text = _age_question_text(question)
     spans: list[tuple[int, int | None]] = []
@@ -3794,8 +3794,12 @@ def _asked_age_spans(question: str) -> list[tuple[int, int | None]]:
         lambda match: add(int(match.group(1)), None),
     )
     consume(
-        r"\b(?:over|>=)\s*(\d{1,3})(?!\d)",
+        r"\b(?:over|>=)\s*(\d{1,3})(?:\s*-?\s*årige)?(?!\d)",
         lambda match: add(int(match.group(1)), None),
+    )
+    consume(
+        r"\b(?:under|yngre\s+end)\s+(\d{1,3})(?:\s*-?\s*årige)?(?!\d)",
+        lambda match: add(0, int(match.group(1)) - 1),
     )
     consume(
         r"(?<!\d)(\d{1,3})\s*\+",

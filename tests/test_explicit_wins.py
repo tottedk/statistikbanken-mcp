@@ -386,6 +386,26 @@ def test_fetched_ages_are_shown_without_parsing_the_question() -> None:
     assert covered.count("10") >= 1
 
 
+def test_under_an_age_is_the_years_below_it() -> None:
+    """'under 18-årige' is 0-17, not the single year 18."""
+    question = "Hvor mange under 18-årige bor i Esbjerg?"
+    covered = guard_answer(
+        question,
+        "kun tekst",
+        [_fact(30, "2026K1", "OMRÅDE: Esbjerg, ALDER: 0-17")],
+    )
+    assert "gælder kun" not in covered.casefold()
+    assert "30" in covered
+    single = guard_answer(
+        question,
+        "kun tekst",
+        [_fact(4, "2026K1", "OMRÅDE: Esbjerg, ALDER: 18 år")],
+    )
+    assert single.casefold().startswith("tallet gælder kun")
+    assert "18-årige" in single.casefold()
+    assert "ikke 0-17" in single.casefold()
+
+
 def test_question_text_does_not_inject_a_single_age(
     calls: list[dict[str, object]],
 ) -> None:

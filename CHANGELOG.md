@@ -17,6 +17,7 @@ The initial commit on 2026-10-31 added only the title line of the README.
 - A time range with a bare year, such as `>=2008` on a quarterly table, uses that table's period codes (`>=2008K1`).
 - Fetched age codes are shown, including a total row and bands fetched one by one. Question text does not add an age and does not reject a fetched one. When a count was fetched only as parts of one category, and the question did not name those parts, the answer adds their sum. Rates, indices, averages, and categories the question names separately are not summed.
 - A fetched age that does not cover the range the question asks about is not presented as that range. A single year such as 80, when the question asks for 80+ or 65+, is shown with a caveat that the figure covers only that age. A 65+ row, bands that together cover the asked range, and a total row are unchanged.
+- "under N", "under N-årige", and "yngre end N" are ages 0 through N−1. "over N" and "over N-årige" stay N and older.
 
 ### Security
 
