@@ -2794,6 +2794,7 @@ def guard_answer(
     text = _with_actual_direction(question, facts, text)
     text = _with_partial_year(question, facts, text)
     text = _with_part_total(question, facts, text)
+    text = _with_age_coverage(question, facts, text)
     extra = _computed_sentence(calls)
     if not extra:
         return text
@@ -3745,6 +3746,147 @@ def _relevance_refusal(question: str, facts: list[dict[str, Any]]) -> str:
     if not facts:
         return ""
     return _place_mismatch(question, facts)
+
+
+_MAX_AGE = 125
+
+
+def _age_question_text(question: str) -> str:
+    """Drop 'for N år siden'. That is a date, not an age."""
+    text = question.casefold().replace("–", "-").replace("—", "-")
+    text = re.sub(r"\bfor\s+\d{1,3}\s+år\s+siden\b", " ", text)
+    return re.sub(r"\b\d{1,3}\s+år\s+siden\b", " ", text)
+
+
+def _keep_age(low: int, high: int | None) -> bool:
+    if low > _MAX_AGE:
+        return False
+    return high is None or low <= high <= _MAX_AGE
+
+
+def _asked_age_spans(question: str) -> list[tuple[int, int | None]]:
+    """Age ranges named in the question. An open end is None.
+
+    Patterns are generic (N-M, N+, N år og derover, mellem N og M).
+    """
+    text = _age_question_text(question)
+    spans: list[tuple[int, int | None]] = []
+
+    def add(low: int, high: int | None) -> None:
+        if _keep_age(low, high) and (low, high) not in spans:
+            spans.append((low, high))
+
+    def consume(pattern: str, collect) -> None:
+        nonlocal text
+        matches = list(re.finditer(pattern, text))
+        for match in matches:
+            collect(match)
+        for match in reversed(matches):
+            blank = " " * (match.end() - match.start())
+            text = text[: match.start()] + blank + text[match.end() :]
+
+    consume(
+        r"mellem\s+(\d{1,3})\s+og\s+(\d{1,3})",
+        lambda match: add(int(match.group(1)), int(match.group(2))),
+    )
+    consume(
+        r"(\d{1,3})\s*-?\s*år(?:ige)?\s+(?:og|eller)\s+derover",
+        lambda match: add(int(match.group(1)), None),
+    )
+    consume(
+        r"\b(?:over|>=)\s*(\d{1,3})(?!\d)",
+        lambda match: add(int(match.group(1)), None),
+    )
+    consume(
+        r"(?<!\d)(\d{1,3})\s*\+",
+        lambda match: add(int(match.group(1)), None),
+    )
+    consume(
+        r"(?<!\d)(\d{1,3})\s*-\s*(\d{1,3})(?!\d)",
+        lambda match: add(int(match.group(1)), int(match.group(2))),
+    )
+    # "80-årige" is one year of age. "10 år" is also a length of time, so it is not.
+    consume(
+        r"(?<!\d)(\d{1,3})\s*-?\s*årige\b",
+        lambda match: add(int(match.group(1)), int(match.group(1))),
+    )
+    return spans
+
+
+def _fetched_age_span(label: str) -> tuple[int, int | None] | None:
+    """The ages one fetched label stands for. A total is not a span."""
+    if _is_total_label(label):
+        return None
+    text = re.sub(r"\s+", " ", label.casefold().replace("–", "-").replace("—", "-")).strip()
+    opened = re.fullmatch(
+        r"(\d{1,3})(?:\s*\+|\s*-?\s*år(?:ige)?\s+(?:og|eller)\s+derover|\s*-)",
+        text,
+    )
+    if opened and _keep_age(int(opened.group(1)), None):
+        return (int(opened.group(1)), None)
+    band = re.fullmatch(r"(\d{1,3})\s*-\s*(\d{1,3})(?:\s*år)?", text)
+    if band:
+        low, high = int(band.group(1)), int(band.group(2))
+        if _keep_age(low, high):
+            return (low, high)
+    single = re.fullmatch(r"(\d{1,3})(?:\s*år)?", text)
+    if single and _keep_age(int(single.group(1)), int(single.group(1))):
+        return (int(single.group(1)), int(single.group(1)))
+    return None
+
+
+def _span_covered(asked: tuple[int, int | None], spans: list[tuple[int, int | None]]) -> bool:
+    """True when the fetched spans together include every age in the asked span."""
+    low, high = asked
+    if high is None:
+        return any(start <= low and end is None for start, end in spans)
+    cursor = low
+    for start, end in sorted(spans, key=lambda item: (item[0], item[1] is not None, item[1] or 0)):
+        if end is None:
+            if start <= cursor:
+                return True
+            end = high
+        if end < low or start > high:
+            continue
+        if start > cursor:
+            return False
+        cursor = max(cursor, end + 1)
+        if cursor > high:
+            return True
+    return cursor > high
+
+
+def _age_coverage_note(question: str, facts: list[dict[str, Any]]) -> str:
+    """Say when the fetched ages are narrower than the range the question asks."""
+    asked = _asked_age_spans(question)
+    if not asked:
+        return ""
+    labels: list[str] = []
+    for fact in facts:
+        label = _detail_field(str(fact.get("detail") or ""), "ALDER")
+        if label and label not in labels:
+            labels.append(label)
+    specific = [(label, span) for label in labels if (span := _fetched_age_span(label)) is not None]
+    if not specific:
+        return ""
+    spans = [span for _, span in specific]
+    missing = [span for span in asked if not _span_covered(span, spans)]
+    if not missing:
+        return ""
+    fetched = " og ".join(
+        f"{low}-årige" if low == high else f"{low}+" if high is None else f"{low}-{high}"
+        for low, high in spans
+    )
+    uncovered = " og ".join(f"{low}+" if high is None else f"{low}-{high}" for low, high in missing)
+    lead = "Tallet" if len(spans) == 1 else "Tallene"
+    return f"{lead} gælder kun {fetched}, ikke {uncovered}."
+
+
+def _with_age_coverage(question: str, facts: list[dict[str, Any]], text: str) -> str:
+    note = _age_coverage_note(question, facts)
+    if not note or note.casefold() in text.casefold():
+        return text
+    return f"{note}\n{text}" if text else note
 
 
 def _is_total_label(label: str) -> bool:

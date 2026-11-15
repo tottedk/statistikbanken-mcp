@@ -756,15 +756,14 @@ def test_question_age_replaces_the_codes_the_model_sent() -> None:
 
 
 def test_wrong_age_is_not_presented_as_the_answer() -> None:
-    """A fetched age is shown. The question phrase does not reject it."""
+    """A single year is not the answer to an open range such as 80+."""
     fact = _population_fact(395, "2015K1")
     fact["detail"] = "OMRÅDE: Esbjerg, ALDER: 80 år"
     question = "Hvordan har udviklingen for 80+ i Esbjerg været siden 2015?"
     shown = _turn(question, "Se grafen.", [fact], [])
-    assert "395" in shown.answer
-    assert "ikke for" not in shown.answer.casefold()
-    assert shown.show_numbers is True
-    assert shown.facts == [fact]
+    assert shown.answer.casefold().startswith("tallet gælder kun")
+    assert "80-årige" in shown.answer.casefold()
+    assert "ikke 80+" in shown.answer.casefold()
 
 
 def test_llm_timeout_inside_a_task_group_is_http_504() -> None:
@@ -3121,7 +3120,7 @@ def test_a_parish_figure_is_not_called_a_municipality() -> None:
     assert "kommune" not in answer.casefold()
 
 
-def test_an_open_age_is_a_sum_when_the_model_omits_it() -> None:
+def test_an_omitted_age_is_left_unset() -> None:
     """Question text does not add an age the model left unset. An explicit code stays."""
     from statistikbanken_mcp.web import apply_age_intent
 

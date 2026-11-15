@@ -250,6 +250,7 @@ def test_an_age_group_plus_the_total_is_accepted() -> None:
     ]
     answer = guard_answer(question, "kun tekst", facts)
     assert "ikke for" not in answer.casefold()
+    assert "gælder kun" not in answer.casefold()
     assert "100" in answer
     assert "400" in answer
     wrong = guard_answer(
@@ -257,8 +258,9 @@ def test_an_age_group_plus_the_total_is_accepted() -> None:
         "80 år",
         [_fact(12, "2026K1", "ALDER: 80 år")],
     )
-    assert "12" in wrong
-    assert "ikke for" not in wrong.casefold()
+    assert wrong.casefold().startswith("tallet gælder kun")
+    assert "80-årige" in wrong.casefold()
+    assert "ikke 65+" in wrong.casefold()
 
 
 def test_age_bands_written_with_aar_are_accepted() -> None:
@@ -380,6 +382,7 @@ def test_fetched_ages_are_shown_without_parsing_the_question() -> None:
     bands = [_fact(10, "2026K1", f"ALDER: {start}-{start + 4} år") for start in range(15, 70, 5)]
     covered = guard_answer("Hvor mange 15-69-årige er der?", "kun tekst", bands)
     assert "ikke for" not in covered.casefold()
+    assert "gælder kun" not in covered.casefold()
     assert covered.count("10") >= 1
 
 
