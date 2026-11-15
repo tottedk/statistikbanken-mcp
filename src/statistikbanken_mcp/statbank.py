@@ -2790,6 +2790,10 @@ def select_named_groups(
             continue
         if variable_id in chosen:
             continue
+        # Age codes come from the caller. A label such as "17 år" inside
+        # "mellem 0 og 17 år" is not a request for that single age.
+        if _fold(variable_id) == "alder" or _fold(variable_id).startswith("alder"):
+            continue
         hits: list[str] = []
         for item in items:
             text = str(item.get("text") or "").strip()

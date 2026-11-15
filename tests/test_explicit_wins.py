@@ -98,15 +98,15 @@ def test_relative_time_is_not_read_as_an_age(
 def test_an_open_ended_age_is_not_collapsed_to_the_single_year() -> None:
     question = "Hvor stor en andel er 65 år eller derover?"
     chosen = select_named_groups(question, _ages(), {})
-    assert chosen.get("ALDER") != ["65"]
-    assert chosen.get("ALDER") == ["65+"]
+    assert "ALDER" not in chosen
     explicit = select_named_groups(question, _ages(), {"ALDER": ["IALT"]})
     assert explicit["ALDER"] == ["IALT"]
     filled = apply_age_intent(
         "Hvor mange er 65 år eller derover i Esbjerg Kommune?",
         {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}},
     )
-    assert filled["sum_from"]["ALDER"] == "65"
+    assert "sum_from" not in filled
+    assert "ALDER" not in filled.get("values", {})
 
 
 def test_one_age_intent_does_not_overwrite_every_call() -> None:
@@ -257,7 +257,8 @@ def test_an_age_group_plus_the_total_is_accepted() -> None:
         "80 år",
         [_fact(12, "2026K1", "ALDER: 80 år")],
     )
-    assert "ikke for 65+" in wrong
+    assert "12" in wrong
+    assert "ikke for" not in wrong.casefold()
 
 
 def test_age_bands_written_with_aar_are_accepted() -> None:
@@ -361,3 +362,65 @@ def test_a_partial_year_keeps_the_unpublished_note() -> None:
     ]
     full = guard_answer("Hvor mange levendefødte var der i Aarhus i 2025?", "kun tekst", complete)
     assert "ikke offentliggjort" not in full.casefold()
+
+
+def test_fetched_ages_are_shown_without_parsing_the_question() -> None:
+    """The wording '65-årige' and tiled bands are not unasked ages."""
+    recognized = guard_answer(
+        "Hvor mange 65-årige eller derover bor i Esbjerg?",
+        "kun tekst",
+        [
+            _fact(100, "2026K1", "OMRÅDE: Esbjerg, ALDER: 65+"),
+            _fact(400, "2026K1", "OMRÅDE: Esbjerg, ALDER: Alder i alt"),
+        ],
+    )
+    assert "ikke for" not in recognized.casefold()
+    assert "100" in recognized
+    assert "400" in recognized
+    bands = [_fact(10, "2026K1", f"ALDER: {start}-{start + 4} år") for start in range(15, 70, 5)]
+    covered = guard_answer("Hvor mange 15-69-årige er der?", "kun tekst", bands)
+    assert "ikke for" not in covered.casefold()
+    assert covered.count("10") >= 1
+
+
+def test_question_text_does_not_inject_a_single_age(
+    calls: list[dict[str, object]],
+) -> None:
+    question = "Hvor mange er der mellem 0 og 17 år i Esbjerg?"
+    try:
+        hent_data(
+            "FOLK1A",
+            {"OMRÅDE": ["561"], "KØN": ["TOT"], "Tid": ["2026K3"]},
+            question=question,
+        )
+    except ToolError:
+        pass
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    ages = next(item["values"] for item in sent["variables"] if item["code"] == "ALDER")
+    assert ages == ["IALT"]
+    kept = apply_age_intent(
+        "Hvor mange er over 80 i Esbjerg?",
+        {"table": "FOLK1A", "values": {"OMRÅDE": ["561"]}},
+    )
+    assert "sum_from" not in kept
+
+
+def test_parts_of_a_count_are_summed_when_no_total_row_was_fetched() -> None:
+    question = "Hvor mange levendefødte var der i Aalborg Kommune i 3. kvartal 2026?"
+    facts = [
+        _fact(329, "2026K3", "OMRÅDE: Aalborg, KØN: Mænd", table="BEV22"),
+        _fact(324, "2026K3", "OMRÅDE: Aalborg, KØN: Kvinder", table="BEV22"),
+    ]
+    answer = guard_answer(question, "kun tekst", facts)
+    assert "329" in answer
+    assert "324" in answer
+    assert "653" in answer
+    rates = [
+        _fact(101, "2026K3", "OMRÅDE: Aalborg, KØN: Mænd", table="PRIS111"),
+        _fact(103, "2026K3", "OMRÅDE: Aalborg, KØN: Kvinder", table="PRIS111"),
+    ]
+    rates[0]["unit"] = "Indeks"
+    rates[1]["unit"] = "Indeks"
+    index = guard_answer("Hvad er indekset?", "kun tekst", rates)
+    assert "204" not in index

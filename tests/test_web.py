@@ -717,7 +717,7 @@ def test_fetch_defaults_keep_the_preferred_table_and_the_headline_code() -> None
 
 
 def test_question_age_replaces_the_codes_the_model_sent() -> None:
-    """An age the model set is kept. The question fills an age only when none was set."""
+    """An age the model set is kept. Question text does not add one."""
     question_a = "Hvordan har udviklingen for 80+ i Esbjerg og Viborg været siden 2015?"
     kept = apply_age_intent(
         question_a,
@@ -732,7 +732,7 @@ def test_question_age_replaces_the_codes_the_model_sent() -> None:
         question_a,
         {"table": "FOLK1A", "values": {"KOM": ["Esbjerg", "Viborg"], "Tid": [">=2015K1"]}},
     )
-    assert omitted["sum_from"] == {"ALDER": "80"}
+    assert "sum_from" not in omitted
     assert "ALDER" not in omitted["values"]
 
     question_c = "Hvor mange børn (0-17 år) bor i Viborg?"
@@ -756,15 +756,15 @@ def test_question_age_replaces_the_codes_the_model_sent() -> None:
 
 
 def test_wrong_age_is_not_presented_as_the_answer() -> None:
+    """A fetched age is shown. The question phrase does not reject it."""
     fact = _population_fact(395, "2015K1")
     fact["detail"] = "OMRÅDE: Esbjerg, ALDER: 80 år"
     question = "Hvordan har udviklingen for 80+ i Esbjerg været siden 2015?"
-    hidden = _turn(question, "Se grafen.", [fact], [])
-    assert hidden.answer == "Jeg fik hentet tal for alder 80 år, ikke for 80+."
-    assert hidden.show_numbers is False
-    assert hidden.facts == []
-    assert hidden.chart == []
-    assert "395" not in hidden.answer
+    shown = _turn(question, "Se grafen.", [fact], [])
+    assert "395" in shown.answer
+    assert "ikke for" not in shown.answer.casefold()
+    assert shown.show_numbers is True
+    assert shown.facts == [fact]
 
 
 def test_llm_timeout_inside_a_task_group_is_http_504() -> None:
@@ -2129,7 +2129,7 @@ def _fact(place: str, period: str, value: int | float, unpublished: bool = False
 @pytest.mark.live
 @pytest.mark.live
 def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
-    """An omitted 80+ is summed. An explicit age code, and a 0-17 value, are kept."""
+    """The model must send the age. An explicit code, and a 0-17 value, are kept."""
 
     async def _run(question: str, arguments: dict, call_id: str) -> TurnResult:
         from mcp import Client
@@ -2154,6 +2154,7 @@ def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
                     "KOM": ["Esbjerg", "Viborg"],
                     "Tid": [">=2015K1"],
                 },
+                "sum_from": {"ALDER": "80"},
             },
             "c_a",
         )
@@ -3121,13 +3122,15 @@ def test_a_parish_figure_is_not_called_a_municipality() -> None:
 
 
 def test_an_open_age_is_a_sum_when_the_model_omits_it() -> None:
+    """Question text does not add an age the model left unset. An explicit code stays."""
     from statistikbanken_mcp.web import apply_age_intent
 
     fetched = apply_age_intent(
         "Hvor mange er over 80 i Ringkøbing-Skjern Kommune?",
         {"table": "FOLK1A", "values": {"OMRÅDE": ["760"]}},
     )
-    assert fetched["sum_from"]["ALDER"] == "80"
+    assert "sum_from" not in fetched
+    assert "ALDER" not in fetched["values"]
     older = apply_age_intent(
         "Hvor mange er 80 år og derover i Ringkøbing-Skjern?",
         {"table": "FOLK1A", "values": {"OMRÅDE": ["760"], "ALDER": ["80"]}},

@@ -65,7 +65,8 @@ If the table title, unit, or description only partly matches the question, say s
 If the tools have no data, say so.
 Prefer sum_from or sum_range when a total is needed.
 A value like >=80 lists rows. It does not add them.
-Ages 80 and older are sum_from {"ALDER": "80"}.
+Ages 80 and older are sum_from {"ALDER": "80"}. Pass that age yourself.
+The server does not read an age out of the question.
 You may also pass >=80 in values together with that sum_from. It is the same request.
 sum_from and sum_range are arguments beside values, not keys inside values.
 Unless the question asks for a change, a development, or several years, use only the latest period.
@@ -2792,6 +2793,7 @@ def guard_answer(
     text = _with_missing_groups(question, facts, text)
     text = _with_actual_direction(question, facts, text)
     text = _with_partial_year(question, facts, text)
+    text = _with_part_total(question, facts, text)
     extra = _computed_sentence(calls)
     if not extra:
         return text
@@ -3197,6 +3199,100 @@ def _partial_year_note(question: str, facts: list[dict[str, Any]]) -> str:
         return ""
     latest = max(periods, key=_period_sort_key)
     return f"{year} er ikke offentliggjort for hele året; seneste er {period_label(latest)}."
+
+
+def _is_count_unit(unit: str) -> bool:
+    """Counts can be added. Rates, indices, and averages cannot."""
+    folded = _fold_place(unit)
+    if not folded:
+        return False
+    if any(
+        word in folded
+        for word in ("indeks", "procent", "percent", "gennemsnit", "rate", "index", "kr")
+    ):
+        return False
+    return "antal" in folded or folded in {"personer", "stk"}
+
+
+def _label_named_in_question(question: str, label: str) -> bool:
+    """True when the question itself names this category."""
+    folded = _fold_place(label)
+    if len(folded) < 4:
+        return False
+    return (
+        re.search(rf"(?<![a-z0-9]){re.escape(folded)}(?![a-z0-9])", _fold_place(question))
+        is not None
+    )
+
+
+def _part_total_lines(question: str, facts: list[dict[str, Any]]) -> list[str]:
+    """Sum the parts of one category when no total row was fetched.
+
+    Areas are places, not parts of one count. Two sexes of live births are.
+    Categories the question names separately, such as clubs and members, stay apart.
+    """
+    numeric = [
+        fact
+        for fact in facts
+        if _single_value(fact) and _is_count_unit(str(fact.get("unit") or ""))
+    ]
+    lines: list[str] = []
+    seen: set[int] = set()
+    for index, fact in enumerate(numeric):
+        if index in seen:
+            continue
+        fields = _detail_fields(str(fact.get("detail") or ""))
+        group = [fact]
+        members = {index}
+        vary: str | None = None
+        for other_index, other in enumerate(numeric):
+            if other_index == index:
+                continue
+            if (fact.get("table"), fact.get("period"), fact.get("unit")) != (
+                other.get("table"),
+                other.get("period"),
+                other.get("unit"),
+            ):
+                continue
+            other_fields = _detail_fields(str(other.get("detail") or ""))
+            if set(fields) != set(other_fields):
+                continue
+            diffs = [key for key in fields if fields[key] != other_fields[key]]
+            if len(diffs) != 1 or diffs[0] in _AREA_FIELDS:
+                continue
+            if vary not in (None, diffs[0]):
+                continue
+            vary = diffs[0]
+            group.append(other)
+            members.add(other_index)
+        if vary is None or len(group) < 2:
+            continue
+        labels = [_detail_fields(str(item.get("detail") or "")).get(vary, "") for item in group]
+        if any(_is_total_label(label) for label in labels):
+            continue
+        if any(_label_named_in_question(question, label) for label in labels):
+            continue
+        total = sum(float(item["value"]) for item in group)
+        period = period_label(str(fact.get("period") or ""))
+        shown = _da_number(total)
+        line = f"I alt {shown} ({period})." if period else f"I alt {shown}."
+        if line not in lines and shown not in " ".join(lines):
+            lines.append(line)
+        seen.update(members)
+    return lines
+
+
+def _with_part_total(question: str, facts: list[dict[str, Any]], text: str) -> str:
+    """Show the sum of additive parts when the fetch has no total row."""
+    if text.startswith("Jeg fik hentet") or text.startswith("Jeg fik ikke"):
+        return text
+    if text in {UNVERIFIED_NUMBERS, NO_DATA_ANSWER, NO_FETCHED_NUMBERS}:
+        return text
+    lines = [line for line in _part_total_lines(question, facts) if line not in text]
+    if not lines:
+        return text
+    extra = "\n".join(lines)
+    return f"{text}\n{extra}" if text else extra
 
 
 def _with_partial_year(question: str, facts: list[dict[str, Any]], text: str) -> str:
@@ -3637,89 +3733,18 @@ def _single_total_year(question: str) -> str | None:
 
 
 def apply_age_intent(question: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Fill one open age when the model left ALDER unset.
+    """Leave age codes as the model sent them.
 
-    An age code the model already chose is kept. Two ages in one question
-    are not forced onto every call.
+    Question text does not add or replace ALDER. A total the model left unset
+    stays the table total instead of becoming a single age named in the question.
     """
-    intent = _age_intent(question)
-    if intent is None:
-        return arguments
-    if any(_has_alder(arguments.get(key)) for key in ("values", "sum_from", "sum_range")):
-        return arguments
-    # 80+ with no age code is still the open sum, on a population table.
-    table = str(arguments.get("table") or "").upper()
-    if intent[0] != "from" or not table.startswith(("FOLK", "BEFOLK")):
-        return arguments
-    updated = dict(arguments)
-    sum_from = dict(updated.get("sum_from") or {})
-    sum_from["ALDER"] = str(intent[1])
-    updated["sum_from"] = sum_from
-    return updated
-
-
-def _age_text(question: str) -> str:
-    text = question.casefold().replace("–", "-").replace("—", "-")
-    text = re.sub(r"\bfor\s+\d{1,3}\s+år\s+siden\b", " ", text)
-    return re.sub(r"\b\d{1,3}\s+år\s+siden\b", " ", text)
-
-
-def _age_intents(question: str) -> list[tuple[str, int, int | None]]:
-    text = _age_text(question)
-    found: list[tuple[str, int, int | None]] = []
-    seen: set[tuple[str, int, int | None]] = set()
-
-    def add(intent: tuple[str, int, int | None]) -> None:
-        if intent not in seen:
-            seen.add(intent)
-            found.append(intent)
-
-    for match in re.finditer(r"mellem\s+(\d{1,3})\s+og\s+(\d{1,3})", text):
-        low, high = int(match.group(1)), int(match.group(2))
-        if _age_span(low, high):
-            add(("range", low, high))
-    for match in re.finditer(r"(?<!\d)(\d{1,3})\s*-\s*(\d{1,3})(?!\d)", text):
-        low, high = int(match.group(1)), int(match.group(2))
-        if _age_span(low, high):
-            add(("range", low, high))
-    if re.search(r"\bbørn\b", text):
-        add(("range", 0, 17))
-    opened = re.compile(
-        r"(\d{1,3})\s*år\s+(?:og|eller)\s+derover"
-        r"|over\s+(\d{1,3})(?!\d)"
-        r"|>=\s*(\d{1,3})(?!\d)"
-        r"|(\d{1,3})\s*\+"
-    )
-    for match in opened.finditer(text):
-        number = next(int(group) for group in match.groups() if group)
-        if number <= 125:
-            add(("from", number, None))
-    return found
-
-
-def _age_intent(question: str) -> tuple[str, int, int | None] | None:
-    """The one age the question names. Two different ages are not one intent."""
-    intents = _age_intents(question)
-    if len(intents) != 1:
-        return None
-    return intents[0]
-
-
-def _age_span(low: int, high: int) -> bool:
-    return low <= high <= 125
-
-
-def _has_alder(mapping: Any) -> bool:
-    return isinstance(mapping, dict) and any(str(key).casefold() == "alder" for key in mapping)
+    return arguments
 
 
 def _relevance_refusal(question: str, facts: list[dict[str, Any]]) -> str:
     if not facts:
         return ""
-    place = _place_mismatch(question, facts)
-    if place:
-        return place
-    return _age_mismatch(question, facts)
+    return _place_mismatch(question, facts)
 
 
 def _is_total_label(label: str) -> bool:
@@ -3733,67 +3758,6 @@ def _is_total_label(label: str) -> bool:
         "alder i alt",
         "hele landet",
     } or folded.endswith(" i alt")
-
-
-def _wanted_ages(intents: list[tuple[str, int, int | None]]) -> str:
-    parts = [f"{low}+" if kind == "from" else f"{low}-{high}" for kind, low, high in intents]
-    return " og ".join(parts)
-
-
-def _age_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
-    """Refuse an age that the question did not ask for.
-
-    A total row is allowed beside the asked groups. Every asked group counts,
-    including an open range such as '65 år eller derover' and a 65+ code.
-    """
-    intents = _age_intents(question)
-    if not intents:
-        return ""
-    labels: list[str] = []
-    for fact in facts:
-        label = _detail_field(str(fact.get("detail") or ""), "ALDER")
-        if label and label not in labels:
-            labels.append(label)
-    if not labels:
-        return ""
-
-    def matches(label: str) -> bool:
-        return any(_age_label_matches(intent, label) for intent in intents)
-
-    specific = [label for label in labels if not _is_total_label(label)]
-    if not specific:
-        # HFUDD11's "Alder i alt" is the table's own 15–69 population, not every age.
-        tables = {str(fact.get("table") or "").upper() for fact in facts}
-        if tables and all(not table.startswith(("FOLK", "BEFOLK", "FRKM")) for table in tables):
-            return ""
-        return (
-            f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {_wanted_ages(intents)}."
-        )
-    if all(matches(label) for label in specific):
-        return ""
-    return f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {_wanted_ages(intents)}."
-
-
-def _age_label_key(label: str) -> str:
-    """'0-17 år' and '65 år og derover' compare as 0-17 and 65årogderover."""
-    compact = label.casefold().replace("–", "-").replace("—", "-")
-    compact = re.sub(r"\s+", "", compact)
-    return re.sub(r"(?:år|aar)$", "", compact)
-
-
-def _age_label_matches(intent: tuple[str, int, int | None], label: str) -> bool:
-    kind, low, high = intent
-    compact = _age_label_key(label)
-    if kind == "from":
-        return compact in {
-            f"{low}+",
-            f"{low}-",
-            f"{low}årogderover",
-            f"{low}årellerderover",
-            f"{low}ogderover",
-            f"{low}ellerderover",
-        }
-    return compact in {f"{low}-{high}", f"{low}til{high}"}
 
 
 def _detail_field(detail: str, field: str) -> str:
