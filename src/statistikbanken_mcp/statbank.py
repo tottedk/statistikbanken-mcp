@@ -1687,6 +1687,8 @@ def _resolve_values(table: _Table, variable: _Variable, raw_values: Any) -> list
             raise StatbankError(f"Variable {variable.id} contains an empty value code.")
         if _is_expression(token):
             canonical = _join_closed_range(token)
+            if variable.time:
+                canonical = _ground_time_expression(variable, canonical)
             if "," in canonical and variable.time:
                 raise StatbankError(
                     f"Unknown value '{token}' for variable {variable.id} on table {table.id}. "
@@ -2422,6 +2424,49 @@ def _join_closed_range(token: str) -> str:
 
 def _is_expression(token: str) -> bool:
     return token == "*" or token.startswith((">", "<", "(", "sum(", "SUM(")) or "*" in token
+
+
+_BARE_YEAR_IN_RANGE = re.compile(r"(>=|<=|>|<)?(\d{4})(?![0-9KQMH])", re.IGNORECASE)
+
+
+def _periods_in_year(variable: _Variable, year: str) -> list[str]:
+    """Sub-period codes of one year, earliest first. A yearly code is not one."""
+    found = [
+        item["id"]
+        for item in variable.values
+        if re.fullmatch(
+            rf"{year}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2])|H[12])",
+            item["id"],
+            re.IGNORECASE,
+        )
+    ]
+    found.sort(key=lambda code: _parsed_period(code) or (0, 0, 0))
+    return found
+
+
+def _ground_time_expression(variable: _Variable, token: str) -> str:
+    """'>=2008' on a quarterly table is '>=2008K1'. A code that exists is kept.
+
+    The bound is the first period of the year after >= or >, and the last
+    period of the year after <= or <. '>=2015K1' is already a period code.
+    """
+    compact = re.sub(r"\s+", "", token)
+
+    def replace(match: re.Match[str]) -> str:
+        operator = match.group(1) or ""
+        year = match.group(2)
+        if _code_on(variable, year):
+            return f"{operator}{year}"
+        periods = _periods_in_year(variable, year)
+        if not periods:
+            return match.group(0)
+        if operator in {"<=", ">"}:
+            chosen = periods[-1]
+        else:
+            chosen = periods[0]
+        return f"{operator}{chosen}"
+
+    return _BARE_YEAR_IN_RANGE.sub(replace, compact)
 
 
 def _sum_call(codes: list[str], label: str) -> str:

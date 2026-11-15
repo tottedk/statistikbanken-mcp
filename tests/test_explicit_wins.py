@@ -260,6 +260,51 @@ def test_an_age_group_plus_the_total_is_accepted() -> None:
     assert "ikke for 65+" in wrong
 
 
+def test_age_bands_written_with_aar_are_accepted() -> None:
+    question = "Hvor mange er 0-17 år og 65 år og derover?"
+    facts = [
+        _fact(30, "2026K1", "ALDER: 0-17 år"),
+        _fact(100, "2026K1", "ALDER: 65 år og derover"),
+        _fact(400, "2026K1", "ALDER: Alder i alt"),
+    ]
+    answer = guard_answer(question, "kun tekst", facts)
+    assert "ikke for" not in answer.casefold()
+    assert "30" in answer
+    assert "100" in answer
+    assert "400" in answer
+
+
+def test_a_bare_year_in_a_time_range_uses_the_table_periods(
+    calls: list[dict[str, object]],
+) -> None:
+    hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["791"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": [">=2008"]},
+    )
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    tid = next(item["values"] for item in sent["variables"] if item["code"] == "Tid")
+    assert tid == [">=2008K1"]
+    calls.clear()
+    hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["791"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": [">=2008<=2026"]},
+    )
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    tid = next(item["values"] for item in sent["variables"] if item["code"] == "Tid")
+    assert tid == [">=2008K1<=2026K3"]
+    calls.clear()
+    hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["791"], "ALDER": ["IALT"], "KØN": ["TOT"], "Tid": [">=2015K1"]},
+    )
+    sent = [call["body"] for call in calls if str(call["path"]).endswith("/data")][-1]
+    assert isinstance(sent, dict)
+    tid = next(item["values"] for item in sent["variables"] if item["code"] == "Tid")
+    assert tid == [">=2015K1"]
+
+
 def test_every_asked_age_group_is_accepted() -> None:
     question = "Hvor mange er 0-17 år og hvor mange er 65 år eller derover?"
     facts = [

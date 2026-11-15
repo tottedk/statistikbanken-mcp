@@ -3774,12 +3774,26 @@ def _age_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
     return f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {_wanted_ages(intents)}."
 
 
+def _age_label_key(label: str) -> str:
+    """'0-17 år' and '65 år og derover' compare as 0-17 and 65årogderover."""
+    compact = label.casefold().replace("–", "-").replace("—", "-")
+    compact = re.sub(r"\s+", "", compact)
+    return re.sub(r"(?:år|aar)$", "", compact)
+
+
 def _age_label_matches(intent: tuple[str, int, int | None], label: str) -> bool:
     kind, low, high = intent
-    folded = label.casefold().replace(" ", "").replace("–", "-")
+    compact = _age_label_key(label)
     if kind == "from":
-        return folded in {f"{low}+", f"{low}årogderover", f"{low}årellerderover"}
-    return folded == f"{low}-{high}"
+        return compact in {
+            f"{low}+",
+            f"{low}-",
+            f"{low}årogderover",
+            f"{low}årellerderover",
+            f"{low}ogderover",
+            f"{low}ellerderover",
+        }
+    return compact in {f"{low}-{high}", f"{low}til{high}"}
 
 
 def _detail_field(detail: str, field: str) -> str:
