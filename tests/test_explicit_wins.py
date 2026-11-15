@@ -240,3 +240,79 @@ def test_a_fetched_change_states_the_actual_direction() -> None:
         facts,
     )
     assert "ikke faldet" not in ranking.casefold()
+
+
+def test_an_age_group_plus_the_total_is_accepted() -> None:
+    question = "Hvor stor en andel er 65 år eller derover?"
+    facts = [
+        _fact(100, "2026K1", "ALDER: 65+"),
+        _fact(400, "2026K1", "ALDER: Alder i alt"),
+    ]
+    answer = guard_answer(question, "kun tekst", facts)
+    assert "ikke for" not in answer.casefold()
+    assert "100" in answer
+    assert "400" in answer
+    wrong = guard_answer(
+        "Hvor mange er 65 år eller derover?",
+        "80 år",
+        [_fact(12, "2026K1", "ALDER: 80 år")],
+    )
+    assert "ikke for 65+" in wrong
+
+
+def test_every_asked_age_group_is_accepted() -> None:
+    question = "Hvor mange er 0-17 år og hvor mange er 65 år eller derover?"
+    facts = [
+        _fact(30, "2026K1", "ALDER: 0-17"),
+        _fact(100, "2026K1", "ALDER: 65+"),
+        _fact(400, "2026K1", "ALDER: Alder i alt"),
+    ]
+    answer = guard_answer(question, "kun tekst", facts)
+    assert "ikke for" not in answer.casefold()
+    assert "30" in answer
+    assert "100" in answer
+    open_label = guard_answer(
+        "Hvor mange er 65+?",
+        "kun tekst",
+        [_fact(100, "2026K1", "ALDER: 65 år eller derover")],
+    )
+    assert "100" in open_label
+    assert "ikke for" not in open_label.casefold()
+
+
+def test_partial_series_keeps_the_available_figures() -> None:
+    question = "Hvor meget er befolkningen i Horsens Kommune vokset siden 2000?"
+    facts = [
+        _fact(50_000, "2008K1", "OMRÅDE: Horsens, ALDER: Alder i alt"),
+        _fact(60_000, "2026K3", "OMRÅDE: Horsens, ALDER: Alder i alt"),
+        _fact(24_000, "2008K1", "OMRÅDE: Horsens, KØN: Mænd"),
+        _fact(29_000, "2026K3", "OMRÅDE: Horsens, KØN: Mænd"),
+    ]
+    answer = guard_answer(question, "Der findes ikke tal siden 2000.", facts)
+    assert "50.000" in answer
+    assert "60.000" in answer
+    assert "2007" in answer
+    assert "ikke med" in answer.casefold()
+    span = "Hvor meget er befolkningen i Horsens Kommune vokset fra 2000 til 2026?"
+    both = guard_answer(span, "2000 mangler.", facts[:2])
+    assert "50.000" in both
+    assert "60.000" in both
+    assert "2000" in both
+    assert "ikke med" in both.casefold()
+
+
+def test_a_partial_year_keeps_the_unpublished_note() -> None:
+    question = "Hvor mange levendefødte var der i Aarhus i 2026?"
+    facts = [
+        _fact(40, "2026M01", "OMRÅDE: Aarhus", table="BEV22"),
+        _fact(55, "2026M09", "OMRÅDE: Aarhus", table="BEV22"),
+    ]
+    answer = guard_answer(question, "Kun september er med.", facts)
+    assert "55" in answer
+    assert "ikke offentliggjort" in answer.casefold()
+    assert "2026" in answer
+    complete = [
+        _fact(10, f"2025K{quarter}", "OMRÅDE: Aarhus", table="BEV22") for quarter in range(1, 5)
+    ]
+    full = guard_answer("Hvor mange levendefødte var der i Aarhus i 2025?", "kun tekst", complete)
+    assert "ikke offentliggjort" not in full.casefold()

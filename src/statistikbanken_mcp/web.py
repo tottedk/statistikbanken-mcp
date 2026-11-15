@@ -2495,34 +2495,51 @@ def _series_bounds(
     return start, end
 
 
-def _one_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+def _series_groups(facts: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     numeric = [fact for fact in facts if _single_value(fact) and not fact.get("unpublished")]
-    if len(numeric) < 2:
-        return None
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    order: list[tuple[str, str, str]] = []
     for fact in numeric:
         key = (
             str(fact.get("table") or ""),
             str(fact.get("unit") or ""),
             str(fact.get("detail") or ""),
         )
+        if key not in groups:
+            order.append(key)
         groups.setdefault(key, []).append(fact)
+    return [groups[key] for key in order if len(groups[key]) >= 2]
+
+
+def _one_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    groups = _series_groups(facts)
     if len(groups) != 1:
         return None
-    return next(iter(groups.values()))
+    return groups[0]
 
 
-def _comparison_line(question: str, facts: list[dict[str, Any]]) -> str | None:
-    """Both requested endpoints, the difference, and the percentage. One series only."""
-    series = _one_series(facts)
-    if series is None:
-        return None
-    bounds = _series_bounds(question, series)
-    if isinstance(bounds, str):
-        return bounds
-    if bounds is None:
-        return None
-    first, last = bounds
+def _detail_is_aggregate(detail: str) -> bool:
+    """Area aside, every category is a total. A sex or age breakdown is not."""
+    values = [
+        value
+        for key, value in _detail_fields(detail).items()
+        if key not in _AREA_FIELDS and key not in {"tid", "time"}
+    ]
+    return bool(values) and all(_is_total_label(value) for value in values)
+
+
+def _preferred_series(facts: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """One series, or the single all-ages total when breakdowns were fetched too."""
+    groups = _series_groups(facts)
+    if len(groups) == 1:
+        return groups[0]
+    totals = [group for group in groups if _detail_is_aggregate(str(group[0].get("detail") or ""))]
+    if len(totals) == 1:
+        return totals[0]
+    return None
+
+
+def _format_change(question: str, first: dict[str, Any], last: dict[str, Any]) -> str | None:
     start, end = float(first["value"]), float(last["value"])
     if start == 0:
         return None
@@ -2536,6 +2553,50 @@ def _comparison_line(question: str, facts: list[dict[str, Any]]) -> str | None:
         f"Forskellen er {_da_number(difference)} ({shown} procent)."
     )
     return f"{direction} {line}" if direction else line
+
+
+def _comparison_for_series(question: str, series: list[dict[str, Any]]) -> str | None:
+    """Endpoints the question named.
+
+    A missing start year still shows the first fetched row through the named
+    end. A missing end year is not replaced by a later row.
+    """
+    bounds = _series_bounds(question, series)
+    if isinstance(bounds, str):
+        span = _named_year_span(question)
+        if span is None:
+            return bounds
+        end_year = span[1]
+        january_years = {int(year) for year in _JANUARY_RE.findall(question)}
+        end = _row_in_year(series, end_year, last=True, january=end_year in january_years)
+        if end is None:
+            return bounds
+        ordered = sorted(series, key=lambda fact: _period_sort_key(str(fact.get("period") or "")))
+        first = ordered[0]
+        if str(first.get("period") or "") == str(end.get("period") or ""):
+            return bounds
+        line = _format_change(question, first, end)
+        if line is None:
+            return bounds
+        return f"{line}\n{bounds}"
+    if bounds is None:
+        return None
+    return _format_change(question, bounds[0], bounds[1])
+
+
+def _comparison_line(question: str, facts: list[dict[str, Any]]) -> str | None:
+    """Both requested endpoints, the difference, and the percentage.
+
+    Several breakdowns do not hide the total. A missing named year does not
+    hide the rows that were fetched.
+    """
+    series = _preferred_series(facts)
+    if series is not None:
+        return _comparison_for_series(question, series)
+    lines = [
+        line for group in _series_groups(facts) if (line := _comparison_for_series(question, group))
+    ]
+    return "\n".join(lines) if lines else None
 
 
 def _series_endpoints(
@@ -2730,6 +2791,7 @@ def guard_answer(
     text = _correct_period_claim(question, facts, text)
     text = _with_missing_groups(question, facts, text)
     text = _with_actual_direction(question, facts, text)
+    text = _with_partial_year(question, facts, text)
     extra = _computed_sentence(calls)
     if not extra:
         return text
@@ -3100,6 +3162,53 @@ def _selected_lines(question: str, facts: list[dict[str, Any]]) -> list[str]:
         else:
             lines.append(f"1. januar {year} er ikke med i de hentede tal.")
     return lines
+
+
+def _partial_year_note(question: str, facts: list[dict[str, Any]]) -> str:
+    """One named year that came back as only some of its months or quarters.
+
+    A change over several years is not an unfinished year, and neither is a
+    named month or 1 January.
+    """
+    if _asks_for_trend(question) or _asks_for_change(question):
+        return ""
+    years = list(dict.fromkeys(_question_years(question)))
+    if len(years) != 1 or _named_subyear(question) or _january_years(question):
+        return ""
+    year = years[0]
+    periods = [
+        str(fact.get("period") or "")
+        for fact in facts
+        if _single_value(fact) and str(fact.get("period") or "")
+    ]
+    if not periods or str(year) in periods:
+        return ""
+    present = {_period_year(period) for period in periods}
+    present.discard(None)
+    if present != {year}:
+        return ""
+    months = {
+        period for period in periods if re.fullmatch(rf"{year}M\d{{2}}", period, re.IGNORECASE)
+    }
+    quarters = {
+        period for period in periods if re.fullmatch(rf"{year}[KQ][1-4]", period, re.IGNORECASE)
+    }
+    if len(months) >= 12 or len(quarters) >= 4:
+        return ""
+    latest = max(periods, key=_period_sort_key)
+    return f"{year} er ikke offentliggjort for hele året; seneste er {period_label(latest)}."
+
+
+def _with_partial_year(question: str, facts: list[dict[str, Any]], text: str) -> str:
+    """Keep the incomplete-year note next to the months that were published."""
+    if text.startswith("Jeg fik hentet") or text.startswith("Jeg fik ikke"):
+        return text
+    note = _partial_year_note(question, facts)
+    if not note or "ikke offentliggjort" in text.casefold() or "not published" in text.casefold():
+        return text
+    if note.casefold() in text.casefold():
+        return text
+    return f"{text}\n{note}" if text else note
 
 
 def _latest_lines(facts: list[dict[str, Any]]) -> list[str]:
@@ -3613,25 +3722,56 @@ def _relevance_refusal(question: str, facts: list[dict[str, Any]]) -> str:
     return _age_mismatch(question, facts)
 
 
+def _is_total_label(label: str) -> bool:
+    folded = _fold_place(label)
+    return folded in {
+        "i alt",
+        "ialt",
+        "total",
+        "tot",
+        "alle",
+        "alder i alt",
+        "hele landet",
+    } or folded.endswith(" i alt")
+
+
+def _wanted_ages(intents: list[tuple[str, int, int | None]]) -> str:
+    parts = [f"{low}+" if kind == "from" else f"{low}-{high}" for kind, low, high in intents]
+    return " og ".join(parts)
+
+
 def _age_mismatch(question: str, facts: list[dict[str, Any]]) -> str:
-    intent = _age_intent(question)
-    if intent is None:
+    """Refuse an age that the question did not ask for.
+
+    A total row is allowed beside the asked groups. Every asked group counts,
+    including an open range such as '65 år eller derover' and a 65+ code.
+    """
+    intents = _age_intents(question)
+    if not intents:
         return ""
     labels: list[str] = []
     for fact in facts:
         label = _detail_field(str(fact.get("detail") or ""), "ALDER")
         if label and label not in labels:
             labels.append(label)
-    if not labels or all(_age_label_matches(intent, label) for label in labels):
+    if not labels:
         return ""
-    # HFUDD11's "Alder i alt" is the table's own 15–69 population, not every age.
-    if all(label.casefold() in {"alder i alt", "i alt", "tot", "total"} for label in labels):
+
+    def matches(label: str) -> bool:
+        return any(_age_label_matches(intent, label) for intent in intents)
+
+    specific = [label for label in labels if not _is_total_label(label)]
+    if not specific:
+        # HFUDD11's "Alder i alt" is the table's own 15–69 population, not every age.
         tables = {str(fact.get("table") or "").upper() for fact in facts}
         if tables and all(not table.startswith(("FOLK", "BEFOLK", "FRKM")) for table in tables):
             return ""
-    kind, low, high = intent
-    wanted = f"{low}+" if kind == "from" else f"{low}-{high}"
-    return f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {wanted}."
+        return (
+            f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {_wanted_ages(intents)}."
+        )
+    if all(matches(label) for label in specific):
+        return ""
+    return f"Jeg fik hentet tal for alder {' og '.join(labels)}, ikke for {_wanted_ages(intents)}."
 
 
 def _age_label_matches(intent: tuple[str, int, int | None], label: str) -> bool:
