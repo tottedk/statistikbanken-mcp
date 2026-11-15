@@ -23,6 +23,18 @@ def live_client():
     client.close()
 
 
+def test_folk1a_denmark_on_1_january_2020_is_the_published_figure(
+    live_client: StatbankClient,
+) -> None:
+    """FOLK1A, whole country, 2020K1. Checked against api.statbank.dk on 2026-11-14."""
+    result = hent_data(
+        "FOLK1A",
+        {"OMRÅDE": ["000"], "KØN": ["TOT"], "ALDER": ["IALT"], "Tid": ["2020K1"]},
+    )
+    assert result["rows"][0]["Tid"] == "2020K1"
+    assert result["rows"][0]["value"] == 5_822_763
+
+
 def test_search_and_metadata(live_client: StatbankClient) -> None:
     hits = find_tabel("befolkning", limit=5)
     assert hits[0]["id"] == "FOLK1A"
@@ -264,7 +276,8 @@ def test_new_cars_and_gentofte_dwellings_match_the_known_totals(
 ) -> None:
     cars = hent_data("BIL55", {"REGBIL": ["4000101002"], "Tid": ["2025"]})
     assert cars["rows"][0]["Tid"] == "2025"
-    assert cars["rows"][0]["value"] == 185394
+    # Sum of the twelve published months, checked 14 Nov 2026. Revised from 185394.
+    assert cars["rows"][0]["value"] == 185395
     assert cars["rows"][0]["year_total"]["method"] == "sum"
     homes = hent_data("BOL101", {"OMRÅDE": ["157"]})
     assert len(homes["rows"]) == 1

@@ -324,14 +324,22 @@ class StatbankClient:
                     },
                 )
             )
+        geography = historical_area_note(query)
         if not ranked:
-            raise StatbankError(
+            message = (
                 f"No table matches {query.strip()!r}. Try fewer words, or a subject such as "
                 "'befolkning', 'indkomst' or 'priser'. A place or category name is a value "
                 "inside a table: search the subject, then pass the name to hent_data."
             )
+            if geography:
+                message = f"{message} {geography}"
+            raise StatbankError(message)
         ranked.sort(reverse=True)
-        return [item for _, _, item in ranked[:limit]]
+        hits = [item for _, _, item in ranked[:limit]]
+        if geography:
+            for hit in hits:
+                hit["geography_note"] = geography
+        return hits
 
     def table_info(
         self,
@@ -340,11 +348,15 @@ class StatbankClient:
         variable: str | None = None,
         values_filter: str | None = None,
     ) -> dict[str, Any]:
-        return _public_metadata(
+        published = _public_metadata(
             self._metadata_for(table),
             variable=variable,
             values_filter=values_filter,
         )
+        geography = historical_area_note(values_filter)
+        if geography:
+            published["geography_note"] = geography
+        return published
 
     def _matching_places(self, tokens: list[str]) -> list[dict[str, str]]:
         try:
@@ -1675,6 +1687,8 @@ def _resolve_values(table: _Table, variable: _Variable, raw_values: Any) -> list
             raise StatbankError(f"Variable {variable.id} contains an empty value code.")
         if _is_expression(token):
             canonical = _join_closed_range(token)
+            if variable.time:
+                canonical = _ground_time_expression(variable, canonical)
             if "," in canonical and variable.time:
                 raise StatbankError(
                     f"Unknown value '{token}' for variable {variable.id} on table {table.id}. "
@@ -2412,6 +2426,49 @@ def _is_expression(token: str) -> bool:
     return token == "*" or token.startswith((">", "<", "(", "sum(", "SUM(")) or "*" in token
 
 
+_BARE_YEAR_IN_RANGE = re.compile(r"(>=|<=|>|<)?(\d{4})(?![0-9KQMH])", re.IGNORECASE)
+
+
+def _periods_in_year(variable: _Variable, year: str) -> list[str]:
+    """Sub-period codes of one year, earliest first. A yearly code is not one."""
+    found = [
+        item["id"]
+        for item in variable.values
+        if re.fullmatch(
+            rf"{year}(?:K[1-4]|Q[1-4]|M(?:0[1-9]|1[0-2])|H[12])",
+            item["id"],
+            re.IGNORECASE,
+        )
+    ]
+    found.sort(key=lambda code: _parsed_period(code) or (0, 0, 0))
+    return found
+
+
+def _ground_time_expression(variable: _Variable, token: str) -> str:
+    """'>=2008' on a quarterly table is '>=2008K1'. A code that exists is kept.
+
+    The bound is the first period of the year after >= or >, and the last
+    period of the year after <= or <. '>=2015K1' is already a period code.
+    """
+    compact = re.sub(r"\s+", "", token)
+
+    def replace(match: re.Match[str]) -> str:
+        operator = match.group(1) or ""
+        year = match.group(2)
+        if _code_on(variable, year):
+            return f"{operator}{year}"
+        periods = _periods_in_year(variable, year)
+        if not periods:
+            return match.group(0)
+        if operator in {"<=", ">"}:
+            chosen = periods[-1]
+        else:
+            chosen = periods[0]
+        return f"{operator}{chosen}"
+
+    return _BARE_YEAR_IN_RANGE.sub(replace, compact)
+
+
 def _sum_call(codes: list[str], label: str) -> str:
     if len(label) > 80:
         label = f"{codes[0]}+…+{codes[-1]}"
@@ -2669,18 +2726,54 @@ def _is_total_text(text: str) -> bool:
     return low in {"i alt", "total", "hele landet", "tot", "ialt"} or low.endswith(" i alt")
 
 
+_HISTORICAL_AREA_RE = re.compile(
+    r"(?<![0-9a-zæøå])(?:amterne|amter|amtet|amt|counties|county)(?![0-9a-zæøå])",
+    re.IGNORECASE,
+)
+HISTORICAL_AREA_NOTE = (
+    "De danske amter blev nedlagt 1. januar 2007 og erstattet af regioner og kommuner."
+)
+
+
+def historical_area_note(text: str | None) -> str:
+    """Counties abolished on 1 January 2007, when the question names an amt."""
+    if not text or _HISTORICAL_AREA_RE.search(text) is None:
+        return ""
+    return HISTORICAL_AREA_NOTE
+
+
+def _label_mentioned(text: str, question: str) -> bool:
+    """A value label as a whole word, not a shorter piece of another phrase.
+
+    '5 år' inside 'for 5 år siden' is a time offset. '65 år' inside
+    '65 år eller derover' is the open range, not the single year.
+    """
+    match = re.search(rf"(?<!\w){re.escape(text)}(?!\w)", question, flags=re.IGNORECASE)
+    if match is None:
+        return False
+    before = question[: match.start()]
+    after = question[match.end() :]
+    if re.match(r"\s+siden\b", after, flags=re.IGNORECASE) and re.search(
+        r"\bfor\s+$", before, flags=re.IGNORECASE
+    ):
+        return False
+    if re.match(r"\s+(?:eller|og)\s+derover\b", after, flags=re.IGNORECASE):
+        return False
+    return True
+
+
 def select_named_groups(
     question: str,
     info: dict[str, Any],
     values: dict[str, Any] | None,
     skip: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Select a value the question names instead of leaving the total.
+    """Select a value the question names when the caller left the variable unset.
 
     A label of four or more letters is bound when it appears as a whole word.
     Totals (I alt, Hele landet) are not treated as a named group. Several
-    matches on one variable are all kept. A variable the caller already set to
-    a non-total code is left as the caller set it.
+    matches on one variable are all kept. A code the caller already set,
+    including an explicit total, is left as the caller set it.
     """
     chosen: dict[str, Any] = {}
     for key, raw in (values or {}).items():
@@ -2695,22 +2788,18 @@ def select_named_groups(
         items = [item for item in variable.get("values") or [] if isinstance(item, dict)]
         if not variable_id or not items or variable_id.casefold() in skipped:
             continue
-        total_ids = {
-            str(item.get("id")) for item in items if _is_total_text(str(item.get("text") or ""))
-        }
-        current = chosen.get(variable_id)
-        if current is not None:
-            current_ids = {
-                str(item) for item in (current if isinstance(current, list) else [current])
-            }
-            if not current_ids <= total_ids:
-                continue
+        if variable_id in chosen:
+            continue
+        # Age codes come from the caller. A label such as "17 år" inside
+        # "mellem 0 og 17 år" is not a request for that single age.
+        if _fold(variable_id) == "alder" or _fold(variable_id).startswith("alder"):
+            continue
         hits: list[str] = []
         for item in items:
             text = str(item.get("text") or "").strip()
             if len(text) < 4 or _is_total_text(text) or not re.search(r"[A-Za-zÆØÅæøå]", text):
                 continue
-            if re.search(rf"(?<!\w){re.escape(text)}(?!\w)", question, flags=re.IGNORECASE):
+            if _label_mentioned(text, question):
                 hits.append(str(item["id"]))
         if hits:
             chosen[variable_id] = hits
@@ -2770,9 +2859,14 @@ def compute_figure(operation: str, numerator: float, denominator: float) -> dict
         "andel": "percent",
         "per_person": "per_capita",
         "density": "per_km2",
+        "percent_change": "percent_difference",
+        "procentforskel": "percent_difference",
     }.get(key, key)
-    if key not in {"difference", "ratio", "percent", "per_capita", "per_km2"}:
-        raise StatbankError("operation must be difference, ratio, percent, per_capita, or per_km2.")
+    if key not in {"difference", "ratio", "percent", "percent_difference", "per_capita", "per_km2"}:
+        raise StatbankError(
+            "operation must be difference, ratio, percent, percent_difference, "
+            "per_capita, or per_km2."
+        )
     num = float(numerator)
     den = float(denominator)
     if key != "difference" and den == 0:
@@ -2783,6 +2877,8 @@ def compute_figure(operation: str, numerator: float, denominator: float) -> dict
         result, unit = num / den, "ratio"
     elif key == "percent":
         result, unit = num / den * 100, "percent"
+    elif key == "percent_difference":
+        result, unit = (num - den) / den * 100, "percent"
     elif key == "per_capita":
         result, unit = num / den, "per person"
     else:

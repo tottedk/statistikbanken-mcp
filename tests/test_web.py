@@ -604,6 +604,7 @@ def test_a_count_question_uses_only_the_latest_period() -> None:
 
 
 def test_no_data_answers_use_a_fixed_danish_sentence() -> None:
+    """A figure-free explanation is kept. A bare 'no data' sentence stays Danish."""
     english = (
         'Tool calls failed because there is no data for "Narnia" in Statistikbanken. '
         "Narnia is not a real municipality in Denmark."
@@ -612,8 +613,10 @@ def test_no_data_answers_use_a_fixed_danish_sentence() -> None:
         'Fant ingen data om "Narnia" i Statistikbanken. '
         "Denne navnet passer ikke bra til vores database."
     )
-    assert guard_answer("Hvor mange bor i Narnia?", english, []) == NO_DATA_ANSWER
-    assert guard_answer("Hvor mange bor i Narnia?", norwegian, []) == NO_DATA_ANSWER
+    assert guard_answer("Hvor mange bor i Narnia?", english, []) == english
+    assert guard_answer("Hvor mange bor i Narnia?", norwegian, []) == norwegian
+    assert guard_answer("Hvor mange bor i Narnia?", "Jeg fandt ingen tal.", []) == NO_DATA_ANSWER
+    assert guard_answer("Hvor mange bor i Narnia?", "Der bor 12.000.", []) == NO_FETCHED_NUMBERS
     assert "Fant" not in NO_DATA_ANSWER
 
 
@@ -714,20 +717,23 @@ def test_fetch_defaults_keep_the_preferred_table_and_the_headline_code() -> None
 
 
 def test_question_age_replaces_the_codes_the_model_sent() -> None:
+    """An age the model set is kept. Question text does not add one."""
     question_a = "Hvordan har udviklingen for 80+ i Esbjerg og Viborg været siden 2015?"
-    rewritten_a = apply_age_intent(
+    kept = apply_age_intent(
         question_a,
         {
             "table": "FOLK1A",
             "values": {"KOM": ["Esbjerg", "Viborg"], "ALDER": "80", "Tid": [">=2015K1"]},
         },
     )
-    assert rewritten_a["values"] == {
-        "KOM": ["Esbjerg", "Viborg"],
-        "Tid": [">=2015K1"],
-    }
-    assert rewritten_a["sum_from"] == {"ALDER": "80"}
-    assert "sum_range" not in rewritten_a
+    assert kept["values"]["ALDER"] == "80"
+    assert "sum_from" not in kept
+    omitted = apply_age_intent(
+        question_a,
+        {"table": "FOLK1A", "values": {"KOM": ["Esbjerg", "Viborg"], "Tid": [">=2015K1"]}},
+    )
+    assert "sum_from" not in omitted
+    assert "ALDER" not in omitted["values"]
 
     question_c = "Hvor mange børn (0-17 år) bor i Viborg?"
     first = apply_age_intent(
@@ -738,27 +744,26 @@ def test_question_age_replaces_the_codes_the_model_sent() -> None:
             "sum_from": {"ALDER": "0"},
         },
     )
-    assert first["values"] == {"OMRÅDE": "Viborg"}
-    assert "sum_from" not in first
-    assert first["sum_range"] == {"ALDER": ["0", "17"]}
+    assert first["values"]["ALDER"] == "0-17"
+    assert first["sum_from"] == {"ALDER": "0"}
+    assert "sum_range" not in first
     second = apply_age_intent(
         question_c,
         {"table": "FOLK1A", "values": {"OMRÅDE": ["791"]}, "sum_from": {"ALDER": 0}},
     )
-    assert second["sum_range"] == {"ALDER": ["0", "17"]}
-    assert "sum_from" not in second
+    assert second["sum_from"] == {"ALDER": 0}
+    assert "sum_range" not in second
 
 
 def test_wrong_age_is_not_presented_as_the_answer() -> None:
+    """A single year is not the answer to an open range such as 80+."""
     fact = _population_fact(395, "2015K1")
     fact["detail"] = "OMRÅDE: Esbjerg, ALDER: 80 år"
     question = "Hvordan har udviklingen for 80+ i Esbjerg været siden 2015?"
-    hidden = _turn(question, "Se grafen.", [fact], [])
-    assert hidden.answer == "Jeg fik hentet tal for alder 80 år, ikke for 80+."
-    assert hidden.show_numbers is False
-    assert hidden.facts == []
-    assert hidden.chart == []
-    assert "395" not in hidden.answer
+    shown = _turn(question, "Se grafen.", [fact], [])
+    assert shown.answer.casefold().startswith("tallet gælder kun")
+    assert "80-årige" in shown.answer.casefold()
+    assert "ikke 80+" in shown.answer.casefold()
 
 
 def test_llm_timeout_inside_a_task_group_is_http_504() -> None:
@@ -1099,7 +1104,7 @@ def test_turn_stops_at_the_tool_cap() -> None:
     )
     result = asyncio.run(run_turn(model, tools, "spørgsmål", max_tool_calls=1))
     assert len(result.calls) == 1
-    assert result.answer == NO_DATA_ANSWER
+    assert result.answer == "Delvist svar."
 
 
 def test_invalid_tool_arguments_are_reported() -> None:
@@ -2123,7 +2128,7 @@ def _fact(place: str, period: str, value: int | float, unpublished: bool = False
 @pytest.mark.live
 @pytest.mark.live
 def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
-    """14b sent age 80, and 0-17 together with sum_from 0. The question wins."""
+    """The model must send the age. An explicit code, and a 0-17 value, are kept."""
 
     async def _run(question: str, arguments: dict, call_id: str) -> TurnResult:
         from mcp import Client
@@ -2146,9 +2151,9 @@ def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
                 "table": "FOLK1A",
                 "values": {
                     "KOM": ["Esbjerg", "Viborg"],
-                    "ALDER": "80",
                     "Tid": [">=2015K1"],
                 },
+                "sum_from": {"ALDER": "80"},
             },
             "c_a",
         )
@@ -2167,13 +2172,26 @@ def test_scripted_model_uses_the_question_age_not_its_codes() -> None:
     assert len(series.chart) == 2
     assert all(len(item["points"]) > 2 for item in series.chart)
 
+    explicit = asyncio.run(
+        _run(
+            "Hvordan har udviklingen for 80+ i Esbjerg været siden 2015?",
+            {
+                "table": "FOLK1A",
+                "values": {"OMRÅDE": ["Esbjerg"], "ALDER": "80", "Tid": ["2026K3"]},
+            },
+            "c_explicit",
+        )
+    )
+    sent = json.loads(explicit.calls[0]["arguments"])
+    assert sent["values"]["ALDER"] == "80"
+    assert "sum_from" not in sent
+
     children = asyncio.run(
         _run(
             "Hvor mange børn (0-17 år) bor i Viborg?",
             {
                 "table": "FOLK1A",
                 "values": {"OMRÅDE": "Viborg", "ALDER": "0-17"},
-                "sum_from": {"ALDER": "0"},
             },
             "c_c",
         )
@@ -3102,20 +3120,22 @@ def test_a_parish_figure_is_not_called_a_municipality() -> None:
     assert "kommune" not in answer.casefold()
 
 
-def test_an_open_age_is_a_sum_when_the_model_omits_it() -> None:
+def test_an_omitted_age_is_left_unset() -> None:
+    """Question text does not add an age the model left unset. An explicit code stays."""
     from statistikbanken_mcp.web import apply_age_intent
 
     fetched = apply_age_intent(
         "Hvor mange er over 80 i Ringkøbing-Skjern Kommune?",
         {"table": "FOLK1A", "values": {"OMRÅDE": ["760"]}},
     )
-    assert fetched["sum_from"]["ALDER"] == "80"
+    assert "sum_from" not in fetched
+    assert "ALDER" not in fetched["values"]
     older = apply_age_intent(
         "Hvor mange er 80 år og derover i Ringkøbing-Skjern?",
         {"table": "FOLK1A", "values": {"OMRÅDE": ["760"], "ALDER": ["80"]}},
     )
-    assert older["sum_from"]["ALDER"] == "80"
-    assert "ALDER" not in older.get("values", {})
+    assert older["values"]["ALDER"] == ["80"]
+    assert "sum_from" not in older
 
 
 def test_both_sexes_are_answered() -> None:
