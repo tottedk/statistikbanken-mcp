@@ -165,7 +165,33 @@ uv run python -m evals.run --limit 5
 uv run python -m evals.run --model grok-4 --out evals/reports/custom.md
 ```
 
-Set `XAI_API_KEY` in the environment, not in the repo. The key is not printed and not written to the report. The committed proof is [evals/reports/2026-11-05-grok-4.md](evals/reports/2026-11-05-grok-4.md).
+Set `XAI_API_KEY` in the environment, not in the repo. The key is not printed and not written to the report.
+
+### Results
+
+Strict means a manual review of every answer. The runs below used `grok-4.3`, `STATBANK_PUBLIC=1`, and at most 6 tool calls. The hidden sets are kept off the repo, so the model and coding agents never saw them.
+
+Hidden set Q721–780 was built and live-verified on 21 November 2026, independent of the PR #30 work. It scored 54/60 strict (90%). The misses were two wrong tables (income picked LABY06, area picked AREALDK2), one missing population density, one fetched figure left out of the answer, one false premise not corrected (flat-price table EJ56 was not found), and one MCP tool error (infrastructure).
+
+Hidden set Q401–460 had a mean of 55.3/60 over three runs (56, 57, and 53). Hidden set Q601–660 scored 56/60. Before PR #30 the same code base scored 44–46/60 on these hidden sets.
+
+Regression set Q201–300 scored 97/100: two PRIS01 versus PRIS111 table mix-ups, and one xAI connection error. Q106–130 scored 25/25.
+
+A full 60-question run costs about $0.55 in xAI usage.
+
+Answers are right about 9 times in 10 on new questions. Always check the cited table.
+
+The 5 November 2026 report stays as history: [evals/reports/2026-11-05-grok-4.md](evals/reports/2026-11-05-grok-4.md).
+
+### What goes wrong
+
+- **Wrong table among similar ones.** The number guard does not catch this. The figure is a real row from the table that was fetched. Income was answered from LABY06, and area from AREALDK2.
+- **Units and shares.** A share uses the fetched total row as the denominator. A percent is kept only when it follows from those rows, and the line shows the numerator, the denominator, and the unit.
+- **Incomplete multi-part answers.** The guard does not fill in a part the model left out. One answer omitted population density.
+- **Uncorrected false premise.** When a fetched change went the other way, the answer states the actual direction. That does not run when the table was not found. The flat-price question was not corrected: table EJ56 was not found.
+- **Coverage gaps.** When the fetched age, a partial series, or an unfinished year does not cover what was asked, the answer adds a caveat that says what the figure covers. It does not fill the gap with a number.
+
+The number guard prevents invented numbers. Only figures from fetched rows are shown.
 
 ## Tests
 
@@ -200,7 +226,7 @@ The image is Python 3.12. It listens on `STATBANK_HOST` (the image sets `0.0.0.0
 
 `STATBANK_PUBLIC=1` uses xAI only. The process exits at startup when `XAI_API_KEY` is missing, and when `STATBANK_PROXY_SECRET` is missing or blank. Pass each value in from the environment (`-e XAI_API_KEY` with no value copies it from the shell; do the same for `STATBANK_PROXY_SECRET`). Do not write `XAI_API_KEY` or `STATBANK_PROXY_SECRET` into a file, the image, or the repo. Set `STATBANK_XAI_MODEL` when you deploy. The default name `grok-4` may be retired.
 
-Public defaults, each still overridable: 40 questions a day (`STATBANK_DAILY_CAP`), 3 per minute per visitor (`STATBANK_RATE_PER_MINUTE`), 6 tool calls, and 300 characters. At most two questions run at once. The daily count is kept in memory and starts again at zero when the process restarts. That is not a spending cap. The hard cap is the prepaid xAI credit. `STATBANK_DAILY_CAP=0` stops the demo. `STATBANK_STATE_FILE`, if set, stores the date and the daily count only.
+Public defaults, each still overridable: 40 questions a day (`STATBANK_DAILY_CAP`), 3 per minute per visitor (`STATBANK_RATE_PER_MINUTE`), 6 tool calls, and 300 characters. At most two questions run at once. The daily count is kept in memory and resets when the process restarts, unless `STATBANK_STATE_FILE` points to persistent storage. That file stores the date and the daily count only. `STATBANK_DAILY_CAP=0` stops the demo.
 
 The per-minute limit reads `CF-Connecting-IP`, or else the last `X-Forwarded-For` entry, only when `STATBANK_PROXY_SECRET` is set and the request carried that value in `X-Proxy-Secret`. Addresses are not logged. When the secret is set, every route except `/healthz` requires the header.
 
