@@ -3,9 +3,16 @@
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-There is no tagged release. Each entry is a merged pull request, and the date is the merge commit.
+There is no tagged release. v1.0.0 is the first planned tag. Each entry under [Unreleased] is a merged pull request, and the date is the merge commit.
 
 The initial commit on 2026-10-31 added only the title line of the README.
+
+## [1.0.0] - unreleased
+
+- Three MCP tools: `find_tabel` searches the catalogue, `tabelinfo` reads a table's codes, and `hent_data` fetches the rows.
+- A Danish web page calls those tools. A number guard shows only figures from the fetched rows.
+- In public mode the page enforces a daily cap, a per-minute limit, a tool-call cap, a length cap, and a concurrency cap. The daily count resets when the process restarts unless `STATBANK_STATE_FILE` points to persistent storage.
+- An evaluation runner, `uv run python -m evals.run`, scores answers. It is not part of the test suite.
 
 ## [Unreleased]
 
